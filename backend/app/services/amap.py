@@ -2,7 +2,6 @@
 
 提供能力：
 - search_poi   ：关键词搜索 POI（景点/餐厅/商场等）
-- search_around：周边搜索（按关键词或类型码，如酒店、餐饮）
 - get_weather  ：天气查询（逐日预报）
 - get_route    ：路线规划（步行 / 驾车 / 公交），含距离、耗时、打车费用
 
@@ -72,27 +71,6 @@ class AmapClient:
         if types:
             params["types"] = types
         data = self._get("/place/text", params)
-        return data.get("pois", [])
-
-    def search_around(
-        self,
-        location: str,
-        keywords: Optional[str] = None,
-        types: Optional[str] = None,
-        radius: int = 3000,
-    ) -> List[Dict[str, Any]]:
-        """周边搜索：location 形如 "lng,lat"。"""
-        params: Dict[str, Any] = {
-            "location": location,
-            "radius": radius,
-            "offset": 25,
-            "sortrule": "distance",
-        }
-        if keywords:
-            params["keywords"] = keywords
-        if types:
-            params["types"] = types
-        data = self._get("/place/around", params)
         return data.get("pois", [])
 
     def get_weather(self, city: str, extensions: str = "all") -> Dict[str, Any]:

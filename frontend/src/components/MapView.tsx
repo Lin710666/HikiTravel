@@ -10,12 +10,17 @@ const PAD = 36
 // 收集规划中所有含有效坐标的 POI
 function collectPoints(plan: TravelPlan): POI[] {
   const out: POI[] = []
-  for (const d of plan.daily_plans) {
-    for (const item of d.timeline) {
-      const loc = item.poi.location
-      if (loc.lat !== 0 && loc.lng !== 0) out.push(item.poi)
-    }
+  const seen = new Set<string>()
+  const push = (p: POI) => {
+    if (p.location.lat === 0 && p.location.lng === 0) return
+    const key = `${p.name}@${p.location.lat},${p.location.lng}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(p)
   }
+  // 先排行程 POI（保持首点为起点），再排每晚酒店
+  for (const d of plan.daily_plans) for (const item of d.timeline) push(item.poi)
+  for (const d of plan.daily_plans) if (d.hotel) push(d.hotel)
   return out
 }
 
@@ -91,14 +96,17 @@ export default function MapView({ plan }: { plan: TravelPlan }) {
             strokeWidth="2"
             strokeDasharray="6 4"
           />
-          {coords.map((c, i) => (
-            <g key={i} onClick={() => setSelected(points[i])} style={{ cursor: 'pointer' }}>
-              <circle cx={c.x} cy={c.y} r={i === 0 ? 9 : 7} fill={i === 0 ? '#52c41a' : '#1677ff'} />
-              <text x={c.x + 11} y={c.y + 4} fontSize="11" fill="#333">
-                {i + 1}. {points[i].name}
-              </text>
-            </g>
-          ))}
+          {coords.map((c, i) => {
+            const fill = points[i].type === '住宿' ? '#fa8c16' : i === 0 ? '#52c41a' : '#1677ff'
+            return (
+              <g key={i} onClick={() => setSelected(points[i])} style={{ cursor: 'pointer' }}>
+                <circle cx={c.x} cy={c.y} r={i === 0 ? 9 : 7} fill={fill} />
+                <text x={c.x + 11} y={c.y + 4} fontSize="11" fill="#333">
+                  {i + 1}. {points[i].name}
+                </text>
+              </g>
+            )
+          })}
         </svg>
       )}
 

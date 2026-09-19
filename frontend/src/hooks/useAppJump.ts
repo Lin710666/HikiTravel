@@ -14,7 +14,7 @@
  * 说明：下列 scheme 为常见方案示例，各 App 官方 scheme 可能调整，
  * 生产环境请以各开放平台的官方 scheme 文档为准，并在此集中配置。
  */
-import { useCallback, useRef, useState } from 'react'
+import { useCallback } from 'react'
 
 // 跳转目标类型
 export type AppTarget = 'navigation' | 'dianping' | 'meituan' | 'booking' | 'tujia'
@@ -123,17 +123,6 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 export function useAppJump() {
-  const timerRef = useRef<number | null>(null)
-  const [status, setStatus] = useState<JumpResult | null>(null)
-
-  // 清理超时定时器
-  const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-  }, [])
-
   const jump = useCallback((target: AppTarget, poi: JumpPoi): Promise<JumpResult> => {
     const env = detectEnv()
     const cfg = SCHEMES[target]
@@ -154,7 +143,7 @@ export function useAppJump() {
 
     // 步骤2：2 秒超时检测
     return new Promise((resolve) => {
-      timerRef.current = window.setTimeout(() => {
+      window.setTimeout(() => {
         document.removeEventListener('visibilitychange', onVisibility)
         if (appOpened) {
           resolve({ ok: true, message: `已唤起${cfg.label}`, needManual: false })
@@ -171,7 +160,7 @@ export function useAppJump() {
     return ok
   }, [])
 
-  return { jump, copyKeyword, status, clearTimer }
+  return { jump, copyKeyword }
 }
 
 // 步骤3：H5 降级；步骤4：微信内提示「在浏览器打开」+「复制口令」

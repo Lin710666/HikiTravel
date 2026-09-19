@@ -21,7 +21,7 @@
 - **后端**：Python FastAPI + Pydantic
 - **AI**：Ollama 本地推理（可用则用，不可用自动降级规则引擎）
 - **存储**：SQLite（隐私数据本地存储、可导出）
-- **部署**：Windows 一键 `.bat` / Docker Compose
+- **部署**：Windows 一键 `.bat`（本地部署）
 
 ## 目录结构
 
@@ -31,7 +31,7 @@ travelplanner/
 │   ├── app/
 │   │   ├── models/         # UserPreference / TravelPlan 数据模型
 │   │   ├── skills/         # 四个协同 Skill
-│   │   ├── services/       # 高德 API / 天气 / 酒店
+│   │   ├── services/       # 高德 API / 天气
 │   │   ├── rag/            # 本地 RAG 知识库（SQLite + 检索）
 │   │   ├── llm/            # Ollama 客户端
 │   │   ├── orchestrator.py # Skill 协同调度器
@@ -46,9 +46,7 @@ travelplanner/
 │       └── api/client.ts
 ├── docs/量化指标.md
 ├── install.bat            # Windows 一键安装部署
-├── start.bat              # Windows 一键启动（部署后日常使用）
-├── Dockerfile
-└── docker-compose.yml
+└── start.bat              # Windows 一键启动（部署后日常使用）
 ```
 
 ## 快速开始
@@ -67,17 +65,7 @@ travelplanner/
 
 > 高德密钥免费申请：https://console.amap.com/ （开通「Web 服务」的搜索 / 天气 / 路线 API）。
 
-### 方式二：Docker 一键部署（跨环境复现）
-
-```bash
-cp .env.example .env   # 或手动创建 .env，填入 AMAP_API_KEY=xxx
-docker compose up -d --build
-# 访问 http://localhost:8000
-```
-
-> 容器内默认连接宿主机 Ollama（`host.docker.internal:11434`）；也可 `docker compose --profile ollama up -d` 一并启动 Ollama。
-
-### 方式三：本地开发（前后端分离）
+### 方式二：本地开发（前后端分离）
 
 **后端**（Python ≥ 3.10，推荐 uv，亦可用 pip）：
 

@@ -28,23 +28,3 @@ export interface UserPreference {
   departure_time: string
   return_hotel_time: string
 }
-
-// 表单默认值
-export const DEFAULT_PREFERENCE: UserPreference = {
-  travelers: { adults: 2, children: 0, elderly: 0 },
-  duration_days: 2,
-  origin: '',
-  destination: '杭州',
-  transportation: '本地',
-  preferences: ['人文历史', '自然风光'],
-  must_visit: [],
-  pace: '适中',
-  has_pet: false,
-  budget: 2000,
-  priority: '玩',
-  dietary_restrictions: [],
-  avoidances: [],
-  start_date: '',
-  departure_time: '09:00',
-  return_hotel_time: '21:00',
-}

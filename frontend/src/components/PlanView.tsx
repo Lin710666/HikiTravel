@@ -6,14 +6,16 @@ import JumpButtons from './JumpButtons'
 const TYPE_COLOR: Record<string, string> = {
   景点: 'blue',
   餐厅: 'orange',
-  博物馆: 'purple',
-  美食街: 'volcano',
   住宿: 'green',
   交通: 'default',
   购物: 'gold',
 }
 
 const TIER_COLOR: Record<string, string> = { 经济: 'default', 中档: 'blue', 高档: 'gold' }
+
+// 室内景点关键词（雨天 Plan B「一键换成室内」判断，与后端 _is_indoor 保持一致）
+const INDOOR_KEYWORDS = ['博物馆', '美术馆', '科技馆', '展览馆', '陈列馆', '图书馆', '商场', '购物中心', '剧院', '室内']
+const isIndoorPoi = (p: POI) => INDOOR_KEYWORDS.some((k) => p.name.includes(k))
 
 // 编辑后重算预算：与后端 _budget 同口径，保证换景点/餐厅/酒店后总预算实时更新
 function recomputeBudget(plan: TravelPlan): TravelPlan {
@@ -215,6 +217,7 @@ function DayCard({
   onSwapMeal,
   onSwapAttraction,
   onSelectHotel,
+  onApplyPlanB,
 }: {
   day: DailyPlan
   diningOptions: POI[]
@@ -225,6 +228,7 @@ function DayCard({
   onSwapMeal?: (itemIndex: number, poi: POI) => void
   onSwapAttraction?: (itemIndex: number, poi: POI) => void
   onSelectHotel?: (poi: POI) => void
+  onApplyPlanB?: () => void
 }) {
   const [showHotel, setShowHotel] = useState(false)
 
@@ -238,7 +242,21 @@ function DayCard({
       }
       style={{ marginBottom: 12 }}
     >
-      {day.plan_b && <Alert type="info" showIcon message={day.plan_b} style={{ marginBottom: 12 }} />}
+      {day.plan_b && (
+        <Alert
+          type="info"
+          showIcon
+          message={day.plan_b}
+          style={{ marginBottom: 12 }}
+          action={
+            onApplyPlanB ? (
+              <Button size="small" type="primary" ghost onClick={onApplyPlanB}>
+                🏠 一键换成室内
+              </Button>
+            ) : undefined
+          }
+        />
+      )}
       <Timeline
         items={day.timeline.map((item, idx) => ({
           children: (
@@ -419,6 +437,28 @@ export default function PlanView({ plan, onApplySuggestions, applying, onUpdate 
     onUpdate(recomputeBudget(next))
   }
 
+  // 一键采纳雨天 Plan B：把当天户外景点替换为室内备选，并重算预算
+  const handleApplyPlanB = (dayIndex: number) => {
+    if (!onUpdate) return
+    const next = clone()
+    const day = next.daily_plans[dayIndex]
+    if (!day) return
+    const used = new Set(day.timeline.map((it) => it.poi.name))
+    const indoor = next.attraction_options.filter((p) => isIndoorPoi(p) && !used.has(p.name))
+    if (indoor.length === 0) return
+    let replaced = 0
+    for (const item of day.timeline) {
+      if (item.poi.type === '景点' && !isIndoorPoi(item.poi)) {
+        item.poi = indoor[replaced % indoor.length]
+        replaced += 1
+      }
+    }
+    if (replaced > 0) {
+      day.plan_b = ''
+      onUpdate(recomputeBudget(next))
+    }
+  }
+
   return (
     <div>
       {/* 概览卡：总预算 + 分项预算 + 住宿说明 + 实时天气，紧凑地聚合在一起 */}
@@ -493,6 +533,7 @@ export default function PlanView({ plan, onApplySuggestions, applying, onUpdate 
           onSwapMeal={onUpdate ? (i, p) => replacePoi(dayIndex, i, p) : undefined}
           onSwapAttraction={onUpdate ? (i, p) => replacePoi(dayIndex, i, p) : undefined}
           onSelectHotel={onUpdate ? (poi) => handleSelectHotel(dayIndex, poi) : undefined}
+          onApplyPlanB={onUpdate ? () => handleApplyPlanB(dayIndex) : undefined}
         />
       ))}
     </div>

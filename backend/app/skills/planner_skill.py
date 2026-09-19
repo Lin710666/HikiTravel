@@ -27,12 +27,19 @@ from .base import Skill
 
 # 各类 POI 的默认游玩耗时（小时）
 DURATION_BY_TYPE: Dict[str, float] = {
-    "景点": 2.5, "餐厅": 1.5, "博物馆": 2.0, "美食街": 2.0,
-    "购物": 2.0, "住宿": 0.5, "交通": 0.5,
+    "景点": 2.5, "餐厅": 1.5, "购物": 2.0, "住宿": 0.5, "交通": 0.5,
 }
 
 # 节奏 -> 每日景点数
 PACE_COUNT: Dict[str, int] = {"悠闲": 2, "适中": 3, "特种兵": 4}
+
+# 室内景点关键词（雨天 Plan B 判断，与前端「一键换成室内」保持一致）
+INDOOR_KEYWORDS = ("博物馆", "美术馆", "科技馆", "展览馆", "陈列馆", "图书馆", "商场", "购物中心", "剧院", "室内")
+
+
+def _is_indoor(poi: POI) -> bool:
+    """判断景点是否为室内（雨天可替换户外景点）。"""
+    return any(k in poi.name for k in INDOOR_KEYWORDS)
 
 
 def _haversine(a: Location, b: Location) -> float:
@@ -80,8 +87,30 @@ class PlannerSkill(Skill):
         plan.attraction_options = ctx.get("attraction_options", [])
         plan.travelers = ctx["preference"].travelers.total  # 出行人数，供前端预算实时重算
         plan.user_budget = ctx["preference"].budget  # 用户预算，供前端结余/超出对比
+        self._finalize(plan, ctx)  # 统一收口：补齐每晚酒店 + 按统一口径重算预算（LLM 与规则路径一致）
         ctx["plan"] = plan
         return ctx
+
+    def _finalize(self, plan: TravelPlan, ctx: dict[str, Any]) -> None:
+        """统一收口：无论 LLM 还是规则引擎生成，都补齐每晚酒店并重算预算。
+
+        原因：LLM 生成的 plan 通常不含每晚酒店（提示词未要求），预算也是模型自行
+        估算的数值，与规则口径不一致。这里用检索到的酒店备选 + 统一预算公式收口，
+        保证「装了 Ollama」与「未装 Ollama」两种环境看到的是同一套口径。
+        """
+        pref = ctx["preference"]
+        nights = max(len(plan.daily_plans) - 1, 0)
+        hotels = self._pick_hotels(ctx.get("hotel_options", []), nights)
+        for i, day in enumerate(plan.daily_plans):
+            if day.hotel is None and i < nights:
+                day.hotel = hotels[i]
+        transport_sum = sum(
+            (item.transport_to_next.cost if item.transport_to_next else 0)
+            for d in plan.daily_plans for item in d.timeline
+        )
+        total, breakdown = self._budget(pref, plan.daily_plans, transport_sum)
+        plan.total_budget_estimate = total
+        plan.budget_breakdown = breakdown
 
     @staticmethod
     def _covers(plan: TravelPlan, must: List[POI]) -> bool:
@@ -267,7 +296,7 @@ class PlannerSkill(Skill):
     def _plan_b(weather: Weather, attractions: List[POI]) -> str:
         """雨天备选方案：替换为室内景点。"""
         if weather.condition and "雨" in weather.condition:
-            indoor = [p.name for p in attractions if p.type == "博物馆" or "博物馆" in p.name][:3]
+            indoor = [p.name for p in attractions if _is_indoor(p)][:3]
             if indoor:
                 return "今日有雨，可改为室内：" + "、".join(indoor)
             return "今日有雨，建议改为室内博物馆/商场，或调整行程。"
