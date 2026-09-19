@@ -57,13 +57,11 @@ travelplanner/
 
 1. **探测运行环境**：按 `py` 启动器 → PATH → 常见安装目录 依次查找 Python 与 Node.js（兼容「装了但没加 PATH」的情况）；
 2. **缺啥补啥**：检测不到时，可一键调用 winget 自动安装，或提示手动下载地址；
-3. **首次配置**：引导填写高德 API Key，写入 `backend\.env`；
+3. **首次配置**：自动写入内置高德 API Key 到 `backend\.env`（无需手动申请）；
 4. **安装依赖 + 构建前端**；
 5. **启动服务**，浏览器访问 http://localhost:8000 即可。
 
 之后每次只需双击 **`start.bat`** 一键启动。
-
-> 高德密钥免费申请：https://console.amap.com/ （开通「Web 服务」的搜索 / 天气 / 路线 API）。
 
 ### 方式二：本地开发（前后端分离）
 
@@ -71,7 +69,7 @@ travelplanner/
 
 ```bash
 cd backend
-cp .env.example .env      # 填写 AMAP_API_KEY
+cp .env.example .env      # 已内置 AMAP_API_KEY，可直接使用
 uv sync                    # 或 pip install -e .
 uv run uvicorn app.main:app --reload   # http://localhost:8000
 ```
@@ -101,5 +99,5 @@ ollama pull nomic-embed-text    # 知识库 embedding 模型
 ## 比赛注意事项
 
 - **代码、文档、演示中不出现任何学校信息**。
-- 演示前务必配置 `AMAP_API_KEY`，否则无实时数据。
+- 高德 API Key 已内置，演示前无需手动配置。
 - 量化指标见 [docs/量化指标.md](docs/量化指标.md)。
