@@ -127,19 +127,14 @@ if not defined NPMCMD (
 echo [2/5] npm found
 
 REM ============================================================
-REM 3. Configure AMap API key (first run only)
+REM 3. Write AMap API key (first run only)
 REM ============================================================
 if not exist "backend\.env" (
     echo.
-    echo [3/5] First run needs an AMap API key for live data.
-    echo        Get one free: https://console.amap.com/
-    echo        Application Management - Create - Add Key - Web Service
-    echo.
-    set "AMAP_API_KEY="
-    set /p "AMAP_API_KEY=Enter AMAP_API_KEY (press Enter to skip): "
+    echo [3/5] Writing built-in AMap API key...
     (
         echo # AMap Web Service API key
-        echo AMAP_API_KEY=!AMAP_API_KEY!
+        echo AMAP_API_KEY=e15977855225aaaedebd91c466a3c39e
         echo.
         echo # Ollama local inference - empty means fall back to rule engine
         echo OLLAMA_BASE_URL=http://localhost:11434
@@ -166,7 +161,7 @@ if defined HAS_UV (
     uv sync
     if errorlevel 1 (
         popd
-        echo [ERROR] Backend dependencies install failed (uv sync).
+        echo [ERROR] Backend dependencies install failed [uv sync].
         goto :fail
     )
     popd
@@ -175,7 +170,7 @@ if defined HAS_UV (
     "%PYEXE%" %PYARGS% -m pip install -e . --quiet
     if errorlevel 1 (
         popd
-        echo [ERROR] Backend dependencies install failed (pip).
+        echo [ERROR] Backend dependencies install failed [pip].
         goto :fail
     )
     popd
