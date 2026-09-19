@@ -67,7 +67,7 @@ if not defined PYEXE (
             echo         then tick "Add python.exe to PATH" and re-run.
             goto :fail
         )
-        echo Installing Python 3.12 via winget (user scope)...
+        echo Installing Python 3.12 via winget [user scope]...
         winget install -e --id Python.Python.3.12 --scope user --silent --accept-source-agreements --accept-package-agreements
         echo.
         echo [INFO] After installation, please re-run this script.
