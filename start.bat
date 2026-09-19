@@ -6,6 +6,22 @@ title Travel Planner - Start
 cd /d "%~dp0"
 
 REM ============================================================
+REM Force UTF-8 mode for Python.
+REM
+REM Why this is needed: "pip install -e ." writes a .pth file that
+REM stores the project path in UTF-8, but site.py reads .pth with the
+REM locale code page (GBK on Chinese Windows). When the project sits in
+REM a path containing non-ASCII characters, the venv python dies inside
+REM init_import_site with a fatal UnicodeDecodeError that never mentions
+REM the path, so it looks like a broken Python install.
+REM
+REM Keep the quotes: writing  set PYTHONUTF8=1 && ...  would leave a
+REM trailing space in the value and python rejects it as invalid.
+REM ============================================================
+set "PYTHONUTF8=1"
+
+
+REM ============================================================
 REM Locate Python: project venv - uv - py launcher - PATH - common dirs
 REM ============================================================
 set "PYEXE="
