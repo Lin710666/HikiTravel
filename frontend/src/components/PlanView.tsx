@@ -112,6 +112,9 @@ function AttractionPickList({
           style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}
         >
           <span style={{ fontWeight: 600 }}>{o.name}</span>
+          {o.rating != null && (
+            <span style={{ color: '#faad14', fontSize: 12 }}>⭐ {o.rating.toFixed(1)}</span>
+          )}
           <span style={{ color: '#888', fontSize: 12 }}>{o.tips}</span>
           <Button size="small" type="primary" ghost onClick={() => onPick(o)}>
             换这个
@@ -150,6 +153,9 @@ function TimelineNode({
         {poi.type}
       </Tag>
       <span style={{ fontWeight: 600 }}>{poi.name}</span>
+      {poi.rating != null && (
+        <span style={{ color: '#faad14', marginLeft: 8, fontSize: 12 }}>⭐ {poi.rating.toFixed(1)}</span>
+      )}
       {poi.price != null && <span style={{ color: '#fa541c', marginLeft: 8 }}>约 ¥{poi.price}</span>}
       <JumpButtons poi={poi} />
       {isAttraction && (onRemove || onSwapAttraction) && (

@@ -16,6 +16,7 @@ export interface POI {
   description: string
   tips: string
   price: number | null
+  rating: number | null
   check_in: string
   check_out: string
 }

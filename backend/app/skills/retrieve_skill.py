@@ -15,13 +15,40 @@ from ..services.amap import AmapClient
 from ..services.weather import WeatherService
 from .base import Skill
 
-# 兴趣导向 -> 高德搜索关键词映射
-PREFERENCE_KEYWORDS: Dict[str, List[str]] = {
-    "人文历史": ["历史古迹", "博物馆", "寺庙"],
-    "自然风光": ["公园", "湿地", "自然风景"],
-    "美食": ["美食街", "特色餐厅"],
-    "娱乐": ["主题乐园", "演出"],
+# 兴趣导向 -> 高德 POI 分类码（types）。用分类码而非关键词，避免「公园灌满」「餐厅混入景点」。
+# 分类码说明（高德三级分类，传中类/小类码即可，多个用 | 分割）：
+#   110101 公园 | 110103 植物园 | 110200 风景名胜(含 110201 世界遗产/110202 国家级景点/
+#   110205 寺庙道观/110208 海滩/110209 观景点) | 110204 纪念馆
+#   140100 博物馆 | 140200 展览馆 | 140400 美术馆 | 140600 科技馆 | 140700 天文馆 | 140800 文化宫
+#   080501 游乐园/主题乐园 | 080600 影剧院(080601 电影院/080603 剧院) | 080401 度假村
+PREFERENCE_TYPES: Dict[str, str] = {
+    "人文历史": "140100|140200|140400|140600|140700|140800|110201|110204|110205",
+    "自然风光": "110101|110103|110200|110208|110209",
+    "娱乐": "080501|080600|080401",
+    # 「美食」不产出景点，走独立的餐厅推荐（见下方 dining 检索），避免餐厅混入景点池
 }
+
+# 饮食禁忌 -> 餐厅搜索关键词（用于餐厅推荐时叠加检索，命中项会进入候选池）
+DIET_KEYWORDS: Dict[str, str] = {
+    "清真": "清真餐厅",
+    "素食": "素食",
+    "海鲜": "海鲜",
+    # 「无辣」无直接可搜关键词，忽略（不影响候选池）
+}
+
+
+def _to_rating(value: Any) -> Optional[float]:
+    """高德评分字段可能是字符串 '4.7'，也可能是空 list [] 或缺失，统一转 float。"""
+    try:
+        r = float(value)
+    except (TypeError, ValueError):
+        return None
+    return r if r > 0 else None
+
+
+def _text(value: Any) -> str:
+    """高德字段偶尔返回空 list []（而非空字符串），统一转安全字符串。"""
+    return value if isinstance(value, str) else ""
 
 
 def _parse_location(loc: str) -> Location:
@@ -35,15 +62,17 @@ def _to_poi(item: Dict[str, Any], poi_type: str = "景点") -> POI:
     biz_ext = item.get("biz_ext") or {}
     cost = biz_ext.get("cost")
     price = float(cost) if cost else None
+    rating = _to_rating(biz_ext.get("rating"))
     tips = f"参考消费约 {price:.0f} 元" if price else ""
     return POI(
-        name=item.get("name", ""),
+        name=_text(item.get("name")),
         type=poi_type,
         location=_parse_location(item["location"]),
-        city=item.get("cityname") or item.get("adname") or "",
-        description=item.get("address", ""),
+        city=_text(item.get("cityname")) or _text(item.get("adname")),
+        description=_text(item.get("address")),
         tips=tips,
         price=price,
+        rating=rating,
     )
 
 
@@ -91,28 +120,49 @@ def _to_recommendation(item: Dict[str, Any], kind: str) -> POI:
         check_in = "14:00"
         check_out = "12:00"
     return POI(
-        name=item.get("name", ""),
+        name=_text(item.get("name")),
         type=kind,
         location=_parse_location(item["location"]),
-        city=item.get("cityname") or item.get("adname") or "",
-        description=item.get("address", ""),
+        city=_text(item.get("cityname")) or _text(item.get("adname")),
+        description=_text(item.get("address")),
         tips=tips,
         price=price,
+        rating=_to_rating(rating),
         tier=tier,
         check_in=check_in,
         check_out=check_out,
     )
 
 
+def _search_multi(
+    amap: AmapClient, keywords: str, city: str, offset: int = 25, pages: int = 2
+) -> List[Dict[str, Any]]:
+    """翻页搜索并按高德 POI id 去重，聚合多页结果（扩大餐厅/酒店候选池）。"""
+    items: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in range(1, pages + 1):
+        for item in amap.search_poi(keywords, city, offset=offset, page=page):
+            pid = item.get("id")
+            if pid and pid not in seen:
+                seen.add(pid)
+                items.append(item)
+    return items
+
+
 def _tiered(items: List[Dict[str, Any]], kind: str) -> List[POI]:
-    """按价位分档，每档最多取 3 个，返回「经济→中档→高档」排序的推荐列表。"""
+    """按价位分档，档内按评分降序，每档最多取 10 个，返回「经济→中档→高档」推荐列表。"""
     buckets: Dict[str, List[POI]] = {"经济": [], "中档": [], "高档": []}
     for item in items:
         poi = _to_recommendation(item, kind)
         buckets[poi.tier].append(poi)
     result: List[POI] = []
     for tier in ("经济", "中档", "高档"):
-        result.extend(buckets[tier][:3])
+        ranked = sorted(
+            buckets[tier],
+            key=lambda p: p.rating if p.rating is not None else -1,
+            reverse=True,
+        )
+        result.extend(ranked[:10])
     return result
 
 
@@ -134,29 +184,64 @@ class RetrieveSkill(Skill):
 
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:
         pref = ctx["preference"]
-        city = pref.destination
+
+        # 先把目的地解析成高德可识别的区县/城市；否则「东山岛」这类景区名会让 city
+        # 参数静默失效，导致关键词搜索返回全国结果（如「公园」搜出北京公园）。
+        # city 为区县级（POI 搜索更聚焦），city_name 为城市级（知识库匹配用）。
+        city, city_name = self.amap.resolve_region(pref.destination)
 
         # 1. 实时天气（多拉 3 天，覆盖 start_date 相对今天最多 3 天的偏移；
         #    高德 extensions=all 最多返回未来 4 天，超出则无法预报）
         ctx["weather"] = self.weather_svc.forecast(city, pref.duration_days + 3)
 
-        # 2. 景点 POI（按兴趣关键词搜索，去重）
+        # 2. 景点 POI（按兴趣分类码搜索，去重后按评分/热度排序）
         attractions: List[POI] = []
         seen: set[str] = set()
         for tag in pref.preferences:
-            for kw in PREFERENCE_KEYWORDS.get(tag, []):
-                for item in self.amap.search_poi(kw, city):
-                    # 用高德 POI id 去重：同一地点在不同关键词下可能返回不同名称，id 才是唯一键
-                    pid = item.get("id") or item.get("name", "")
-                    if pid and pid not in seen:
-                        seen.add(pid)
-                        attractions.append(_to_poi(item))
+            types = PREFERENCE_TYPES.get(tag, "")
+            if not types:
+                continue
+            for item in self.amap.search_poi(types=types, city=city, offset=25):
+                # 用高德 POI id 去重：同一地点在不同分类下可能返回不同名称，id 才是唯一键
+                pid = item.get("id") or item.get("name", "")
+                if pid and pid not in seen:
+                    seen.add(pid)
+                    attractions.append(_to_poi(item))
 
-        # 3. 餐饮 / 酒店 POI（含按价位分档推荐，给用户更多选择）
-        restaurant_items = self.amap.search_poi("餐厅", city)
+        # 按高德评分降序（无评分排最后）：让高分景点（海滩、热门景区）浮到前面，
+        # 避免高德默认的「距市中心距离」顺序把冷门低分点顶上来。
+        attractions.sort(key=lambda p: p.rating if p.rating is not None else -1, reverse=True)
+
+        # 3. 餐饮 / 酒店 POI：多关键词 + 翻页扩大候选池，按评分排序 + 饮食禁忌叠加检索，
+        #    供跨天轮换与「换一家」面板提供更丰富选择
+        restaurant_items = _search_multi(self.amap, "餐厅", city, pages=2)
+        seen_rids = {it.get("id") for it in restaurant_items}
+        # 通用风味（小吃/本地菜）+「美食」兴趣 + 饮食禁忌：叠加针对性检索，
+        # 既丰富种类，又贴合用户画像
+        extra_keywords: List[str] = ["小吃", "本地菜"]
+        if "美食" in pref.preferences:
+            extra_keywords.append("特色美食")
+        extra_keywords.extend(
+            DIET_KEYWORDS[r] for r in pref.dietary_restrictions if r in DIET_KEYWORDS
+        )
+        for kw in extra_keywords:
+            for item in _search_multi(self.amap, kw, city, pages=2):
+                if item.get("id") and item.get("id") not in seen_rids:
+                    seen_rids.add(item.get("id"))
+                    restaurant_items.append(item)
         restaurants = [_to_poi(item, poi_type="餐厅") for item in restaurant_items]
+        # 按高德评分降序：高分餐厅优先进规划，保证「综合评分」推荐
+        restaurants.sort(key=lambda p: p.rating if p.rating is not None else -1, reverse=True)
         ctx["dining_options"] = _tiered(restaurant_items, "餐厅")
-        hotel_items = self.amap.search_poi("酒店", city)
+
+        # 酒店：除「酒店」外叠加「民宿/客栈」，翻页扩大候选池并去重
+        hotel_items = _search_multi(self.amap, "酒店", city, pages=2)
+        seen_hids = {it.get("id") for it in hotel_items}
+        for kw, pages in (("民宿", 2), ("客栈", 1)):
+            for item in _search_multi(self.amap, kw, city, pages=pages):
+                if item.get("id") and item.get("id") not in seen_hids:
+                    seen_hids.add(item.get("id"))
+                    hotel_items.append(item)
         ctx["hotel_options"] = _tiered(hotel_items, "住宿")
 
         # 4. 特别想去的景点（必去）：优先复用已搜到的 POI，否则按名称单独搜索；
@@ -186,9 +271,9 @@ class RetrieveSkill(Skill):
             p for p in attractions if p.name not in {m.name for m in must_pois}
         ]
 
-        # 5. 本地 RAG 知识（防坑 / 拍照 / 动线）
-        rag_query = " ".join(pref.preferences) + " " + city
-        ctx["rag_tips"] = self.retriever.search(rag_query, top_k=5)
+        # 5. 本地 RAG 知识（防坑 / 拍照 / 动线），按城市过滤避免串到别的目的地
+        rag_query = " ".join(pref.preferences) + " " + city_name
+        ctx["rag_tips"] = self.retriever.search(rag_query, top_k=5, city=city_name)
 
         ctx["attractions"] = attractions
         # 景点备选池：完整去重后的景点列表（含必去），供前端编辑时「换景点」

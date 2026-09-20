@@ -81,10 +81,29 @@ class Retriever:
             self._ollama_ok = False
         return _bigram(text)
 
-    def search(self, query: str, top_k: int = 3) -> List[str]:
-        """检索与查询最相关的知识片段正文。"""
+    def search(self, query: str, top_k: int = 3, city: str = "") -> List[str]:
+        """检索与查询最相关的知识片段正文。
+
+        city：目的地城市级名称（如「杭州」）。用于过滤知识库——
+        只保留「通用知识（city 为空）」或「与目的地城市匹配」的片段，
+        避免给非杭州目的地返回杭州西湖的写死贴士。
+        """
         q_vec = self._embed(query)
+
+        def _match(city_of_chunk: str) -> bool:
+            if not city_of_chunk:
+                return True  # 通用知识
+            if not city:
+                return True  # 未解析出城市时不额外过滤
+            return city_of_chunk in city or city in city_of_chunk
+
         scored = sorted(
-            enumerate(self._index), key=lambda i: _cosine(q_vec, i[1]), reverse=True
+            (
+                (i, _cosine(q_vec, vec))
+                for i, vec in enumerate(self._index)
+                if _match(self.chunks[i].get("city", ""))
+            ),
+            key=lambda x: x[1],
+            reverse=True,
         )
         return [self.chunks[i]["text"] for i, _ in scored[:top_k]]

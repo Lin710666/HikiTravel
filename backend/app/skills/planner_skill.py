@@ -183,11 +183,14 @@ class PlannerSkill(Skill):
         nights = max(pref.duration_days - 1, 0)
         hotels = self._pick_hotels(ctx.get("hotel_options", []), nights)
         days: List[DailyPlan] = []
+        meal_cursor = 0  # 每餐递增，保证午餐/晚餐及各天餐厅都不重复
         for i in range(pref.duration_days):
             day_date = (date.fromisoformat(start) + timedelta(days=i)).isoformat()
             day_pois = selected[i * per_day : (i + 1) * per_day]
-            lunch = self._pick(restaurants, i)
-            dinner = self._pick(restaurants, i + pref.duration_days)
+            lunch = self._pick(restaurants, meal_cursor)
+            meal_cursor += 1
+            dinner = self._pick(restaurants, meal_cursor)
+            meal_cursor += 1
             weather = weather_map.get(day_date) or Weather(condition="", temp="")
             timeline = self._build_timeline(pref, day_pois, lunch, dinner)
             plan_b = self._plan_b(weather, attractions)
@@ -219,9 +222,9 @@ class PlannerSkill(Skill):
         )
 
     def _pick(self, restaurants: List[POI], i: int) -> POI:
-        """按天轮换选取餐厅；无餐厅数据时返回「就近用餐」占位。"""
-        if restaurants:
-            return restaurants[i % len(restaurants)]
+        """按序号取餐厅（不取模）；取尽后返回「就近用餐」占位，保证全程不重复。"""
+        if i < len(restaurants):
+            return restaurants[i]
         return POI(
             name="就近用餐", type="餐厅", location=Location(lat=0, lng=0),
             tips="到店后可用地图搜索附近餐厅",
@@ -229,11 +232,13 @@ class PlannerSkill(Skill):
 
     @staticmethod
     def _pick_hotels(hotel_options: List[POI], nights: int) -> List[Optional[POI]]:
-        """为每个夜晚独立选一家酒店（优先中档，其次按序轮换）；无数据返回全 None。"""
+        """为每个夜晚独立选一家酒店（中档优先，依次轮换不重复）；无数据返回全 None。"""
         if not hotel_options:
             return [None] * nights
-        mids = [h for h in hotel_options if h.tier == "中档"] or list(hotel_options)
-        return [mids[i % len(mids)] for i in range(nights)]
+        mids = [h for h in hotel_options if h.tier == "中档"]
+        others = [h for h in hotel_options if h.tier != "中档"]
+        ordered = mids + others  # 中档优先，其余档次补足，保证每晚尽量不同
+        return [ordered[i % len(ordered)] for i in range(nights)]
 
     def _build_timeline(
         self, pref: Any, day_pois: List[POI], lunch: POI, dinner: POI

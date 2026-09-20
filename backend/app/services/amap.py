@@ -64,14 +64,68 @@ class AmapClient:
         return data
 
     def search_poi(
-        self, keywords: str, city: str, types: Optional[str] = None, offset: int = 20
+        self,
+        keywords: Optional[str] = None,
+        city: Optional[str] = None,
+        types: Optional[str] = None,
+        offset: int = 20,
+        page: int = 1,
     ) -> List[Dict[str, Any]]:
-        """关键词搜索 POI。"""
-        params: Dict[str, Any] = {"keywords": keywords, "city": city, "offset": offset}
+        """关键词 / 分类码搜索 POI。
+
+        keywords 与 types 二选一（高德规定至少传其一）：
+        - 传 keywords：按关键词搜索（可搭配 city 限定城市）。
+        - 传 types：按 POI 分类码搜索（如 "110200" 风景名胜，多个用 | 分割）。
+        offset 单页最多 25 条；需要更多结果时用 page 翻页（1 起）。
+        """
+        params: Dict[str, Any] = {"offset": offset, "page": page}
+        if keywords:
+            params["keywords"] = keywords
+        if city:
+            params["city"] = city
         if types:
             params["types"] = types
         data = self._get("/place/text", params)
         return data.get("pois", [])
+
+    def resolve_region(self, destination: str) -> tuple[str, str]:
+        """把目的地解析为 (区县名 adname, 城市名 cityname)。
+
+        高德 place/text 的 city 参数只认「城市名/区县名/adcode」；像「东山岛」
+        这类景区名会静默失效，导致返回全国结果（例如关键词「公园」搜出北京公园）。
+        策略：
+        1. 先用风景名胜类型探测 destination 能否直接当 city 用（城市名命中则直接用，
+           保留城市粒度，避免「杭州」被缩小到某个区）；
+        2. 不行则按关键词搜一次，取首个结果的所在区县（adname）与城市（cityname），
+           例如 东山岛 -> (东山县, 漳州市)：区县级用于 POI 搜索更聚焦，城市级用于
+           天气 / 知识库匹配。
+        都失败时返回 (destination, destination)，由后续搜索兜底。
+        """
+        try:
+            probe = self._get(
+                "/place/text",
+                {"types": "110000", "city": destination, "offset": "1"},
+            )
+            if probe.get("count") and int(probe["count"]) > 0:
+                return destination, destination
+        except AmapError:
+            pass
+        try:
+            hits = self._get(
+                "/place/text", {"keywords": destination, "offset": "5"}
+            ).get("pois", [])
+            for p in hits:
+                adname = p.get("adname")
+                if adname:
+                    return adname, p.get("cityname") or adname
+        except AmapError:
+            pass
+        return destination, destination
+
+    def resolve_city(self, destination: str) -> str:
+        """兼容旧接口：返回区县级城市名（POI 搜索用）。"""
+        adname, _ = self.resolve_region(destination)
+        return adname
 
     def get_weather(self, city: str, extensions: str = "all") -> Dict[str, Any]:
         """逐日天气查询。extensions="all" 返回多日预报。"""

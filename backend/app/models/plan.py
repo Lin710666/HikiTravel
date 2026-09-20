@@ -27,6 +27,7 @@ class POI(BaseModel):
     description: str = Field(default="", description="简介")
     tips: str = Field(default="", description="游玩贴士 / 避坑提醒")
     price: Optional[float] = Field(default=None, description="参考消费/票价（元，来自 API 动态获取）")
+    rating: Optional[float] = Field(default=None, description="高德评分（0-5，用于口碑/热度排序）")
     check_in: str = Field(default="", description="入住时间（住宿类，如 14:00，行业通行惯例，以酒店实际为准）")
     check_out: str = Field(default="", description="退房时间（住宿类，如 12:00，行业通行惯例，以酒店实际为准）")
 
