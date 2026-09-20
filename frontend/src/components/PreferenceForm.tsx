@@ -18,6 +18,8 @@ interface Props {
   onSubmit: (pref: Partial<UserPreference>) => void
   onChange?: (pref: Partial<UserPreference>) => void
   loading?: boolean
+  /** 内嵌副本（见 App.tsx 的说明）：不接外壳广播，避免两份实例同时响应 */
+  standalone?: boolean
 }
 
 // 从表单值构建「仅含已填字段」的部分画像（表单生成 + 对话合并复用）
@@ -48,7 +50,7 @@ function buildPartial(values: Record<string, unknown>): Partial<UserPreference> 
  * 所有字段均可选填，留空则后端用默认值补齐；
  * 填写更多细节，生成的规划会更贴合。
  */
-export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
+export default function PreferenceForm({ onSubmit, onChange, loading, standalone = false }: Props) {
   const [form] = Form.useForm()
 
   /**
@@ -64,19 +66,21 @@ export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
    *     会跟界面对不上。
    */
   useEffect(() => {
+    if (standalone) return              // 内嵌副本不接广播，见 App.tsx
     return subscribePreference((patch) => {
       if (!patch || Object.keys(patch).length === 0) return
       form.setFieldsValue(patch as Record<string, unknown>)
       onChange?.(buildPartial(form.getFieldsValue()))
     })
-  }, [form, onChange])
+  }, [form, onChange, standalone])
 
   // 词云点「个性化方案」时，由外壳请求这里直接提交一次
   useEffect(() => {
+    if (standalone) return              // 同上：否则两份实例会各提交一次，打两次 /api/plan
     return subscribeGenerate(() => {
       form.submit()
     })
-  }, [form])
+  }, [form, standalone])
 
   const handleFinish = (values: Record<string, unknown>) => {
     onSubmit(buildPartial(values))

@@ -6,13 +6,14 @@ import { getPlan, health, listPlans, planByChat, planByForm, savePlan, type Plan
 import PreferenceForm from '../components/PreferenceForm'
 import PlanView from '../components/PlanView'
 import MapView from '../components/MapView'
+import { emitPlan } from '../bridge'
 
 // 记录最近一次请求，用于「一键采纳建议」时按原画像/原话重新生成
 type LastRequest =
   | { kind: 'form'; pref: Partial<UserPreference> }
   | { kind: 'chat'; message: string; base?: Partial<UserPreference> }
 
-export default function PlannerPage() {
+export default function PlannerPage({ standalone = false }: { standalone?: boolean } = {}) {
   const [plan, setPlan] = useState<TravelPlan | null>(null)
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -29,6 +30,22 @@ export default function PlannerPage() {
   useEffect(() => {
     health().then(setEnv).catch(() => setEnv(null))
   }, [])
+
+  /**
+   * 方案一变就广播出去，给外壳用。
+   *
+   * 需求是「把底部对话框的输出内容换成文旅工作台的样式」。外壳拿到这份 plan 后
+   * 会用**同一个 PlanView 组件**渲染到对话框里，所以两处长得一模一样 ——
+   * 也就不用在外壳里复刻一套样式，以后也不会只改到一边。
+   * 单独跑这个应用（不走嵌入）时没人订阅，这里就是空转，没有副作用。
+   *
+   * `standalone`（内嵌副本）**不广播**：它自己就会把方案渲染在自己那一块里，
+   * 再广播一次会让外壳以为"是我这次请求回来的"，可能把方案挂到另一条消息上。
+   */
+  useEffect(() => {
+    if (standalone) return
+    if (plan) emitPlan(plan)
+  }, [plan, standalone])
 
   const run = async (req: LastRequest, apply = false) => {
     setLoading(true)
@@ -133,6 +150,7 @@ export default function PlannerPage() {
             onSubmit={(pref) => run({ kind: 'form', pref })}
             onChange={(pref) => (formPrefRef.current = pref)}
             loading={loading}
+            standalone={standalone}
           />
 
           <Card title="对话生成" size="small" style={{ marginTop: 12 }}>

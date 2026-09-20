@@ -1,5 +1,8 @@
 # 文旅智能辅助 · 融合版（HikiTravel 后端 + AIRI 网页界面）
 
+**版本：`HikiTravel-AIRI-1.1`**（仓库分支同名：`HikiTravel-AIRI-1.1`；
+本地目录名也是 `HikiTravel-AIRI-1.1/`）
+
 赛题 **JBGS-2026-06**（发榜方：杭州网易智企）的比赛工程。
 
 这个目录把两条线并成了一个可运行的产品：
@@ -61,7 +64,7 @@ fatal error，报的还是 `UnicodeDecodeError: 'gbk' codec can't decode ...`，
 ## 目录结构
 
 ```
-HikiTravel-AIRI/
+HikiTravel-AIRI-1.1/
 ├─ install.bat              一键部署（建 venv、装依赖、生成 .env 模板）
 ├─ start.bat                一键启动（起服务 + 开浏览器）
 ├─ public/                  5.0 的 AIRI 界面，纯静态
@@ -417,6 +420,84 @@ HikiTravel-AIRI/
 JS 报错 无    4xx/5xx 无
 ```
 
+### 11. 对话框的输出区里挂的是**文旅工作台本体**，不是照它画的界面
+
+需求原话：「我要的是文旅工作台也是图二一模一样的样子在输出框里面」。
+
+做法：把组员那套 React 组件（`App` = `PlannerPage` = `PreferenceForm` 表单
+＋结果的 `PlanView` ＋ `MapView`）**原样挂进对话框的一条消息里**，
+和「文旅」页签里挂的是同一棵树、同一份 `planner-embed.js`。
+
+```
+外壳（public/js/app.js）
+  startWorkbenchInChat()
+    → appendMsg('assistant','') 造一条消息
+    → el('div',{class:'workbench-host'}) 作为容器
+    → window.WenlvPlanner.renderWorkbench(host)      ← frontend/src/embed.tsx
+        → ReactDOM.createRoot(host).render(<App standalone />)
+```
+
+**为什么不照着画一套像的。** 之前那版是"照着工作台的问题手搓了一份气泡问答"
+（`js/ask-bubbles.js`）。手搓的东西永远有偏差 —— 字段顺序、下拉候选、placeholder
+文案、日期选择器的样子、有没有「出发地」这一项……而且组员以后改表单，
+外壳那份不会跟着变。老板的评价是「这哪里一样了」，这个判断是对的。
+同一棵组件树挂两处，才是真的"一模一样"，而且一行复刻代码都不用写。
+
+**证明是同一棵树，不是看着像**（`.verify-tools/verify-chat-workbench.mjs`）：
+把「文旅」页签里那份和输出区里那份的字段清单打出来逐项比对 ——
+
+```
+输出区: ["目的地","出发地","特别想去的景点","成人","儿童","老人","游玩天数",
+        "总预算（元）","兴趣导向","游玩节奏","往返交通","讨厌的项目",
+        "饮食禁忌","出行日期"]
+文旅页: ["目的地","出发地","特别想去的景点","成人","儿童","老人","游玩天数",
+        "总预算（元）","兴趣导向","游玩节奏","往返交通","讨厌的项目",
+        "饮食禁忌","出行日期"]
+→ 逐项相同（含顺序）✅
+```
+
+**`standalone` 那个开关是必需的。** 工作台里有两处订阅了外壳的广播
+（`subscribePreference` 收词云点选、`subscribeGenerate` 收"生成一次"）。
+外壳里同时存在两份实例时，外壳喊一嗓子**两份都会响应** ——
+点一次「个性化方案」会打两次 `/api/plan`。所以内嵌那一份必须"自足"：
+不订阅、不广播，自己填自己生成（见 `frontend/src/App.tsx` 的注释）。
+
+**940px 那个上限也不是随便写的。** `embed.css` 给 `.wenlv-scope` 建了容器查询，
+断点是 940px：以下走"窄面板"（表单铺满一列），以上走"表单 8/24 + 结果 16/24"两栏。
+对话框那块有 986px，不设上限就会排成两栏，和「文旅」页签里不是同一种样子。
+限到 940 以内，两处都走窄面板那一支。
+
+**顺带把面板底色压实了。** `--surface` 是 `rgb(255 255 255 / .045)` ——
+一层几乎全透的白 + 22px 模糊。装几句对话气泡时没问题（那是外壳的玻璃质感），
+但把整张表单放进去之后，背后的人物会从表单里透出来，字段和 placeholder 都看不清
+（实测截图里人物整个叠在「目的地 / 出发地」上）。现在只在面板里真装了
+工作台或方案时把底压实成 `rgba(9,12,16,.88)`。
+
+**验过的行为**（`.verify-tools/verify-workbench-inline-generate.mjs`）：
+在输出区那张表单上填「目的地=苏州 / 游玩天数=3」→ 点「生成我的旅行规划」
+→ 方案就出在**它自己那一块里面**：
+
+```
+打到接口    : POST /api/plan
+标题        : 苏州3日适中人文历史·自然风光游 / 2026-09-20 · 晴 20-29℃ / 2026-09-21 · 晴 21-29℃
+时间轴节点  : 15
+按钮        : 导 航 / 点 评 / 美 团 / 🍽 换一家餐厅（按价位） / 更换酒店 / 携 程 / 途 家
+              / 保存计划 / 导出 JSON / 历史计划
+地图        : 有（svg 打点与轨迹）
+外面另起的方案消息: 0 条（方案就在工作台自己里面，没跑到别处）
+JS 报错     : 无
+```
+
+**已知边界：两份实例的状态是分开的。** 在对话框那份里生成的方案，
+不会同步到「文旅」页签那份（反之亦然）—— 两边都能用，但各是各的。
+同理，词云的 `setPreference` 目前只喂给「文旅」页签那份（内嵌那份是 standalone）。
+默认布局下页签是隐藏的，所以"在词云上点了词、对话框里那份表单没跟着变"是当前行为。
+要打通的话思路是把"哪一份算主实例"跟着布局走（调试布局→页签那份，
+默认布局→对话框那份），留给组员定。
+
+`js/ask-bubbles.js` 那份气泡**保留着没删**，`startBubbleGuide()` 也还在：
+`renderWorkbench` 不可用时（老 bundle）会退回它，不会给一个死按钮。
+
 ## 验证记录（都是实测数字）
 
 ### 接口覆盖率
@@ -634,6 +715,28 @@ Day 3: 周庄古镇 → 鑫震源·苏式大虾生煎 → 周庄沈厅   ← 苏
 7. **React 工作台是构建产物**：`public/planner-embed.js` 与 `.css` 是
    `vite build` 的结果。改 `HikiTravel/frontend/src/` 之后要重新构建并拷回来，
    命令见「重新构建并更新工作台」一节。
+8. **boot 还没跑完就发消息，回复会被整条清掉**（v6.2 原有，未改）
+   `app.js` 的 `renderHistory()` 排在 `boot()` 的十几个 `await` 之后；
+   它一执行就 `log.innerHTML = ''` 再按 `S.history` 重建。
+   助手那条流式回复是**直接写进 DOM 的**，流没结束前不在 `S.history` 里，
+   于是这一清就没了 —— 界面上表现为"我说了话，它忙了一会儿，什么都没回"。
+   实测（`.verify-tools/probe-chat-dom.mjs`，MutationObserver）：
+
+   ```
+   + msg me      你好，你能做什么？
+   + msg         🤖                          ← 流式容器（空）
+   + msg sys     🤖 正在理解需求，并检索真实景点与天气…
+   - msg me      …三个节点被一起删掉…
+   - msg
+   - msg sys
+   + msg me      你好，你能做什么？            ← 只按 history 重建，助手回复不在其中
+   ```
+
+   触发窗口有多大取决于 boot 有多快：本机常态约 **5 秒**内（15 个 `/api` 调用
+   在 4.8 秒内返回）。但**只要有一条 `/api/chat/stream` 在飞，后端是串行的**，
+   boot 会被拖到 30 秒以上，窗口就跟着变宽（实测 30 秒时发消息必触发）。
+   修法很简单：`renderHistory()` 挪到 `loadHistory()` 之后、或加一个
+   "正在流式就别重建" 的判断 —— 属于 `app.js` 的改动，留给组员定。
 
 ---
 
@@ -653,8 +756,8 @@ Day 3: 周庄古镇 → 鑫震源·苏式大虾生煎 → 周庄沈厅   ← 苏
 ```bat
 cd HikiTravel\frontend
 node node_modules\vite\bin\vite.js build --config vite.embed.config.ts
-copy /Y dist-embed\planner-embed.js  ..\HikiTravel-AIRI\public\
-copy /Y dist-embed\style.css         ..\HikiTravel-AIRI\public\planner-embed.css
+copy /Y dist-embed\planner-embed.js  ..\HikiTravel-AIRI-1.1\public\
+copy /Y dist-embed\style.css         ..\HikiTravel-AIRI-1.1\public\planner-embed.css
 rmdir /S /Q dist-embed
 ```
 

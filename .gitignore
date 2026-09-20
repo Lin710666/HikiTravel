@@ -6,19 +6,27 @@ __pycache__/
 .venv/
 backend/.venv/
 
-# ---- ??????? Key??????????? ----
+# ---- 本机配置：高德 Key、模型地址等，不要提交 ----
 .env
 backend/.env
 
-# ---- ??????SQLite ?????????????????? ----
+# ---- 运行期数据：SQLite 计划库、角色卡、缓存等，都是本机状态 ----
 backend/data/
+# 音轨库与热点词表落在**项目根**的 data/（见 /api/audio 返回的 dir）。
+#
+# ⚠ 前面那个 `/` 不能省。gitignore 里不带前导斜杠的 `data/` 会匹配
+# **任意层级**叫 data 的目录 —— 写成 `data/` 会把 `backend/app/data/`
+# （当前项目自己的词表、能力清单、提示词）也一起忽略掉，
+# 于是那些文件根本不会被提交，别人 clone 下来就是缺文件的。
+# 加前导 `/` 才是"只锚定仓库根目录下的 data/"。
+/data/
 
-# ---- Node / ?? ----
+# ---- Node / 前端 ----
 node_modules/
 frontend/dist/
 frontend/dist-embed/
 
-# ---- ??? / ?? ----
+# ---- 编辑器 / 系统 ----
 .vscode/
 .idea/
 *.swp

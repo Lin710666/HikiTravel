@@ -25,6 +25,25 @@ class Settings:
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
     ollama_timeout: float = float(os.getenv("OLLAMA_TIMEOUT", "30"))
+    #: 生成模型用完多久卸载。Ollama 默认留 5 分钟，单卡上那段时间会挡着
+    #: 别的模型加载 —— 默认收到 30 秒。
+    ollama_keep_alive: str = os.getenv("OLLAMA_KEEP_ALIVE", "30s")
+
+    # ---- 模型路由：云端优先，本地兜底 ----
+    #: auto = 配了云端就先用云端，超时/连不上自动落到本地
+    #: cloud = 只用云端   local = 只用本地（数据不出机器）
+    llm_policy: str = os.getenv("LLM_POLICY", "auto")
+    #: OpenAI 兼容的云端服务。三个都填了才算"配好"；留空就是没配。
+    cloud_base_url: str = os.getenv("CLOUD_BASE_URL", "")
+    cloud_api_key: str = os.getenv("CLOUD_API_KEY", "")
+    cloud_model: str = os.getenv("CLOUD_MODEL", "")
+
+    # ---- 热点来源（气泡问题里的"去哪儿"跟着热点变）----
+    #: auto = 按 A → C → B → D 依次试   A/C = 外部接口   B = 高德估算   D = 本地词表
+    hot_source: str = os.getenv("HOT_SOURCE", "auto")
+    #: A / C 通道的接口地址与密钥（任何返回 JSON 的接口都行，字段约定见 hot_topics.py）
+    hot_api_url: str = os.getenv("HOT_API_URL", "")
+    hot_api_key: str = os.getenv("HOT_API_KEY", "")
 
     # ---- 高德开放平台（POI / 天气 / 路线 / 周边酒店餐饮 实时数据）----
     amap_api_key: str = os.getenv("AMAP_API_KEY", "")

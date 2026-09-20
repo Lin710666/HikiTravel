@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#121212">
-<title>文旅智能辅助 v4.1 · AIRI 网页版</title>
+<title>文旅智能辅助 HikiTravel-AIRI-1.1 · AIRI 网页版</title>
 <meta name="description" content="基于 Project AIRI 交互风格重构的文旅智能辅助系统：Live2D 虚拟人物 + 可点击交互词云 + 全本地 AI 服务（Ollama / Qwen TTS）">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🏔️</text></svg>">
 <link rel="stylesheet" href="/css/airi.css?v=__ASSET_V__">
@@ -37,7 +37,7 @@
     <div class="brand">
       <div class="brand-logo">🏔️</div>
       <div class="brand-text">
-        <span class="brand-title">文旅智能辅助 <span class="ver">v4.1</span></span>
+        <span class="brand-title">文旅智能辅助 <span class="ver">HikiTravel-AIRI-1.1</span></span>
         <span class="brand-sub">Live2D 虚拟向导，全程本机运行</span>
       </div>
     </div>
@@ -96,12 +96,20 @@
         </div>
       </div>
       <div class="stage-tools">
+        <!-- 工具排收纳按钮。
+             放在最前面：收纳起来之后它是这一条里唯一还看得见的按钮，
+             排在后面的话会跟着一起被藏掉，用户就再也展不开了。 -->
+        <button class="tool-btn tools-toggle" id="btn-tools-toggle"
+                title="设置：展开 / 收起右上角这一排工具" aria-expanded="false">
+          <span class="ico">⚙️</span><span class="txt">设置</span>
+        </button>
         <button class="tool-btn" id="open-bg" title="更换背景"><span class="ico">🖼️</span><span class="txt">背景</span></button>
         <button class="tool-btn" id="open-model" title="更换人物形象"><span class="ico">🧍</span><span class="txt">形象</span></button>
-        <button class="tool-btn" id="btn-nav" title="定位导航：看我在哪、附近的景点、怎么过去"><span class="ico">🧭</span><span class="txt">导航</span></button>
-        <span class="tool-sep"></span>
-        <button class="tool-btn" id="btn-nav" title="定位导航：看我在哪、附近的景点、怎么过去"><span class="ico">🧭</span><span class="txt">导航</span></button>
-        <button class="tool-btn" id="btn-boot" title="重新播放开屏"><span class="ico">🎬</span><span class="txt">开屏</span></button>
+        <button class="tool-btn" id="btn-avatar-hide" title="显示 / 隐藏虚拟形象（默认开启）"><span class="ico">👁️</span><span class="txt">隐藏</span></button>
+        <button class="tool-btn" id="btn-nav" title="定位导航：看我在哪、附近的景点、怎么过去（走本机后端的高德接口）"><span class="ico">🧭</span><span class="txt">导航</span></button>
+        <button class="tool-btn" id="btn-boot" title="重新播放开屏（回到主界面入口）"><span class="ico">🏠</span><span class="txt">主界面</span></button>
+        <button class="tool-btn" id="btn-chatbar" title="显示 / 关闭底部对话栏（大屏时想只留人物就关掉它）"><span class="ico">💬</span><span class="txt">对话栏</span></button>
+        <button class="tool-btn" id="btn-dock" title="调试：在「对话常驻」与「左右分栏」两套布局之间切换"><span class="ico">🐞</span><span class="txt">调试</span></button>
         <button class="tool-btn" id="btn-kiosk" title="全屏展示模式（展厅大屏：藏掉操作界面，只留形象与字幕）"><span class="ico">🖥️</span><span class="txt">大屏</span></button>
         <span class="tool-sep"></span>
         <button class="tool-btn" id="btn-wc-toggle" title="显示 / 隐藏词云"><span class="ico">☁️</span></button>
@@ -195,9 +203,22 @@
       <!-- ---------- 对话 ---------- -->
       <section class="pane active" id="pane-chat">
         <h3>和 <span id="chat-char-name">小文</span> 说说话</h3>
-        <p class="sub">对话由本机 Ollama 驱动。人格来自角色卡，回答前会先翻一遍机体记忆。</p>
         <div class="badges" id="chat-badges"></div>
         <div class="chat-log" id="chat-log"></div>
+
+        <!-- ---------- 历史对话 ----------
+             S.history 只是"当前这一段"；点「＋ 新对话」会把当前这段归档进
+             S.sessions（也存本机 localStorage），下面是归档列表，每条能打开或删除。 -->
+        <div class="hist" id="chat-hist">
+          <div class="hist-head">
+            <span class="hist-title">历史对话 <b id="hist-count">0</b></span>
+            <span class="hist-actions">
+              <button class="mini-btn" id="hist-new" title="把当前这段存进历史，重新开一段">＋ 新对话</button>
+              <button class="mini-btn danger" id="hist-clear" title="删除全部历史对话（不可恢复）">🗑 清空</button>
+            </span>
+          </div>
+          <div class="hist-list" id="hist-list"></div>
+        </div>
       </section>
 
       <!-- ---------- 文旅 ---------- -->
@@ -224,7 +245,12 @@
             生成结果
             <span class="lbl-actions">
               <button class="mini-btn" id="btn-speak-result" title="用本机语音朗读结果">🔊 朗读</button>
-              <button class="mini-btn" id="btn-export" title="导出为 Markdown">📥 导出</button>
+              <button class="mini-btn" id="btn-export" title="导出自带排版的 HTML（双击能看、Ctrl+P 存 PDF）">📥 导出</button>
+            <!-- 注意：模板上传/恢复两个按钮**不能留在这里**。
+                 本容器（#tools-result）在没出结果时是 hidden 的，
+                 按钮点不到 —— 用户也就没法在生成之前先把模板准备好。
+                 它们已挪到「外观」页的「导出模板」一节。 -->
+            <input type="file" id="export-tpl-file" accept=".html,.htm,.txt" hidden>
             </span>
           </div>
           <div id="tools-warn"></div>
@@ -292,7 +318,6 @@
       <!-- ---------- 外观 ---------- -->
       <section class="pane" id="pane-look">
         <h3>外观</h3>
-        <p class="sub">换背景、换形象、调词云。素材都在本机，不联网。</p>
 
         <div class="section">
           <div class="lbl">
@@ -308,11 +333,12 @@
               <div class="look-preview-note" id="look-bg-note">—</div>
             </div>
           </div>
-        </div>
 
-        <div class="section">
-          <div class="lbl">
-            视频背景（大屏宣传片）
+          <!-- 视频也是"背景"的一种，所以并进同一个 section，不再单开一块 ——
+               用户的心智是"我要换背景"，不该让他在两处找。
+               视频卡片上的「主界面 / 开屏」两个按钮见 .pick-video-actions 的样式。 -->
+          <div class="lbl" style="margin-top:16px">
+            宣传片（视频背景）
             <span class="lbl-actions">
               <button class="mini-btn" id="video-upload">📤 上传视频</button>
               <button class="mini-btn" id="video-refresh">🔄 刷新</button>
@@ -347,15 +373,57 @@
         </div>
 
         <div class="section">
-          <div class="lbl">开屏模板</div>
+          <div class="lbl">
+            开屏模板
+          </div>
           <p class="sub" style="margin:0 0 8px">
-            两套可随时互相切换。改动立即生效，下次进来就用新的。
+            开屏就一套「视频主页」。改动立即生效，下次进来就用新的。
           </p>
           <div class="seg" id="boot-tpl-seg">
             <button class="seg-item" data-boot-tpl="video" type="button">🎬 视频主页</button>
-            <button class="seg-item" data-boot-tpl="character" type="button">🛶 形象主页</button>
           </div>
           <div class="hintline" id="boot-tpl-hint">—</div>
+
+          <!-- ---------- 配乐 ----------
+               默认用视频原声；上传宣传片时后端会自动抽音轨进 data/audio/，
+               这里就能换成别的（或静音）。列表由 js/bg-audio.js 渲染。 -->
+          <div class="lbl" style="margin-top:16px">配乐</div>
+          <p class="sub" style="margin:0 0 8px">
+            默认用<strong>视频原声</strong>。上传宣传片时如果片子里有声音，
+            音轨会自动抽出来放进音频库，可以在这里换成别的曲子。
+          </p>
+          <div id="audio-list" class="aud-list"></div>
+
+          <!-- ---------- 导出模板 ----------
+               放在这里而不是文旅页的导出键旁边：那个容器（#tools-result）
+               没出结果时是 hidden 的，用户根本点不到，也就没法在生成之前
+               先把模板准备好。这两个按钮要始终可达。 -->
+          <div class="lbl" style="margin-top:16px">
+            导出模板
+            <span class="lbl-actions">
+              <button class="mini-btn" id="btn-export-tpl" title="上传自己的导出模板（HTML，支持 {{title}} {{body}} 等占位符）">🎨 上传模板</button>
+              <button class="mini-btn" id="btn-export-tpl-reset" title="恢复到内置模板" hidden>↺ 内置模板</button>
+            </span>
+          </div>
+          <p class="sub" style="margin:0 0 8px">
+            导出方案时套用的版式。不传就用内置模板（封面 + 正文 + 页脚，可打印成 PDF）。
+            模板里用 <code>{{title}}</code> <code>{{body}}</code> <code>{{date}}</code>
+            等占位符；<code>{{body}}</code> 是必需项。模板只存在本机浏览器里。
+          </p>
+
+          <!-- 上传入口。原来这里是「形象主页」那个按钮（已删）——
+               与其留一个空位，不如把最常用的动作放这儿：
+               换宣传片是展厅现场最常被要求的事。点了转给上面那节里的
+               #video-upload（同一个上传流程，不重复实现一遍）。 -->
+          <!-- 上传入口。两个分开，因为它们是两件事：
+               · 上传视频并提取音频 —— 传宣传片，后端顺手把音轨抽出来
+               · 上传音频           —— 我自己有一首曲子，直接放进音频库
+               两条最终都进同一个音频库，在下面的「配乐」列表里都能选。 -->
+          <div class="lbl-actions" style="margin-top:12px">
+            <button class="mini-btn" id="video-upload-here" type="button">📤 上传视频并提取音频</button>
+            <button class="mini-btn" id="audio-upload-here" type="button">🎵 上传音频</button>
+            <input type="file" id="audio-file" accept=".m4a,.mp3,.wav,.ogg,.opus,.aac,.flac,audio/*" hidden>
+          </div>
 
           <!-- 开屏背景：本机视频（画面模式在上面的「视频背景」一节里统一设置） -->
           <div class="field" style="margin-top:12px">
@@ -801,7 +869,6 @@
       <!-- ---------- 机体记忆 ---------- -->
       <section class="pane" id="pane-memory">
         <h3>机体记忆</h3>
-        <p class="sub">AIRI 的机体记忆原本依赖 Postgres + pgvector；这里替换为本地文件存储 + 混合检索（语义向量 + 中文词法）。</p>
         <div class="badges" id="memory-badges"></div>
 
         <div class="section">
@@ -832,7 +899,6 @@
       <!-- ---------- 角色卡 ---------- -->
       <section class="pane" id="pane-cards">
         <h3>AI 角色卡</h3>
-        <p class="sub">自定义虚拟人格：人设、说话风格、开场白、音色、模型参数、人物形象。角色卡都存在本机。</p>
         <div class="actions" style="margin-bottom:13px">
           <button class="btn sm" id="card-new">＋ 新建</button>
           <button class="btn ghost sm" id="card-import">📂 导入</button>
@@ -927,6 +993,9 @@
         <button class="icon-btn" id="btn-mic" title="按住说话：录一段语音，用本机 Whisper 识别成文字" hidden>🎤</button>
         <div class="spacer"></div>
         <span class="hintline" id="composer-hint"></span>
+        <!-- 「让 AI 先问我」：把文旅流程里**所有**必问项一条条问出来，
+             用户逐条答完就自动去生成方案。放在发送键左边，和"打字问"并列。 -->
+        <button class="btn ghost sm" id="btn-ask-me" title="让 AI 把文旅规划需要的项目一条条问你，答完自动出方案">🤔 让 AI 先问我</button>
         <button class="btn ghost sm" id="btn-stop" hidden>■ 停止</button>
         <button class="btn sm" id="btn-send">发送</button>
       </div>
@@ -939,6 +1008,15 @@
 <audio id="tts-audio" hidden></audio>
 
 <script src="/js/util.js?v=__ASSET_V__"></script>
+<!-- 方案导出（内置排版模板 + 用户自定义模板）。排在 util.js 之后：
+     它要复用 util.js 里的 renderMarkdown，导出件和页面里的排版才一致。 -->
+<script src="/js/export-plan.js?v=__ASSET_V__"></script>
+<!-- 背景配乐：默认用视频原声，也能换成音频库里的音轨。
+     音轨由后端在上传视频时自动抽取（data/audio/）。 -->
+<script src="/js/bg-audio.js?v=__ASSET_V__"></script>
+<!-- 对话引导气泡：分批提问 + 「我选好了」。
+     替换原来"点一下就直接生成"的老流程 —— 那套没有引导作用。 -->
+<script src="/js/ask-bubbles.js?v=__ASSET_V__"></script>
 <script src="/js/backgrounds.js?v=__ASSET_V__"></script>
 <!-- 导航模式的牌子与风景图（纯 2D 绘制，Live2D 与 3D 两套渲染器共用）。
      必须排在 live2d.js 之前：live2d.js 会用到 window.WenlvNavVisuals。 -->

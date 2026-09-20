@@ -233,6 +233,11 @@
     if (!S.history.length) {
       // 首次进入：让角色主动打个招呼，而不是空白一片
       setTimeout(() => say(S.card ? S.card.greeting : '你好，我是你的文旅向导。', true), 900);
+      // 再补一条对话引导：**分批气泡**。
+      // 原来是「猜你想去」三个地名，点一下就立刻生成 —— 用户反馈"没有引导作用"。
+      // 现在交给 ask-bubbles.js：一批几个问题，选完点「我选好了」才推进，
+      // 最后一批才真正去生成。
+      setTimeout(() => { try { startWorkbenchInChat(); } catch { /* 忽略 */ } }, 1800);
     }
     // 开屏已经在 boot() 开头就播了（原因见那里的注释），这里不再重复调用。
   }
@@ -784,8 +789,15 @@
 
       case 'export':
         if (!S.lastResult) { toast('还没有可导出的内容，先生成一次吧', 'err'); break; }
-        download(`文旅方案_${new Date().toISOString().slice(0, 10)}.md`, S.lastResult);
-        toast('已导出为 Markdown（数据不出本机）', 'ok');
+        // 导出成**带排版的 HTML**（封面抬头 + 正文 + 页脚，双击能看、Ctrl+P 存 PDF）。
+        // 原来是把 Markdown 原样甩出去，用户拿到一坨 ## 和 | 管道还得自己再排。
+        if (window.WenlvExport) {
+          const r = window.WenlvExport.exportHtml(S.lastResult);
+          toast(`已导出「${r.title}」（HTML，可直接打印成 PDF）`, 'ok', 4200);
+        } else {
+          download(`文旅方案_${new Date().toISOString().slice(0, 10)}.md`, S.lastResult);
+          toast('已导出为 Markdown', 'ok');
+        }
         break;
 
       case 'focus': {
@@ -1216,12 +1228,445 @@
 
   const scrollChat = () => { const l = $('#chat-log'); l.scrollTop = l.scrollHeight; };
 
+  /* ========================================================================
+   * 十一之二、「猜你想去」与「让 AI 先问我」
+   *
+   * 两件事放在一起，因为它们是同一个交互：**在对话里给一排可点的选项**，
+   * 点一下就等于回答/选定了。
+   *
+   * 问哪些项不是拍脑袋定的：下面这 6 个键与 collectPlanParams() **一一对应**，
+   * 只有能被后端规划链路真正吃掉的项才值得问 —— 问一堆答案用不上的问题，
+   * 那不叫功能，那叫填表。
+   * ======================================================================*/
+
+  /** 「猜你想去」的随机池：都是样本库里有的城市/景区，点了就能直接出方案 */
+  const SUGGEST_SPOTS = [
+    '杭州', '苏州', '成都', '丽江', '西安',
+    '西湖', '灵隐寺', '拙政园', '宽窄巷子', '丽江古城',
+    '雷峰塔', '平江路', '大熊猫基地', '兵马俑', '玉龙雪山',
+  ]
+
+  /** 一条条问出来的项目。options 给了就渲染成可点词条，没有就让用户自己打。 */
+  const ASK_ITEMS = [
+    { key: 'city', q: '先去哪座城市？', hint: '直接说城市名就行，比如 杭州 / 苏州 / 成都', def: '杭州' },
+    { key: 'days', q: '玩几天？', hint: '填 1～30 之间的天数', def: '2' },
+    { key: 'crowd', q: '和谁一起去？', options: ['独自', '情侣', '朋友', '家庭', '带老人', '带小孩'], def: '朋友' },
+    { key: 'budget', q: '预算大概是哪一档？', options: ['经济', '舒适', '品质', '豪华'], def: '舒适' },
+    {
+      key: 'interests', q: '对什么感兴趣？', multi: true,
+      options: ['人文历史', '自然风光', '美食', '娱乐', '亲子', '摄影'], def: '自然风光',
+      hint: '可以多选，点几个都行，选完点「就这些」',
+    },
+    { key: 'diet', q: '有饮食禁忌吗？', options: ['无', '清真', '素食', '不吃辣', '不吃海鲜'], def: '无' },
+  ]
+
+  /** 当前正在进行的追问流程；null 表示没有 */
+  let askFlow = null
+
+  /**
+   * 跳到文旅展示栏。
+   *
+   * ★ 必须先切到**调试界面**（原始左右分栏）再切页签 ——
+   *   默认形态下侧栏只剩底部那张卡，#pane-tools 是 display:none 的，
+   *   直接 switchTab('tools') 等于往一个看不见的地方写，用户点「查看完整方案 ›」
+   *   会觉得"点了没反应"。
+   */
+  function gotoPlanPane() {
+    try { if (S && typeof S._debugApply === 'function') S._debugApply(true, { silent: true }); } catch { /* 忽略 */ }
+    // 布局切换后 DOM 尺寸要下一帧才稳，延后一点再切页签
+    setTimeout(() => {
+      try { switchTab('tools'); } catch { /* 忽略 */ }
+    }, 180);
+  }
+
+  /** 造一排可点词条 */
+  function chipRow(items, onPick) {
+    const box = el('div', { class: 'chat-suggest' });
+    items.forEach((it) => {
+      const b = el('button', { class: 'sg', type: 'button', text: it.label });
+      if (it.note) b.appendChild(el('span', { class: 'sg-note', text: it.note }));
+      b.addEventListener('click', () => onPick(it, b));
+      box.appendChild(b);
+    });
+    return box;
+  }
+
+  /**
+   * 「猜你想去」：进主界面时给三个随机地名。
+   * 为什么是随机的：用户第一次进来不知道能问什么，给几个具体地名比
+   * "请描述您的需求"有用得多 —— 点一下就直接出方案。
+   */
+  function postSuggest() {
+    const pool = SUGGEST_SPOTS.slice();
+    const pick3 = [];
+    while (pick3.length < 3 && pool.length) {
+      pick3.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    const bd = appendMsg('assistant', '**猜你想去** —— 点一个我直接给你排：');
+    bd.appendChild(chipRow(pick3.map((s) => ({ label: s, value: s })), async (it) => {
+      it.el && it.el.setAttribute('disabled', 'disabled');
+      await runPlanWith({ city: it.value });
+    }));
+    // 顺带给一条"让 AI 先问我"的入口，用户不知道要说什么时可以走那条
+    const alt = el('div', { class: 'chat-suggest' });
+    const b = el('button', { class: 'sg', type: 'button', text: '不确定？让 AI 先问我 ›' });
+    b.addEventListener('click', () => startAskMe());
+    alt.appendChild(b);
+    bd.appendChild(alt);
+  }
+
+  /** 用一组覆盖参数去跑文旅规划，并把结果反馈回对话 */
+  /**
+   * 「输入框里说的话」→ 工作台表单字段。
+   *
+   * 后端 /api/parse-preference 只返回**用户真说到的**字段（没提到的不出现），
+   * 所以这里可以直接拿它盖在气泡答案上 —— 不会因为输入框里有句话，
+   * 就把气泡选的城市天数一起冲掉。键名与 UserPreference 一致，这里翻译成表单字段。
+   */
+  function userPreferenceToForm(f) {
+    const out = {};
+    if (!f) return out;
+    if (f.destination) out.destination = f.destination;
+    if (f.duration_days) out.duration_days = Number(f.duration_days) || undefined;
+    if (f.budget) out.budget = Number(f.budget) || undefined;
+    if (f.travelers && typeof f.travelers === 'object') {
+      const t = f.travelers;
+      if (t.adults != null) out.adults = t.adults;
+      if (t.children != null) out.children = t.children;
+      if (t.elderly != null) out.elderly = t.elderly;
+    }
+    if (f.preferences && f.preferences.length) out.preferences = f.preferences;
+    if (f.pace) out.pace = f.pace;
+    if (f.transportation) out.transportation = f.transportation;
+    if (f.dietary_restrictions && f.dietary_restrictions.length) {
+      out.dietary_restrictions = f.dietary_restrictions.map((d) => WC_DIET_ALIAS[d] || d);
+    }
+    if (f.avoidances && f.avoidances.length) out.avoidances = f.avoidances;
+    if (f.must_visit && f.must_visit.length) out.must_visit = f.must_visit;
+    if (f.origin) out.origin = f.origin;
+    if (f.start_date) out.start_date = f.start_date;
+    return out;
+  }
+
+  /** 输入框里现在有没有内容（气泡那边要判断"能不能直接出方案"） */
+  function chatInputText() {
+    const el = $('#chat-input');
+    return el ? String(el.value || '').trim() : '';
+  }
+
+  /**
+   * 出方案（气泡「我选好了」与自由输入都走这里）。
+   *
+   * 三条规则（按需求定的）：
+   *   ① 气泡**不必选完** —— 选了多少用多少；一个都没选、但输入框里有字，也照样出方案
+   *   ② 输入框与气泡**冲突时以输入框为准**，但只覆盖输入框里真说到的字段
+   *   ③ 生成交给**「文旅」模块**（组员那套工作台），所以结果就是
+   *      PlanView 那套视图 —— 导航／点评／美团这些跳转按钮都在，
+   *      与切到调试布局后在文旅页生成的完全一致
+   */
+  async function runPlanWith(overrides, typedText) {
+    if (S.busy) { toast('正在生成，请稍等或点停止', 'err'); return; }
+
+    // ① 气泡答案 → 工作台表单字段
+    let patch = pickToWorkbench(overrides || {}) || {};
+
+    // ② 输入框优先：只覆盖它真说到的字段。
+    //    文字优先用调用方传进来的（sendMessage 会先清空输入框，事后再读就读不到了），
+    //    没传才去读输入框当前内容（气泡「我选好了」那条路）。
+    const typed = (typedText != null ? String(typedText) : chatInputText()).trim();
+    let typedFields = {};
+    if (typed) {
+      try {
+        const r = await fetch('/api/parse-preference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: typed }),
+        }).then((x) => x.json());
+        typedFields = userPreferenceToForm(r && r.fields);
+      } catch (e) {
+        // 解析失败不该把生成卡住 —— 退化成"只按气泡走"
+        console.warn('[wenlv] 解析输入框失败，退化为只按气泡：', e);
+      }
+    }
+    patch = Object.assign(patch, typedFields);
+
+    const api = window.WenlvPlanner;
+    if (!api || typeof api.setPreference !== 'function' || typeof api.requestGenerate !== 'function') {
+      toast('行程规划工作台没挂上，先用「文旅」面板里的表单生成。', 'err', 6000);
+      return;
+    }
+
+    // 说出去了什么，让用户看得见（也能看出"输入框优先"有没有生效）
+    const said = [];
+    if (typed) said.push(`「${typed}」`);
+    if (Object.keys(typedFields).length) said.push('（按你说的为准）');
+    appendMsg('user', typed ? `帮我排一个方案：${typed}` : `帮我排一个方案：${overrides && overrides.city ? overrides.city : ''}${overrides && overrides.days ? ' · ' + overrides.days + ' 天' : ''}`);
+    const bd = appendMsg('assistant', `正在用「文旅」模块生成…${said.join('')}`);
+
+    // ③ 填进工作台表单 → 触发工作台生成 → 跳到文旅页看结果
+    try {
+      api.setPreference(patch);
+    } catch (e) {
+      bd.innerHTML = renderMarkdown(`填写工作台表单失败：${e && e.message ? e.message : e}`);
+      return;
+    }
+    // 不再强切布局：方案现在就渲染在这条对话框里，切到分栏反而会把宽洋洋的
+    // 底部对话框变成右侧一条窄栏（450px），
+    // 想看文旅页那份的话下面给了一个词条。
+    setTimeout(() => {
+      try {
+        /* ★ 方案出来之后，**同一份 plan 也用文旅工作台那套视图渲染进这条对话框**。
+           不是在外壳里复刻样式 —— 复刻永远有偏差（表格边框、分档标签、
+           换景点/换餐厅的交互、导航·点评·美团跳转按钮），所以让工作台把生成好的
+           plan 回传过来，这里用同一个 PlanView 组件挂上去，两处天然一致。 */
+        let unsub = null;
+        const stop = () => { if (unsub) { unsub(); unsub = null; } };
+        if (typeof api.subscribePlan === 'function' && typeof api.renderPlan === 'function') {
+          unsub = api.subscribePlan((plan) => {
+            stop();
+            try {
+              const box = el('div', { class: 'plan-view-host' });
+              bd.innerHTML = '';
+              bd.appendChild(box);
+              if (!api.renderPlan(box, plan)) {
+                bd.textContent = '（方案渲染失败，可在右侧文旅页查看）';
+                return;
+              }
+              bd.appendChild(chipRow([{ label: '在文旅页打开 ›', value: 'tools' }], () => {
+                gotoPlanPane();
+              }));
+              // 方案卡片是一屏高的内容，默认那条 105px 的缝里根本看不成样
+              if (window.WenlvChatPane && window.WenlvChatPane.autoExpand) {
+                window.WenlvChatPane.autoExpand();
+              }
+            } catch (e) {
+              bd.textContent = `方案渲染出错：${e && e.message ? e.message : e}`;
+            }
+          });
+          setTimeout(stop, 180000);   // 等不到就别一直挂着订阅
+        }
+        api.requestGenerate();
+        if (typed) {
+          const input = $('#chat-input');
+          if (input) input.value = '';   // 输入框的内容已经被采用，清掉免得再发一次
+        }
+        bd.innerHTML = renderMarkdown(unsub
+          ? '正在生成…方案出来会直接显示在这里。'
+          : '已经交给「文旅」模块了，方案和跳转按钮都在文旅页里。');
+        if (!unsub) {
+          bd.appendChild(chipRow([{ label: '去文旅页看看 ›', value: 'tools' }], () => {
+            gotoPlanPane();
+          }));
+        }
+      } catch (e) {
+        bd.innerHTML = renderMarkdown(`生成失败：${e && e.message ? e.message : e}`);
+      }
+    }, 220);
+  }
+
+  /**
+   * 把**文旅工作台本身**挂进对话框的输出区。
+   *
+   * 需求原话：「我要的是文旅工作台也是图二一模一样的样子在输出框里面」。
+   *
+   * 所以这里**不是**照着工作台画一套像的界面，而是把组员那套 React 组件
+   * （`App` = PreferenceForm 表单 + 结果 + 地图）原样挂进这条消息里，
+   * 和「文旅」页签里挂的是同一棵树、同一个 bundle。字段顺序、下拉候选、
+   * placeholder、日期选择器的样子因此天然一致 —— 而且组员以后改表单，
+   * 这里跟着一起变，不存在"只改到一边"。
+   *
+   * 为什么不再用气泡引导（js/ask-bubbles.js）：气泡是"照着工作台的问题
+   * 手搓的一套问答"，本质是仿制品，永远会有偏差（老板原话：
+   * 「这哪里一样了」）。真家伙能挂，就没有理由挂仿制品。
+   * 气泡模块保留着没删，`#btn-ask-me` 在挂载不可用时仍然会退回它。
+   */
+  function startWorkbenchInChat() {
+    switchTab('chat');
+    const log = $('#chat-log');
+    if (!log) return;
+    const api = window.WenlvPlanner || {};
+
+    // 兜底：老 bundle 里没有 renderWorkbench。宁可退回气泡，也别给一个死按钮。
+    if (typeof api.renderWorkbench !== 'function') {
+      startBubbleGuide();
+      return;
+    }
+
+    // 已经挂过就只滚过去 —— 再挂一份就有两张一模一样的表单，用户分不清哪张算数
+    const exist = log.querySelector('.workbench-host');
+    if (exist) { scrollChat(); return; }
+
+    const bd = appendMsg('assistant', '');
+    bd.innerHTML = '';
+    const host = el('div', { class: 'workbench-host' });
+    bd.appendChild(host);
+    if (!api.renderWorkbench(host)) {
+      bd.textContent = '（文旅工作台没挂上，可点右侧「文旅」页查看）';
+      return;
+    }
+    // 这一块是一整张表单，默认那条 105px 的缝里根本看不成样
+    if (window.WenlvChatPane && window.WenlvChatPane.autoExpand) {
+      window.WenlvChatPane.autoExpand();
+    }
+  }
+
+  /**
+   * 分批气泡引导。
+   *
+   * 交互本身在 js/ask-bubbles.js（三个批次 + 「我选好了」）；
+   * 这里只负责**问完之后怎么生成** —— 那是 app 内部的事
+   * （collectPlanParams / generate / 结果入对话框），模块不该知道这些。
+   *
+   * 和老的 startAskMe 的区别：老的是"一问一答、答完立刻生成"，
+   * 点一下就往下走，没有商量的余地；新的可以在一批里把几项都选好再推进。
+   *
+   * ★ 现在默认入口是 startWorkbenchInChat（真挂工作台），气泡只在
+   *   `renderWorkbench` 不可用时才走 —— 留着是因为它是一条好用的退路，
+   *   而且在窄屏上比一整张表单省地方。
+   */
+  function startBubbleGuide() {
+    if (S.busy) { toast('正在生成，请稍等或点停止', 'err'); return; }
+    switchTab('chat');
+    if (!window.WenlvAsk) { startAskMe(); return; }   // 模块没加载 → 退回老流程，不给用户一个死按钮
+    window.WenlvAsk.start(function (answers) {
+      // 气泡里给的是中文选项，runPlanWith 会把它翻成工作台表单的字段
+      runPlanWith(answers || {});
+    }, {
+      // 气泡一个都没选、但输入框里有字，也允许出方案
+      hasInput: chatInputText,
+    });
+  }
+
+  /** 开始"一条条问" */
+  function startAskMe() {
+    if (S.busy) { toast('正在生成，请稍等或点停止', 'err'); return; }
+    switchTab('chat');
+    askFlow = { i: 0, answers: {}, picked: [] };
+    appendMsg('assistant', `好，我一共问你 **${ASK_ITEMS.length}** 项，答完直接出方案。中途想停就点「■ 停止」或直接刷新。`);
+    askNext();
+  }
+
+  /** 问下一项；问完就出结果 */
+  function askNext() {
+    if (!askFlow) return;
+    const item = ASK_ITEMS[askFlow.i];
+    if (!item) { finishAsk(); return; }
+
+    const total = ASK_ITEMS.length;
+    const bd = appendMsg('assistant', `**${item.q}**${item.hint ? `\n\n<sub>${item.hint}</sub>` : ''}`);
+    bd.appendChild(el('div', { class: 'chat-ask-progress', html: `第 <b>${askFlow.i + 1}</b> / ${total} 项` }));
+
+    if (item.options && item.options.length) {
+      const opts = item.options.map((o) => ({ label: o, value: o }));
+      if (item.multi) {
+        // 多选：点过的加亮，另有「就这些」收尾
+        const box = chipRow(opts, (it, btn) => {
+          const k = it.value;
+          const at = askFlow.picked.indexOf(k);
+          if (at >= 0) { askFlow.picked.splice(at, 1); btn.classList.remove('on'); }
+          else { askFlow.picked.push(k); btn.classList.add('on'); }
+        });
+        bd.appendChild(box);
+        const done = el('div', { class: 'chat-suggest' });
+        const b = el('button', { class: 'sg', type: 'button', text: '就这些 ›' });
+        b.addEventListener('click', () => {
+          const v = askFlow.picked.length ? askFlow.picked.slice() : [item.def];
+          askFlow.answers[item.key] = v;
+          askFlow.i += 1;
+          askFlow.picked = [];
+          askNext();
+        });
+        done.appendChild(b);
+        bd.appendChild(done);
+      } else {
+        bd.appendChild(chipRow(opts, (it) => {
+          askFlow.answers[item.key] = it.value;
+          askFlow.i += 1;
+          askNext();
+        }));
+      }
+      // 也允许直接打字回答（自由输入和点词条等价）
+      return;
+    }
+    // 自由输入的项：等用户在输入框里发
+  }
+
+  /** 把用户在输入框里打的字，喂给正在进行的追问 */
+  function feedAsk(text) {
+    const item = ASK_ITEMS[askFlow.i];
+    if (!item) { askFlow = null; return; }
+    askFlow.answers[item.key] = text;
+    askFlow.i += 1;
+    askNext();
+  }
+
+  /** 问完了：带着答案去生成 */
+  async function finishAsk() {
+    const answers = Object.assign({}, askFlow.answers);
+    askFlow = null;
+    const city = answers.city || '杭州';
+    // days 要转成数字；interests 已经保证是数组
+    if (answers.days != null) {
+      const n = parseInt(String(answers.days).replace(/[^\d]/g, ''), 10);
+      answers.days = Number.isFinite(n) ? Math.min(30, Math.max(1, n)) : 2;
+    }
+    appendMsg('assistant', '收齐了，开始按这份画像排：');
+    const bd = appendMsg('assistant', '正在生成…');
+    try {
+      await generate('plan', collectPlanParams(answers));
+      bd.innerHTML = renderMarkdown(`已经按你的回答排好了：**${city} · ${answers.days || 2} 天**。`);
+      bd.appendChild(chipRow([{ label: '查看完整方案 ›', value: 'tools' }], () => { gotoPlanPane(); }));
+    } catch (e) {
+      bd.innerHTML = renderMarkdown(`生成失败：${e && e.message ? e.message : e}`);
+    }
+  }
+
   async function sendMessage() {
     if (S.busy) { toast('正在生成，请稍等或点停止', 'err'); return; }
     const input = $('#chat-input');
     const text = input.value.trim();
     const image = S.visionImage;
     if (!text && !image) return;
+
+    // 正在"一条条问"的时候，用户打的字就是这一项的回答 ——
+    // 不进普通对话，否则会跟追问流程抢输入框。
+    if (askFlow && text && !image) {
+      input.value = '';
+      appendMsg('user', text);
+      feedAsk(text);
+      return;
+    }
+
+    /* ★ 默认形态下，底部这条对话框就是**文旅入口**：
+       打一句话直接出方案，不走闲聊。
+       为什么不全走文旅：需求里说"对话所给与的效果就是文旅界面的功能"，
+       而文旅那套要的是结构化画像（城市/天数/…）。所以这里从这句话里
+       认出城市和天数，认不出来就退回普通对话 —— 宁可退，也别把
+       "你好呀"这种话硬塞进规划链路里，那会出一份莫名其妙的方案。 */
+    const inDefaultView = !document.body.classList.contains('debug');
+
+    // 气泡还开着的时候按发送 = 就用"输入框里说的 + 气泡里选了的"出方案。
+    // 不再看那句话里有没有认出城市/天数 —— 用户已经进了引导流程，
+    // 而且他打的字本身就优先，这时候不给方案才是意外。
+    if (text && !image && window.WenlvAsk && window.WenlvAsk.active()) {
+      input.value = '';
+      await runPlanWith(window.WenlvAsk.answers() || {}, text);
+      return;
+    }
+
+    if (inDefaultView && text && !image) {
+      const cityHit = SUGGEST_SPOTS.find((s) => text.includes(s));
+      const dayHit = /(\d+)\s*天/.exec(text);
+      if (cityHit || dayHit) {
+        const over = {};
+        if (cityHit) over.city = cityHit;
+        if (dayHit) over.days = Number(dayHit[1]);
+        input.value = '';
+        appendMsg('user', text);
+        await runPlanWith(over, text);
+        return;
+      }
+    }
 
     input.value = '';
     clearAttach();
@@ -1438,6 +1883,18 @@
         out.innerHTML = renderMarkdown(acc);
         // 只有结果卡才排这个版：右侧面板本来就只有巴掌宽，再分列会挤成一条
         if (out.id === 'result-body') layoutResultBlock(out);
+
+        /* ★ 方案也要进**对话框**，而且要和调试界面里那份**长得一样**。
+           原来结果只写进 #result-body（舞台结果卡）或 #tools-output（文旅页），
+           用户在底部对话框里问完，对话框里什么都没有 —— 看起来就像"没出方案"。
+           现在把正文追加到聊天记录里，并挂上 `output` 类：
+           那个类是文旅页方案输出区的样式（表格、标题、引用块），
+           挂上它，同一份方案在两处的排版才一致 ——
+           不加的话这里走的是聊天气泡样式，两份看着像两个东西。 */
+        try {
+          const bd = appendMsg('assistant', acc);
+          bd.classList.add('plan-body', 'output');
+        } catch { /* 忽略：聊天区不可用时不影响主流程 */ }
         renderWarnings(warn, ev.warnings || []);
         const secs = Math.round((Date.now() - t0) / 1000);
         toast((ev.warnings && ev.warnings.length)
@@ -2277,7 +2734,300 @@
       }
     });
 
+    /* ======================================================================
+     * 历史对话
+     *
+     * 原来只有 S.history —— 一段扁平的当前记录，最多 60 条，刷新后接着用。
+     * 问题是**没法回看、也没法删**：聊了几十轮之后想找回上周那份方案，
+     * 只能一直往上滚；不想留的也删不掉。
+     *
+     * 现在的模型：
+     *   S.history   = 当前这一段（没变）
+     *   S.sessions  = 归档的历史段 [{id,title,time,count,messages}]
+     * 点「＋ 新对话」把当前这段归档，开新的一段；列表里每条能打开 / 删除。
+     * 存在本机 localStorage，不上传。
+     * ====================================================================*/
+    const LS_SESSIONS = 'wenlv.sessions';
+    if (!Array.isArray(S.sessions)) {
+      try { S.sessions = JSON.parse(localStorage.getItem(LS_SESSIONS) || '[]'); } catch { S.sessions = []; }
+      if (!Array.isArray(S.sessions)) S.sessions = [];
+    }
+    const saveSessions = () => {
+      try { localStorage.setItem(LS_SESSIONS, JSON.stringify(S.sessions.slice(-50))); } catch { /* 忽略 */ }
+    };
+
+    /** 一段对话的标题：取第一条用户消息，压成一行 */
+    function sessionTitle(msgs) {
+      const first = (msgs || []).find((m) => m.role === 'user' && m.content);
+      const t = (first && first.content ? String(first.content) : '（空对话）').replace(/\s+/g, ' ').trim();
+      return t.length > 22 ? t.slice(0, 22) + '…' : t;
+    }
+
+    function renderHistoryList() {
+      const box = $('#hist-list');
+      const cnt = $('#hist-count');
+      if (cnt) cnt.textContent = String((S.sessions || []).length);
+      if (!box) return;
+      box.innerHTML = '';
+      const list = (S.sessions || []).slice().reverse();   // 新的在上面
+      if (!list.length) {
+        box.appendChild(el('div', { class: 'hist-empty', text: '还没有历史对话。聊完之后点「＋ 新对话」就会存到这里。' }));
+        return;
+      }
+      for (const s of list) {
+        const row = el('div', { class: 'hist-row' }, [
+          el('div', { class: 'hist-main', title: '点击打开这段对话' }, [
+            el('div', { class: 'hist-name', text: s.title || '（空对话）' }),
+            el('div', { class: 'hist-meta', text: `${s.time || ''} · ${s.count || 0} 条` }),
+          ]),
+          el('button', { class: 'hist-del', type: 'button', title: '删除这段对话', text: '🗑' }),
+        ]);
+        row.querySelector('.hist-main').addEventListener('click', () => openSession(s.id));
+        row.querySelector('.hist-del').addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!confirm(`删除这段历史对话？\n\n${s.title || '（空对话）'}\n\n不可恢复。`)) return;
+          const i = S.sessions.findIndex((x) => x.id === s.id);
+          if (i >= 0) S.sessions.splice(i, 1);
+          saveSessions();
+          renderHistoryList();
+          toast('已删除该段对话', 'ok');
+        });
+        box.appendChild(row);
+      }
+    }
+
+    /** 把当前这段归档（空的不存），然后清空开新的 */
+    function newSession() {
+      const msgs = (S.history || []).filter((m) => m.content);
+      if (msgs.length) {
+        S.sessions.push({
+          id: 'S' + Date.now().toString(36),
+          title: sessionTitle(msgs),
+          time: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+          count: msgs.length,
+          messages: msgs.slice(-80),
+        });
+        saveSessions();
+      }
+      S.history = [];
+      saveHistory();
+      const log = $('#chat-log');
+      if (log) log.innerHTML = '';
+      renderHistoryList();
+      toast('已开始新对话（上一段存进历史了）', 'ok');
+      say(S.card ? S.card.greeting : '你好，我是你的文旅向导。', true);
+    }
+
+    /** 打开一段历史：先把当前这段归档，再把选中的装回来 */
+    function openSession(id) {
+      const s = (S.sessions || []).find((x) => x.id === id);
+      if (!s) return;
+      const cur = (S.history || []).filter((m) => m.content);
+      if (cur.length) {
+        // 当前这段没归档过就先留住，别因为"打开历史"把它弄丢了
+        S.sessions.push({
+          id: 'S' + Date.now().toString(36),
+          title: sessionTitle(cur),
+          time: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+          count: cur.length,
+          messages: cur.slice(-80),
+        });
+        saveSessions();
+      }
+      const i = S.sessions.findIndex((x) => x.id === id);
+      if (i >= 0) S.sessions.splice(i, 1);
+      saveSessions();
+
+      S.history = (s.messages || []).slice();
+      saveHistory();
+      const log = $('#chat-log');
+      if (log) log.innerHTML = '';
+      for (const m of S.history) appendMsg(m.role, m.content, { raw: true, image: m.image });
+      renderHistoryList();
+      toast(`已打开「${s.title || '历史对话'}」`, 'ok');
+    }
+
+    {
+      const bNew = $('#hist-new');
+      if (bNew) bNew.addEventListener('click', newSession);
+      const bClear = $('#hist-clear');
+      if (bClear) bClear.addEventListener('click', () => {
+        if (!(S.sessions || []).length) { toast('还没有历史对话', 'err'); return; }
+        if (!confirm(`删除全部 ${S.sessions.length} 段历史对话？此操作不可恢复。`)) return;
+        S.sessions = [];
+        saveSessions();
+        renderHistoryList();
+        toast('历史对话已清空', 'ok');
+      });
+      renderHistoryList();
+    }
+
+    /* ======================================================================
+     * 底部对话框：放大 / 收起
+     *
+     * 默认那条只有 200~330px 高，方案一长就得一直滚。
+     * 放大态最高 62vh —— **最多盖过人物身体**，脑袋还留得出来，
+     * 不至于"为了看方案把人整个挡没"。再点一次回到原来的高度。
+     *
+     * 按钮是运行时插进 .side 的（.side 是 position:fixed，绝对定位的按钮
+     * 正好贴在它右上角），这样不用改 HTML 结构，也不影响调试界面的右侧分栏
+     * —— 那边的 .side 不参与这套规则（CSS 里带了 :not(.debug)）。
+     * ====================================================================*/
+    {
+      const side = document.querySelector('aside.side');
+      if (side && !document.querySelector('#btn-chat-expand')) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'btn-chat-expand';
+        btn.className = 'chat-expand';
+        btn.textContent = '⤢';
+        side.appendChild(btn);
+
+        const TALL_KEY = 'wenlv.chatTall';
+        const applyTall = (on) => {
+          const want = Boolean(on);
+          document.body.classList.toggle('chat-tall', want);
+          btn.textContent = want ? '⤡' : '⤢';
+          btn.title = want ? '收起输出区，回到原来的大小' : '放大输出区（最多盖过人物）';
+          try { localStorage.setItem(TALL_KEY, want ? '1' : '0'); } catch { /* 忽略 */ }
+          // 尺寸变了，舞台要重算，否则人物还按旧画布摆着
+          setTimeout(() => { const st = activeStage(); if (st && st.resize) st.resize(); }, 120);
+        };
+        let stored = null;
+        try { stored = localStorage.getItem(TALL_KEY); } catch { /* 忽略 */ }
+        applyTall(stored === '1');
+        btn.addEventListener('click', () => {
+          // 主人自己动过手了：之后自动放大就不再插手（见下面的 WenlvChatPane）
+          btn.dataset.userToggled = '1';
+          applyTall(!document.body.classList.contains('chat-tall'));
+        });
+
+        /* ------------------------------------------------------------------
+         * 给别的模块用的"自动放大一次"。
+         *
+         * 默认布局下 .chat-log 的可见高度只有 105px（.side 300px 再扣掉
+         * 页签行 + composer）。气泡引导一批近 400px、方案卡片更是一屏高 ——
+         * 不放大，主人就只能从一道缝里看内容，会以为"你根本没改"。
+         *
+         * 刻意**不写 localStorage**：这是替内容临时腾地方，不是主人的偏好，
+         * 写进去会把他自己设的 ⤢ 状态顶掉。
+         * 主人一旦手点过 ⤢（userToggled），这里就完全不再插手。
+         * ------------------------------------------------------------------ */
+        window.WenlvChatPane = {
+          tall: () => document.body.classList.contains('chat-tall'),
+          autoExpand: () => {
+            if (btn.dataset.userToggled === '1') return false;
+            if (document.body.classList.contains('chat-tall')) return false;
+            if (document.body.classList.contains('debug')) return false;  // 调试界面是右侧分栏
+            document.body.classList.add('chat-tall');
+            btn.textContent = '⤡';
+            btn.title = '收起输出区，回到原来的大小';
+            setTimeout(() => { const st = activeStage(); if (st && st.resize) st.resize(); }, 120);
+            return true;
+          },
+        };
+      }
+    }
+
+    // ---- 背景配乐 ----
+    // 选了音轨就让 <audio> 跟着背景视频播，视频这边一律静音。
+    {
+      try {
+        if (window.WenlvBgAudio) {
+          window.WenlvBgAudio.init('#audio-list').catch(() => { /* 列表拉不到不影响主流程 */ });
+        }
+      } catch { /* 忽略 */ }
+    }
+
+    // ---- 自定义导出模板 ----
+    // 用户传一个带占位符的 HTML（{{title}} / {{body}} / {{date}} …），导出时就套它。
+    // 模板只存在浏览器本地，不上传服务器。
+    {
+      const tplFile = $('#export-tpl-file');
+      const tplBtn = $('#btn-export-tpl');
+      const tplReset = $('#btn-export-tpl-reset');
+
+      const syncTplUI = () => {
+        const has = window.WenlvExport && window.WenlvExport.hasTemplate();
+        if (tplReset) tplReset.hidden = !has;
+        if (tplBtn && window.WenlvExport) {
+          const nm = window.WenlvExport.templateName();
+          tplBtn.textContent = has ? `🎨 模板：${nm}` : '🎨 导出模板';
+          tplBtn.classList.toggle('on', !!has);
+        }
+      };
+
+      if (tplBtn && tplFile) {
+        tplBtn.addEventListener('click', () => tplFile.click());
+        tplFile.addEventListener('change', async () => {
+          const f = tplFile.files && tplFile.files[0];
+          tplFile.value = '';
+          if (!f) return;
+          if (f.size > 512 * 1024) { toast('模板文件太大（上限 512KB）', 'err'); return; }
+          const text = await f.text();
+          if (!/\{\{\s*body\s*\}\}/.test(text)) {
+            // 没有 {{body}} 就套不进方案正文 —— 与其导出一份空文档，不如当场说清楚
+            toast('模板里必须包含 {{body}} 占位符（方案正文放这儿）', 'err', 5200);
+            return;
+          }
+          window.WenlvExport.setTemplate(text, f.name);
+          syncTplUI();
+          toast(`已启用自定义模板「${f.name}」，下次导出就套它`, 'ok', 4200);
+        });
+      }
+      if (tplReset && window.WenlvExport) {
+        tplReset.addEventListener('click', () => {
+          window.WenlvExport.clearTemplate();
+          syncTplUI();
+          toast('已恢复内置模板', 'ok');
+        });
+      }
+      syncTplUI();
+    }
+
     // ---- 开屏模板 ----
+    // 现在只剩「视频主页」一套，所以这里不再有切换逻辑；
+    // 那个上传入口转给上面那一节既有的 #video-upload，不重复实现上传流程。
+    {
+      const here = $('#video-upload-here');
+      if (here) here.addEventListener('click', () => {
+        const up = $('#video-upload');
+        if (up) up.click();
+      });
+
+      /* 「🎵 上传音频」：自己有一首曲子，直接放进音频库（不经视频）。
+         和"上传视频并提取音频"是两个入口、一个音频库。 */
+      const abtn = $('#audio-upload-here');
+      const afile = $('#audio-file');
+      if (abtn && afile) {
+        abtn.addEventListener('click', () => afile.click());
+        afile.addEventListener('change', async () => {
+          const f = afile.files && afile.files[0];
+          afile.value = '';
+          if (!f) return;
+          if (f.size > 60 * 1024 * 1024) { toast('音频文件太大（上限 60MB）', 'err'); return; }
+          if (window.WenlvBgAudio) window.WenlvBgAudio.onUploading && window.WenlvBgAudio.onUploading(f.name);
+          try {
+            // 用和视频上传同一套读法（FileReader → dataURL → 取逗号后面那段）
+            const dataUrl = await new Promise((res, rej) => {
+              const fr = new FileReader();
+              fr.onload = () => res(String(fr.result || ''));
+              fr.onerror = () => rej(new Error('读取文件失败'));
+              fr.readAsDataURL(f);
+            });
+            const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+            const r = await api('/api/audio', { method: 'POST', body: { audio: b64, name: f.name } });
+            toast(`已上传「${f.name}」到音频库`, 'ok', 4000);
+            if (window.WenlvBgAudio) {
+              await window.WenlvBgAudio.refresh('#audio-list');
+              if (r && r.items) window.WenlvBgAudio.onUploaded && window.WenlvBgAudio.onUploaded({ has_audio: true, extracted: true, track: f.name });
+            }
+          } catch (e) {
+            toast(`上传失败：${e && e.message ? e.message : e}`, 'err', 5000);
+          }
+        });
+      }
+    }
     const syncSeg = () => {
       const cur = bootScreen ? bootScreen.template : 'video';
       $$('#boot-tpl-seg .seg-item').forEach(b => b.classList.toggle('on', b.dataset.bootTpl === cur));
@@ -2450,6 +3200,152 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && document.body.classList.contains('kiosk')) setKiosk(false);
     });
+
+    /* ======================================================================
+     * 右上角工具排：收纳成一个按钮
+     *
+     * 默认是**收起来**的（用户要的就是"那一排收起来，点一下才全部展示"）。
+     * 展开状态下点到别处会自动收回去 —— 不然那一排会一直摊着挡住角色。
+     * ====================================================================*/
+    const TOOLS_KEY = 'wenlv.toolsCollapsed';
+    {
+      const apply = (on) => {
+        document.body.classList.toggle('tools-collapsed', on);
+        const b = $('#btn-tools-toggle');
+        if (b) b.setAttribute('aria-expanded', on ? 'false' : 'true');
+        try { localStorage.setItem(TOOLS_KEY, on ? '1' : '0'); } catch { /* 隐私模式忽略 */ }
+      };
+      let stored = null;
+      try { stored = localStorage.getItem(TOOLS_KEY); } catch { /* 忽略 */ }
+      apply(stored === null ? true : stored === '1');      // 没存过 → 默认收起
+
+      const b = $('#btn-tools-toggle');
+      if (b) b.addEventListener('click', () => {
+        apply(!document.body.classList.contains('tools-collapsed'));
+      });
+      // 点空白处收起（只处理展开态，收起态什么都不做）
+      document.addEventListener('click', (e) => {
+        if (document.body.classList.contains('tools-collapsed')) return;
+        const t = e.target;
+        if (t && t.closest && !t.closest('.stage-tools')) apply(true);
+      });
+    }
+
+    /* ======================================================================
+     * 虚拟形象 显示 / 隐藏（默认**显示**）
+     *
+     * 用 body 上的类切 opacity，不改 canvas 的 display：
+     * Live2D 走 PIXI/WebGL，display:none 之后重新显示时它拿到的还是上一次的尺寸，
+     * 可能整块画不出来。
+     * ====================================================================*/
+    const AVATAR_KEY = 'wenlv.avatarHidden';
+    {
+      const apply = (on) => {
+        document.body.classList.toggle('avatar-hidden', on);
+        const b = $('#btn-avatar-hide');
+        if (b) {
+          b.classList.toggle('on', !on);
+          const ico = b.querySelector('.ico');
+          if (ico) ico.textContent = on ? '🙈' : '👁️';
+        }
+        try { localStorage.setItem(AVATAR_KEY, on ? '1' : '0'); } catch { /* 忽略 */ }
+      };
+      let stored = null;
+      try { stored = localStorage.getItem(AVATAR_KEY); } catch { /* 忽略 */ }
+      apply(stored === '1');                                // 没存过 → 显示
+
+      const b = $('#btn-avatar-hide');
+      if (b) b.addEventListener('click', () => {
+        const nowHidden = !document.body.classList.contains('avatar-hidden');
+        apply(nowHidden);
+        toast(nowHidden ? '已隐藏虚拟形象（再点一次显示）' : '已显示虚拟形象', 'ok', 2500);
+      });
+    }
+
+    /* ======================================================================
+     * 「🐞 调试」= 切回**一开始那一版**的界面
+     *
+     * 语义：默认形态是"人物居中 + 底部悬浮对话框"；
+     * 点调试 → 回到最初的左右分栏（右侧一列：对话/文旅/外观/记忆/角色卡/声音），
+     * 在那里才能看到文旅工作台的完整展示栏（"查看完整方案 ›"就是跳过去）。
+     *
+     * 实现上用的是 **debug 这个类**，不是 dock ——
+     * 之前那套 `body.dock ...` 的覆盖规则会把侧栏强制做成底部条，
+     * 结果点调试进不去原始界面。改用新类名之后，那些规则不再匹配，
+     * 样式自然回落到最初定义的左右分栏。
+     * ====================================================================*/
+    const DOCK_KEY = 'wenlv.dock';
+    {
+      const apply = (on, opts) => {
+        const want = Boolean(on);
+        /* ★ 进调试界面之前，先退出「词云全屏」。
+           两条规则会打架：`body.wc-full.debug .side { visibility: hidden }`
+           本意是"词云全屏时藏掉右侧操作面板"，可一旦用户是**在词云全屏下**
+           点的「🐞 调试」，debug 类和 wc-full 类同时存在，右侧分栏就被这条
+           藏掉了 —— 表现就是"点了调试，原来的界面并不跳出来"。
+           点调试的意图很明确：我要看操作界面。所以先退出全屏词云。 */
+        if (want && document.body.classList.contains('wc-full')) {
+          const wf = $('#wc-full');
+          if (wf) { try { wf.click(); } catch { /* 忽略 */ } }
+        }
+        document.body.classList.toggle('debug', want);
+        const b = $('#btn-dock');
+        if (b) {
+          // 只切高亮，**不改文字** —— 这个按钮叫「调试」，名称固定。
+          b.classList.toggle('on', want);
+        }
+        try { localStorage.setItem(DOCK_KEY, want ? '1' : '0'); } catch { /* 忽略 */ }
+        // 布局变了要通知舞台重算尺寸，否则角色还按旧画布尺寸摆着
+        setTimeout(() => { const st = activeStage(); if (st && st.resize) st.resize(); }, 120);
+        if (!(opts && opts.silent)) {
+          toast(want ? '已切到调试界面（右侧分栏）' : '已回到主界面', 'ok', 3000);
+        }
+      };
+      let stored = null;
+      try { stored = localStorage.getItem(DOCK_KEY); } catch { /* 忽略 */ }
+      // 默认关闭：常态是"人物居中 + 底部悬浮对话框"
+      apply(stored === '1', { silent: true });
+
+      // 暴露给"查看完整方案 ›"用：跳转前先把调试界面打开，
+      // 否则文旅展示栏在一个隐藏的面板里，点了等于没反应。
+      S._debugApply = apply;
+
+      const b = $('#btn-dock');
+      if (b) b.addEventListener('click', () => {
+        apply(!document.body.classList.contains('debug'));
+      });
+    }
+
+    /* ======================================================================
+     * 「💬 对话栏」：显示 / 关闭底部那条对话框
+     *
+     * 大屏时想只留人物与背景，就把它关掉。
+     * 关键：**关掉之后随时能再打开** —— 不管是从调试界面切回来，
+     * 还是从主界面切回来，它都必须重新出现（之前切出去就回不来了）。
+     * 所以状态只存在 no-chatbar 这个类上，切布局不会把它弄丢。
+     * ====================================================================*/
+    const CHATBAR_KEY = 'wenlv.chatbar';
+    {
+      const applyBar = (on) => {
+        const want = Boolean(on);
+        // 只在非调试布局下才谈得上"底部对话栏"；调试用的是右侧分栏，
+        // CSS 里那条规则带了 :not(.debug)，不会连坐藏掉右侧栏
+        document.body.classList.toggle('no-chatbar', !want);
+        const b = $('#btn-chatbar');
+        if (b) b.classList.toggle('on', want);
+        try { localStorage.setItem(CHATBAR_KEY, want ? '1' : '0'); } catch { /* 忽略 */ }
+        setTimeout(() => { const st = activeStage(); if (st && st.resize) st.resize(); }, 120);
+      };
+      let barStored = null;
+      try { barStored = localStorage.getItem(CHATBAR_KEY); } catch { /* 忽略 */ }
+      applyBar(barStored !== '0');            // 默认显示
+      S._chatbarApply = applyBar;
+
+      const cb = $('#btn-chatbar');
+      if (cb) cb.addEventListener('click', () => {
+        applyBar(document.body.classList.contains('no-chatbar'));
+      });
+    }
   }
 
   /**
@@ -4166,15 +5062,26 @@
       $('#wc-enabled').checked = S.settings.wcEnabled;
       if (S.settings.wcEnabled) cloud.layout();
     });
-    $('#pill-model').addEventListener('click', () => switchTab('look'));
-    $('#pill-memory').addEventListener('click', () => switchTab('memory'));
-    $('#pill-voice').addEventListener('click', () => switchTab('voice'));
-    $('#pill-vision').addEventListener('click', () => { switchTab('chat'); $('#file-input').click(); });
+    /* 顶栏那排状态药丸（模型 / 记忆 / 语音 / 视觉）**只做状态显示，不可点击**。
+       原来它们绑了页签跳转（switchTab('look'/'memory'/'voice')），
+       用户点一下就被切走 —— 在底部对话框形态下，看起来就是"聊天突然消失了"，
+       而且很容易误触（那排就在右上角、紧挨着工具排）。
+       要进那些设置页面，走 ⚙️ 设置 → 🐞 调试 → 右侧页签，路径明确得多。 */
+    ['#pill-model', '#pill-memory', '#pill-voice', '#pill-vision'].forEach((sel) => {
+      const el = $(sel);
+      if (!el) return;
+      el.disabled = true;                    // 真按钮禁用：不触发点击，但 title 提示还在
+      el.style.cursor = 'default';
+      el.removeAttribute('role');
+    });
 
     // 舞台工具条
     $('#open-bg').addEventListener('click', openBackgroundPicker);
     $('#open-model').addEventListener('click', openModelPicker);
-    $('#wc-full').addEventListener('click', () => {
+    // 「⤢ 词云全屏」按钮已移除（用户说没用）。这里必须加 null 守卫 ——
+    // 直接 $('#wc-full').addEventListener 会 TypeError，把后面所有绑定一起搞挂。
+    const wcFullBtn = $('#wc-full');
+    if (wcFullBtn) wcFullBtn.addEventListener('click', () => {
       document.body.classList.toggle('wc-full');
       // 退出全屏时顺手收起结果卡：右栏这会儿又露出来了，结果看那边那份就行
       if (!document.body.classList.contains('wc-full')) closeStageResult();
@@ -4238,6 +5145,13 @@
       input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
     });
     $('#btn-send').addEventListener('click', sendMessage);
+
+    // 「让 AI 先问我」保持**分批气泡**（和进不进来看无关）：
+    // 这个按钮的字面意思就是"让 AI 来问我"，出表单是另一回事。
+    // 工作台本体是**进入时默认就挂在输出区**里的（见 startWorkbenchInChat）——
+    // 两者并存：想要一张能直接填的表单就看输出区，想要被一条条问就点这里。
+    const askBtn = $('#btn-ask-me');
+    if (askBtn) askBtn.addEventListener('click', () => startBubbleGuide());
     $('#btn-web').addEventListener('click', async () => {
       const next = !S.webEnabled;
       try {

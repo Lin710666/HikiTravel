@@ -49,3 +49,33 @@ export function subscribeGenerate(fn: () => void): () => void {
     genListeners.delete(fn)
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * 生成出来的方案，回传给外壳
+ *
+ * 用途：需求是"把对话框的输出内容换成文旅工作台的样式"。与其在外壳里
+ * 复刻一套看起来像的样式，不如把工作台产出的那份 plan 原样交给外壳，
+ * 让外壳用**同一个 PlanView 组件**渲染 —— 两处天然一致，
+ * 换景点／换餐厅／导航·点评·美团这些交互也一并带上。
+ * ------------------------------------------------------------------------- */
+type PlanListener = (plan: unknown) => void
+
+const planListeners = new Set<PlanListener>()
+
+/** 工作台用：拿到新方案时广播出去 */
+export function emitPlan(plan: unknown): void {
+  if (!plan) return
+  for (const fn of planListeners) fn(plan)
+}
+
+/**
+ * 外壳用：订阅方案。
+ * @returns 取消订阅的函数 —— 外壳渲染完一条就该取消，
+ *          否则后面每生成一次都会往同一条气泡里再塞一遍。
+ */
+export function subscribePlan(fn: PlanListener): () => void {
+  planListeners.add(fn)
+  return () => {
+    planListeners.delete(fn)
+  }
+}

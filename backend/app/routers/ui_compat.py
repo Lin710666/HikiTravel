@@ -33,6 +33,7 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
+from urllib.parse import quote, unquote
 
 from fastapi import APIRouter, Request
 
@@ -46,6 +47,39 @@ router = APIRouter(prefix="/api")
 # 与原生 api 路由共用同一个编排器（省一次知识索引构建）
 orchestrator = get_orchestrator()
 llm = LLMClient()
+
+
+def _llm_route_status() -> Dict[str, Any]:
+    """把模型路由的真实状态翻译成前端认的结构。
+
+    前端读的是 localFirst.{policy,chat,vision,embed,canFallbackToLocal}：
+      · policy  —— 给人看的一句话（走云端 / 走本地 / 都没配）
+      · chat/vision/embed —— 各条链路的实际通道
+      · canFallbackToLocal —— auto 模式下云端失败能不能落到本地
+    """
+    try:
+        st = llm.status()
+    except Exception:  # noqa: BLE001 —— 状态接口不能因为探测失败而 500
+        return {"policy": "状态探测失败", "chat": "unknown", "vision": "unknown",
+                "embed": "local", "canFallbackToLocal": True}
+    pol, act = st["policy"], st["active"]
+    if pol == "local":
+        text = "只用本地 Ollama（数据不出机器）"
+    elif pol == "cloud":
+        text = "只用云端服务" if act == "cloud" else "只用云端，但还没配好（缺地址/key/模型名）"
+    elif act == "cloud":
+        text = "云端优先：网络不好或超时会自动落到本地"
+    elif act == "local":
+        text = "云端优先（未配外部服务）→ 当前走本地 Ollama"
+    else:
+        text = "云端和本地都不可用：请配 CLOUD_* 或启动 Ollama"
+    return {
+        "policy": text,
+        "chat": act, "vision": act, "embed": "local",
+        "canFallbackToLocal": pol != "cloud",
+        "cloudConfigured": st["cloud"]["configured"],
+        "localReady": st["local"]["configured"],
+    }
 
 # ---------------------------------------------------------------------------
 # 静态数据：从 5.0 导出的 UI 清单 + 2.2 引擎导出的提示词
@@ -164,11 +198,10 @@ def status() -> Dict[str, Any]:
             "embedModel": embed_model,
             "ready": bool(models),
             "localReady": bool(models),
-            "localFirst": {
-                "policy": "本地优先：本融合版只走本地 Ollama，未接入外部模型服务",
-                "chat": "local", "vision": "local", "embed": "local",
-                "canFallbackToLocal": True,
-            },
+            # 真实的路由状态：走云端还是本地、有没有配外部服务、能不能回落。
+            # 原来这里写死一句"只走本地、未接入外部模型服务" —— 那是接入云端之前的事，
+            # 现在客户端的 LLMClient.status() 才是真的。
+            "localFirst": _llm_route_status(),
         },
         "tts": {"running": False, "url": "", "models": [], "code": "NO_TTS",
                 "error": "融合版暂时没接语音合成；规划与文案生成不受影响。"},
@@ -194,6 +227,31 @@ def status() -> Dict[str, Any]:
         "blender": {"enabled": False},
         "dataDir": str(DATA_DIR),
     }
+
+
+@router.post("/parse-preference")
+def parse_preference(body: Dict[str, Any]) -> Dict[str, Any]:
+    """只解析**文字里真的说到的**字段，返回一个「部分画像」。
+
+    给「输入框优先」那条路用：用户在对话框里打的字，要盖过气泡里点过的选项，
+    但**只能盖过他真说到的那些字段** —— 否则输入框里随便一句话就会把气泡选的
+    城市/天数一起冲掉。
+
+    所以这里不能返回完整 UserPreference（那样没提到的字段会带上默认值，
+    调用方分不清"用户说了"还是"默认值"）。规则见 intent_skill.parse_partial。
+
+    返回的键名与 UserPreference 一致，调用方按需映射成工作台表单的字段。
+    """
+    text = str((body or {}).get("text") or "").strip()
+    if not text:
+        return {"ok": True, "fields": {}}
+    try:
+        from ..skills.intent_skill import IntentSkill
+
+        fields = IntentSkill(llm=llm).parse_partial(text)
+    except Exception as exc:  # noqa: BLE001 - 解析失败不该阻断生成
+        return {"ok": False, "fields": {}, "error": str(exc)}
+    return {"ok": True, "fields": fields}
 
 
 @router.get("/capabilities")
@@ -397,9 +455,279 @@ def prefs() -> Dict[str, Any]:
             "tools": [], "configPath": ""}
 
 
+# ---------------------------------------------------------------------------
+# 视频背景：data/videos/
+#
+# 为什么这里必须自己实现：HikiTravel 的后端**没有视频背景这个概念**，
+# 融合时这块只留了一个空壳接口（永远返回空列表）。而 5.0 的前端有一整套
+# 视频面板（列片 / 缩略图 / 设为主界面或开屏背景 / 上传 / 删除），
+# 它每次问「有哪些片子」都被告知"一个都没有" ——
+# **表现就是"每次重新启动视频都不见了"**：文件明明还在磁盘上。
+#
+# 目录取**项目根**下的 data/videos/，不是 backend/data/：
+# 用户的片子是从 5.0 带过来的，本来就在那儿；指到 backend/data 会找不到。
+# ---------------------------------------------------------------------------
+VIDEO_DIR = Path(__file__).resolve().parents[3] / "data" / "videos"
+#: 抽取出来的音轨。和视频并列放，前者是"画面"，后者是"配乐"。
+AUDIO_DIR = Path(__file__).resolve().parents[3] / "data" / "audio"
+VIDEO_MAX_MB = 300
+_VIDEO_EXT = {".mp4", ".webm", ".mov", ".m4v", ".ogv"}
+_VIDEO_MIME = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+    ".mov": "video/quicktime", ".ogv": "video/ogg",
+}
+
+
+def _video_items() -> List[Dict[str, Any]]:
+    """扫一遍 data/videos/。名字带「西湖」的自动成为推荐片（赛题就是西湖宣传）。"""
+    if not VIDEO_DIR.is_dir():
+        return []
+    out: List[Dict[str, Any]] = []
+    for p in sorted(VIDEO_DIR.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in _VIDEO_EXT:
+            continue
+        out.append({
+            "id": p.name,
+            "name": p.name,
+            # 用文件名当 id，url 走本文件的取片接口
+            "url": "/api/videos/" + quote(p.name),
+            "bytes": p.stat().st_size,
+            "recommended": "西湖" in p.name,
+        })
+    out.sort(key=lambda v: (not v["recommended"], v["name"]))
+    return out
+
+
+def _video_path(vid: str) -> Optional[Path]:
+    """把 id 变成一个真实存在的文件路径。只取 basename，杜绝 ../ 穿越。"""
+    name = Path(unquote(str(vid or ""))).name
+    if not name or Path(name).suffix.lower() not in _VIDEO_EXT:
+        return None
+    p = VIDEO_DIR / name
+    return p if p.is_file() else None
+
+
 @router.get("/videos")
 def videos() -> Dict[str, Any]:
-    return {"ok": True, "items": [], "dir": "", "maxMB": 300}
+    items = _video_items()
+    rec = next((v for v in items if v["recommended"]), (items[0] if items else None))
+    return {
+        "ok": True,
+        "items": items,
+        "dir": str(VIDEO_DIR),
+        "maxMB": VIDEO_MAX_MB,
+        # 前端读的是 status.recommended / status.count / status.dir
+        "status": {
+            "recommended": rec,
+            "dir": str(VIDEO_DIR),
+            "count": len(items),
+            "maxMB": VIDEO_MAX_MB,
+        },
+    }
+
+
+@router.post("/videos")
+async def video_upload(request: Request) -> Dict[str, Any]:
+    from fastapi import HTTPException
+
+    body = await request.json()
+    raw = str(body.get("video") or "")
+    # 允许带 data: 前缀
+    if "," in raw[:80] and raw.lstrip().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    name = Path(str(body.get("name") or "video.mp4")).name
+    if Path(name).suffix.lower() not in _VIDEO_EXT:
+        raise HTTPException(status_code=400, detail="只支持 mp4 / webm / mov / m4v / ogv")
+
+    import base64
+    import binascii
+
+    try:
+        data = base64.b64decode(re.sub(r"\s+", "", raw), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="上传内容不是合法的 base64")
+    if not data:
+        raise HTTPException(status_code=400, detail="上传内容为空")
+    if len(data) > VIDEO_MAX_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"视频过大（上限 {VIDEO_MAX_MB}MB）")
+
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    target = VIDEO_DIR / name
+    target.write_bytes(data)
+
+    # 上传时顺手探一次音轨：有声音就抽出来放进音频库。
+    # 默认仍然是**用视频自带的原声**，抽出来只是让用户能单独换配乐/试听。
+    from ..services.audio_extract import extract_audio, probe_audio
+    info = probe_audio(target)
+    audio: Dict[str, Any] = {"has_audio": info.get("has_audio", False),
+                             "reason": info.get("reason", "")}
+    if audio["has_audio"]:
+        got = extract_audio(target, AUDIO_DIR)
+        audio["extracted"] = bool(got["ok"])
+        audio["track"] = got["name"] if got["ok"] else ""
+        if not got["ok"]:
+            audio["reason"] = got.get("error", "")
+
+    items = _video_items()
+    return {"ok": True, "name": name, "bytes": len(data), "audio": audio,
+            "item": next((v for v in items if v["id"] == name), None)}
+
+
+@router.delete("/videos/{vid}")
+def video_delete(vid: str) -> Dict[str, Any]:
+    p = _video_path(vid)
+    if p is None:
+        return {"ok": False, "error": "视频不存在"}
+    try:
+        p.unlink()
+    except OSError as e:
+        return {"ok": False, "error": f"删除失败：{e}"}
+    return {"ok": True}
+
+
+@router.get("/videos/{vid}")
+def video_file(vid: str, request: Request) -> Any:
+    """取片。
+
+    必须支持 **Range**：前端给缩略图设了 `#t=1.2` 并 `currentTime = 1.2` 去取首帧，
+    播放器要用 Range 请求才能定位；不支持的话缩略图会一直黑着、拖动进度条也会失效。
+    """
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse, Response
+
+    p = _video_path(vid)
+    if p is None:
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    mime = _VIDEO_MIME.get(p.suffix.lower(), "application/octet-stream")
+    size = p.stat().st_size
+    rng = request.headers.get("range") or ""
+    m = re.match(r"bytes=(\d*)-(\d*)$", rng.strip())
+
+    if m:
+        start = int(m.group(1)) if m.group(1) else 0
+        end = int(m.group(2)) if m.group(2) else size - 1
+        start = max(0, min(start, size - 1))
+        end = max(start, min(end, size - 1))
+        length = end - start + 1
+        with p.open("rb") as f:
+            f.seek(start)
+            chunk = f.read(length)
+        return Response(
+            content=chunk, status_code=206, media_type=mime,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    return FileResponse(str(p), media_type=mime, headers={"Accept-Ranges": "bytes"})
+
+
+# ---------------------------------------------------------------------------
+# 音频库：data/audio/
+#
+# 上传视频时自动抽取（见 video_upload），也可以被用户单独指定给别的片子。
+# 默认行为不变：**视频用自己的原声**；这里的音轨是"可选的替换项"。
+# ---------------------------------------------------------------------------
+@router.get("/audio")
+def audio_list() -> Dict[str, Any]:
+    from ..services.audio_extract import list_audio
+    return {"ok": True, "items": list_audio(AUDIO_DIR), "dir": str(AUDIO_DIR)}
+
+
+@router.get("/hot")
+def hot() -> Dict[str, Any]:
+    """热点来源。气泡里"去哪儿"的那批选项由它驱动。
+
+    A/B/C/D 四条通道可切换（HOT_SOURCE），auto 按 A→C→B→D 回退。
+    返回值里的 `source` / `estimated` 要**原样透给前端** ——
+    "真热搜"和"按 POI 估算的"必须能分辨，不能假装。
+    """
+    from ..services.hot_topics import hot_topics
+    try:
+        return hot_topics()
+    except Exception as e:  # noqa: BLE001 —— 热点挂了不能影响别的接口
+        log.warning("热点接口异常：%s", e)
+        return {"ok": False, "source": "", "estimated": False,
+                "label": "热点不可用", "items": []}
+
+
+@router.post("/audio")
+async def audio_upload(request: Request) -> Dict[str, Any]:
+    """直接上传一个音频文件（不经过视频）。
+
+    和"上传视频时自动抽音轨"是两条路：
+      · 视频那条约等于"用我片子的原声"
+      · 这条是"我自己有一首，直接放进来"
+    两条最终都落到同一个音频库，前端在配乐列表里同样能选。
+    """
+    import base64
+    import binascii
+
+    from fastapi import HTTPException
+
+    from ..services.audio_extract import AUDIO_EXTS, list_audio
+
+    body = await request.json()
+    raw = str(body.get("audio") or "")
+    if "," in raw[:80] and raw.lstrip().startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    name = Path(str(body.get("name") or "audio.m4a")).name
+    if Path(name).suffix.lower() not in AUDIO_EXTS:
+        raise HTTPException(status_code=400,
+                            detail="只支持 m4a / mp3 / wav / ogg / opus / aac / flac")
+    try:
+        data = base64.b64decode(re.sub(r"\s+", "", raw), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="上传内容不是合法的 base64")
+    if not data:
+        raise HTTPException(status_code=400, detail="上传内容为空")
+    if len(data) > 60 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="音频过大（上限 60MB）")
+
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    (AUDIO_DIR / name).write_bytes(data)
+    return {"ok": True, "name": name, "bytes": len(data), "items": list_audio(AUDIO_DIR)}
+
+
+@router.get("/audio/{name}")
+def audio_file(name: str, request: Request) -> Any:
+    """取音轨。和视频一样要支持 Range —— 试听时拖进度条要用。"""
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse, Response
+
+    from ..services.audio_extract import AUDIO_EXTS
+
+    safe = Path(unquote(str(name or ""))).name
+    if not safe or Path(safe).suffix.lower() not in AUDIO_EXTS:
+        raise HTTPException(status_code=404, detail="音轨不存在")
+    p = AUDIO_DIR / safe
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="音轨不存在")
+
+    mime = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+            ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac",
+            ".aac": "audio/aac"}.get(p.suffix.lower(), "application/octet-stream")
+    size = p.stat().st_size
+    rng = request.headers.get("range") or ""
+    m = re.match(r"bytes=(\d*)-(\d*)$", rng.strip())
+    if m:
+        start = int(m.group(1)) if m.group(1) else 0
+        end = int(m.group(2)) if m.group(2) else size - 1
+        start = max(0, min(start, size - 1))
+        end = max(start, min(end, size - 1))
+        with p.open("rb") as f:
+            f.seek(start)
+            chunk = f.read(end - start + 1)
+        return Response(content=chunk, status_code=206, media_type=mime,
+                        headers={"Content-Range": f"bytes {start}-{end}/{size}",
+                                 "Accept-Ranges": "bytes",
+                                 "Content-Length": str(len(chunk)),
+                                 "Cache-Control": "no-store"})
+    return FileResponse(str(p), media_type=mime, headers={"Accept-Ranges": "bytes"})
 
 
 # ---------------------------------------------------------------------------
@@ -736,14 +1064,10 @@ def memory_delete(mem_id: str) -> Any:
     _unavailable("删除单条记忆", "融合版还没有接记忆库，所以没有可删的条目。")
 
 
-@router.delete("/videos/{vid}")
-def video_delete(vid: str) -> Any:
-    _unavailable("视频背景")
-
-
-@router.get("/videos/{vid}")
-def video_get(vid: str) -> Any:
-    _unavailable("视频背景")
+# 注意：原来这里还有一对 /videos/{vid} 的空壳路由（GET / DELETE），
+# 已经删掉了 —— 真正的实现在本文件上半部分（列片 / 取片 / 上传 / 删除）。
+# 留着会形成重复路由，FastAPI 只认先注册的那条，后面那条永远不生效，
+# 排查时极容易被误导成"接口没实现"。
 
 
 @router.delete("/voices/{voice_id}")

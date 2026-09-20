@@ -36,10 +36,52 @@
 
   const LS_KEY = 'wenlv-airi/boot';
 
+  /**
+   * 开屏模板清单。
+   *
+   * 目前**只保留「视频主页」一套** —— 形象主页已按要求砍掉。
+   * 相关代码文件都还在（js/boot-puppet.js、boot-art.js、boot-hanfu.js），
+   * 想把形象主页加回来，只要把下面注释掉的那一行放出来：
+   *
+   *   { id: 'character', name: '形象主页', hint: '…' },
+   *
+   * 加回来之后：
+   *   · 模板切换器会自动出现（只有一套时它是隐藏的，见 build()）
+   *   · 存量用户 localStorage 里如果存着 'character'，loadState() 会校验并回落到 video，
+   *     所以不会出现"界面上没有这一套、却停在这一套"的情况
+   */
   const TEMPLATES = [
     { id: 'video', name: '视频主页', hint: '整屏播西湖宣传片，三个功能入口' },
-    { id: 'character', name: '形象主页', hint: '以展示虚拟形象为主，点功能看动作' },
+    // { id: 'character', name: '形象主页', hint: '立绘站在暗场里，鼠标划过菜单就换动作' },
   ];
+
+  /**
+   * 模板 B 专用的汉服模型（减面版）地址。
+   *
+   * 为什么是"减面版"：原始工程导出的 glb 有 64MB（50 万顶点）。
+   * 开屏是**页面一打开就盖上**的东西，让首屏等 64MB 下载完是不可接受的。
+   * 这一版减到 12% 的面（6 万顶点）→ 16MB，权重的形状看不出差别，
+   * 而 10 段动作一个不少（动作存在 NLA 轨道上，与顶点数无关）。
+   * 生成脚本见 out/blender-hanfu/rig/make-web-glb.py。
+   */
+  /**
+   * 形象主页用哪种形象。
+   *
+   *   'puppet' —— 2D 立绘 + **网格形变木偶**（默认）。整张立绘贴到细分网格上，
+   *               在顶点着色器里按部位做权重形变 —— 头会跟着鼠标转、会呼吸、
+   *               悬停菜单会作揖/侧身。参数名沿用 Cubism 标准命名，见 js/boot-puppet.js。
+   *   'art'    —— 2D 立绘 + 分层视差（不动骨骼，只有呼吸/摇曳/光扫）。
+   *   '3d'     —— 汉服 glb 三维场景（js/boot-hanfu.js）。
+   *
+   * 三套控制器对外接口一致（react / greet / setVisible / resize / dispose），
+   * 所以这里改一个词就够了。
+   */
+  const CHARACTER_STYLE = 'puppet'
+
+  /** 形象主页的 2D 立绘（已经抠好透明底，见 out/blender-hanfu/rig/cutout-avatar.mjs） */
+  const ART_URL = '/avatars/hanfu-girl.png'
+
+  const HANFU_URL = '/models3d/hanfu/hanfu.glb';
 
   /** 页签 id → 中文名。用在入口按钮上标出"点了会去哪" */
   const PANE_LABEL = {
@@ -192,8 +234,18 @@
     let bgEl = null;
     let muteBtn = null;
     let canvasEl = null;
+    let loadingEl = null;    // 载入遮罩（宣传片还没能播时盖住那几秒）
+    let loadingTimer = 0;    // 兜底：卡住也要把遮罩撤掉，不能永远挡着
     let stageInUse = false;  // 模板 B 期间形象正在被开屏驱动
     let hoverTimer = null;
+    /* ---------------- 模板 B 专属的汉服三维场景 ----------------
+     * 见 js/boot-hanfu.js。这是一块**独立于主舞台**的画布：
+     * 开屏固定展示汉服模型 + 它自带的那 10 段动作，
+     * 和"主界面当前选了哪个形象"无关（换 Live2D 也不会影响开屏）。
+     */
+    let hanfu = null;          // 场景控制器
+    let hanfuLoading = null;   // 加载中的 Promise（防止并发重复加载）
+    let hanfuFailed = false;   // 加载失败 → 退回"露出主舞台形象"的老行为
 
     /* ---------------- DOM ---------------- */
 
@@ -211,12 +263,22 @@
           <video class="boot-video" playsinline loop preload="auto"></video>
           <canvas class="boot-canvas"></canvas>
           <div class="boot-scrim"></div>
+
+          <!-- 载入遮罩：宣传片是本机文件，取片、解码、等 canplay 加起来有几秒。
+               这几秒里如果直接露底，用户看到的是"先闪一下程序化西湖、再切成视频"，
+               像卡了一下。所以拿一层带进度条的载入动画把这段时间盖住，
+               视频真的能播了再淡出。 -->
+          <div class="boot-loading" id="boot-loading" hidden>
+            <div class="bl-mark" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
+            <div class="bl-title" id="boot-loading-title">正在载入宣传片…</div>
+            <div class="bl-bar" aria-hidden="true"><i></i></div>
+          </div>
         </div>
         <div class="boot-body">
           <div class="boot-head">
-            <div class="boot-mark">西湖文旅 · AI 导览</div>
-            <h1 class="boot-title">杭州西湖</h1>
-            <p class="boot-sub">世界文化遗产 · 一湖两塔三岛三堤</p>
+            <div class="boot-mark">HikiTravel · 文旅智能辅助</div>
+            <h1 class="boot-title">智能文旅辅助系统</h1>
+            <p class="boot-sub">本机大模型驱动 · 一句话生成可执行行程</p>
           </div>
           <nav class="boot-menu" id="boot-menu"></nav>
           <div class="boot-foot">
@@ -259,6 +321,7 @@
         });
       }
       canvasEl = root.querySelector('.boot-canvas');
+      loadingEl = root.querySelector('#boot-loading');
 
       // "不再自动播放"勾选：让觉得开屏烦的用户自己关掉，而不是我替所有人做决定
       const autoCb = root.querySelector('#boot-auto');
@@ -267,18 +330,25 @@
         autoCb.addEventListener('change', () => setAutoShow(autoCb.checked));
       }
 
-      // 模板切换按钮
+      // 模板切换按钮。
+      // 只剩一套模板时把整个切换器收起来 —— 留一个"只有一项的下拉/按钮组"
+      // 既占地方又让人以为还有别的可选。
       const sw = root.querySelector('#boot-switch');
-      TEMPLATES.forEach(t => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'boot-switch-btn';
-        b.textContent = t.name;
-        b.title = t.hint;
-        b.dataset.tpl = t.id;
-        b.addEventListener('click', () => setTemplate(t.id, { animate: true }));
-        sw.appendChild(b);
-      });
+      const swWrap = root.querySelector('.boot-switch');
+      if (TEMPLATES.length < 2) {
+        if (swWrap) swWrap.hidden = true;
+      } else {
+        TEMPLATES.forEach(t => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'boot-switch-btn';
+          b.textContent = t.name;
+          b.title = t.hint;
+          b.dataset.tpl = t.id;
+          b.addEventListener('click', () => setTemplate(t.id, { animate: true }));
+          sw.appendChild(b);
+        });
+      }
 
       // 入口
       const menu = root.querySelector('#boot-menu');
@@ -295,6 +365,12 @@
           + `<span class="boot-entry-go">${(PANE_LABEL[(e.target || {}).pane] || '')} ›</span>`;
         // 悬停/聚焦 → 让形象做对应动作。用户还没进主界面就先看到"形象是活的"。
         const react = () => {
+          // 模板 B 优先走汉服场景 —— 它才是开屏上**实际显示**的那个形象。
+          // 不先问它而去驱动主舞台的话，用户看到的是"划过菜单，画面里的人没反应"
+          // （因为主舞台上那个形象根本没显示出来）。
+          if (state.template === 'character' && hanfu) {
+            if (hanfu.react(e.id)) { hint(`${e.title} · 形象正在响应`); return; }
+          }
           const st = getStage && getStage();
           if (!st) { hint(`${e.title} · 当前还没有加载形象`); return; }
           hint(`${e.title} · 形象正在响应`);
@@ -319,6 +395,92 @@
       if (h) h.textContent = text || '';
     }
 
+    /* ---------------- 载入遮罩 ----------------
+     * 宣传片是本机文件，但从"决定要播"到"真的能播"中间隔着：
+     * 取片 → 解码 → canplay。实测有几秒。这几秒如果直接露底，
+     * 用户看到的是"先闪一下程序化西湖、再硬切成视频"，像卡了一下。
+     * 用一层带进度条的动画盖住，视频能播了再淡出。
+     */
+
+    function showLoading(text) {
+      if (!loadingEl) return;
+      clearTimeout(loadingTimer);
+      loadingEl.hidden = false;
+      loadingEl.classList.remove('bl-out');
+      const t = loadingEl.querySelector('#boot-loading-title');
+      if (t && text) t.textContent = text;
+      setLoadingProgress(0);
+      // 兜底：真卡住了（文件损坏、浏览器不给播）也要撤遮罩，
+      // 底下还有程序化西湖兜着，不能让用户对着动画干等。
+      loadingTimer = setTimeout(hideLoading, 12000);
+    }
+
+    function setLoadingProgress(p) {
+      if (!loadingEl) return;
+      const bar = loadingEl.querySelector('.bl-bar i');
+      if (bar) bar.style.width = `${Math.round(Math.max(0, Math.min(1, p)) * 100)}%`;
+    }
+
+    function hideLoading() {
+      clearTimeout(loadingTimer);
+      if (!loadingEl || loadingEl.hidden) return;
+      loadingEl.classList.add('bl-out');
+      setTimeout(() => { if (loadingEl) loadingEl.hidden = true; }, 460);
+    }
+
+    /* ---------------- 模板 B：汉服三维场景 ---------------- */
+
+    /**
+     * 确保汉服开屏场景已就绪。
+     *
+     * 三个设计决定：
+     *   1. **按需动态 import**。three.js 1.3MB + GLTFLoader，模板 A 的用户
+     *      不该为它们付下载代价。这和 stage3d.js 的做法一致。
+     *   2. **失败不抛给调用方**。glb 缺失 / WebGL 被禁 / 离线，任何一个都可能发生；
+     *      退回到原来的"露出主舞台形象"行为就行，开屏不能因为一个模型挂了就整块黑掉。
+     *   3. **同一个 Promise 复用**。show() 和 startMedia() 都会调它，
+     *      不做去重就会出现两个场景叠在一起（画面闪烁、显存翻倍）。
+     */
+    function ensureHanfu() {
+      if (hanfu || hanfuFailed) return hanfuLoading;
+      if (hanfuLoading) return hanfuLoading;
+      const media = root && root.querySelector('.boot-media');
+      if (!media) return null;
+
+      hint('形象加载中…');
+      const load = {
+        puppet: () => import('/js/boot-puppet.js').then(mod => mod.createPuppetSplash({ mount: media, url: ART_URL })),
+        art: () => import('/js/boot-art.js').then(mod => mod.createArtSplash({ mount: media, url: ART_URL })),
+        '3d': () => import('/js/boot-hanfu.js').then(mod => mod.createHanfuSplash({
+          mount: media,
+          url: HANFU_URL,
+          onProgress: (p) => {
+            hint(p == null ? '形象加载中…' : `形象加载中… ${Math.round(p * 100)}%`);
+          },
+        })),
+      }[CHARACTER_STYLE] || (() => import('/js/boot-art.js').then(mod => mod.createArtSplash({ mount: media, url: ART_URL })));
+
+      hanfuLoading = load()
+        .then((ctrl) => {
+          hanfu = ctrl;
+          // 加载完时开屏可能已经被用户关掉了，那就别亮出来
+          const live = root && !root.hidden && state.template === 'character';
+          ctrl.setVisible(live);
+          if (live) ctrl.greet();
+          if (live) hint(TEMPLATES.find(t => t.id === 'character').hint);
+          return ctrl;
+        })
+        .catch((err) => {
+          hanfuFailed = true;
+          console.warn('[开屏] 汉服形象没能加载，退回主舞台形象：', err);
+          // 退回老路径：让 .boot-media 保持透明，露出主舞台上当前的形象
+          root && root.classList.add('boot-hanfu-fallback');
+          hint('形象加载失败，已改用主界面形象');
+          return null;
+        });
+      return hanfuLoading;
+    }
+
     /* ---------------- 模板切换 ---------------- */
 
     function applyTemplate(id) {
@@ -334,6 +496,9 @@
       // 用 body 上的类而不是改那些元素的 style，是为了"收起来/放回去"永远成对，
       // 不会因为某条分支漏了还原而让界面缺一块。
       document.body.classList.toggle('boot-character', id === 'character' && !root.hidden);
+      // 切到模板 A 时把汉服场景停掉：它虽然被视频盖住了，
+      // 但不停的话 WebGL 会一直在后台空转（白烧电、笔记本风扇会响）。
+      if (hanfu) hanfu.setVisible(id === 'character' && !root.hidden);
       const t = TEMPLATES.find(x => x.id === id);
       hint(t ? t.hint : '');
     }
@@ -362,11 +527,13 @@
         stopCanvas();
         // ★ 关键：把开屏自己的兜底画布**让开**。
         //
-        // 模板 B 的设计是"透明层 + 露出主界面真实舞台上的形象"，
-        // 但画布只是停了 rAF，上一帧画的程序化西湖图还留在上面、opacity 也还是 1，
-        // 于是它把真实形象整个盖住了 —— 表现就是"第 2 套里看到的不是主界面的形象"。
-        // 停动画 ≠ 让开，必须显式把不透明度归零。
+        // 程序化西湖图那张画布只是停了 rAF，上一帧还留在上面、opacity 也还是 1，
+        // 不显式归零的话它会盖住整个模板 B。停动画 ≠ 让开。
         if (canvasEl) canvasEl.style.opacity = '0';
+        // 模板 B 现在有自己的汉服三维场景（画在 .boot-hanfu 上），
+        // 所以"露出主舞台"只是**加载失败时**的退路，不再是主路径。
+        hideLoading();
+        ensureHanfu();
         return;
       }
 
@@ -426,6 +593,34 @@
         v.src = url;
         try { v.load(); } catch { /* 忽略 */ }
       }
+
+      // ---- 载入遮罩接线（每个 video 只接一次，避免反复 syncVideos 时监听器堆积）----
+      if (v.dataset.lwired !== '1') {
+        v.dataset.lwired = '1';
+        v.addEventListener('progress', () => {
+          try {
+            if (v.buffered.length && v.duration) {
+              setLoadingProgress(v.buffered.end(v.buffered.length - 1) / v.duration);
+            }
+          } catch { /* 时长还没解析出来时读 buffered 会抛，忽略 */ }
+        });
+        // 能播了就撤遮罩。**故意的分界**：
+        //   canplay 只把进度条推到 100%，不撤遮罩 —— 实测 canplay 之后到真的出画面
+        //   还有约 2 秒，那 2 秒撤了遮罩就是"露底"（用户看到的就是先闪画布再切视频）。
+        //   只有 playing（确实开始播了）才撤。
+        v.addEventListener('loadeddata', () => setLoadingProgress(1));
+        v.addEventListener('canplay', () => setLoadingProgress(1));
+        v.addEventListener('playing', () => { setLoadingProgress(1); hideLoading(); });
+        v.addEventListener('error', () => {
+          hint('宣传片没能加载，先用程序化西湖兜底');
+          hideLoading();
+        });
+      }
+
+      // 已经在播就别再闪遮罩（例如换了背景又切回来）
+      if (!v.paused && v.readyState >= 3) hideLoading();
+      else showLoading('正在载入宣传片…');
+
       const p = v.play();
       if (p && p.catch) p.catch(() => { /* 真被拒了也没关系，底下还有程序化兜底 */ });
 
@@ -558,12 +753,35 @@
       root.hidden = false;
       t0 = performance.now();
       applyTemplate(state.template);
+      // ★ 遮罩要在**开屏一出现**就亮，不能等 syncVideos ——
+      //   从"页面加载"到"拿到视频清单"中间还隔着一次 /api/videos 往返，
+      //   那一秒多里如果不盖，用户先看到的是程序化西湖，然后才被视频顶掉。
+      if (state.template === 'video') showLoading('正在载入宣传片…');
       startMedia();      // 重播入场动画
       root.classList.remove('boot-in');
       void root.offsetWidth;
       root.classList.add('boot-in');
       // 模板 B：让形象切到"迎宾"状态，动作由悬停驱动
       if (state.template === 'character') {
+        // 自己的汉服场景：亮出来并做一次迎宾动作。
+        // setVisible(true) 会重置 clock，避免"隐藏期间积攒的 delta"让模型闪跳一下。
+        if (hanfu) {
+          hanfu.setVisible(true);
+          hanfu.resize();
+          hanfu.greet();
+        } else {
+          const p = ensureHanfu();
+          if (p && p.then) {
+            p.then((ctrl) => {
+              if (ctrl && root && !root.hidden && state.template === 'character') {
+                ctrl.setVisible(true);
+                ctrl.resize();
+                ctrl.greet();
+              }
+            });
+          }
+        }
+        // 退路：万一汉服场景没起来，仍然按老办法驱动主舞台上的形象
         const st = getStage && getStage();
         if (st && st.playMotionByName) { try { st.playMotionByName('作揖'); } catch { /* 忽略 */ } }
         stageInUse = true;
@@ -578,6 +796,9 @@
       stopCanvas();
       if (videoEl) { try { videoEl.pause(); } catch { /* 忽略 */ } }
       pauseBg();
+      // 汉服场景停渲染（不是销毁）：用户很可能还会点「🎬 开屏」再看一次，
+      // 销毁了就得重新下载 16MB。setVisible(false) 只是停 rAF。
+      if (hanfu) hanfu.setVisible(false);
       stageInUse = false;
       // 主界面的操作界面放回去（与 applyTemplate 里的 classList.toggle 成对）
       document.body.classList.remove('boot-character');
@@ -596,6 +817,8 @@
     function destroy() {
       hide();
       clearTimeout(hoverTimer);
+      // 真正销毁（页面级清理）：停 rAF、释放几何/材质/贴图、摘掉画布
+      if (hanfu) { try { hanfu.dispose(); } catch { /* 忽略 */ } hanfu = null; }
       if (root && root.parentElement) root.parentElement.removeChild(root);
       root = null;
     }

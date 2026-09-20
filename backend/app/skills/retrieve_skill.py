@@ -30,18 +30,41 @@ def _parse_location(loc: str) -> Location:
     return Location(lat=float(lat), lng=float(lng))
 
 
+def _as_text(value: Any) -> str:
+    """把高德返回的字段收敛成字符串。
+
+    为什么必须有这个：高德的字段类型不固定 —— `address`、`cityname`、`adname`
+    这些在有些 POI / 有些城市上返回的是**数组**（实测苏州的餐厅就是
+    `address: []`），而我们的 POI 模型这几个字段都声明成 str，
+    于是 pydantic 直接抛 ValidationError，整条 /api/plan 变成 500。
+
+    这个 bug 很阴：同样的请求在杭州没事、换苏州就 500，看起来像"某个城市不支持"，
+    其实是响应字段类型不同。所以这里统一收口，宁可转成空串也不要炸。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return "、".join(_as_text(v) for v in value if v not in (None, ""))
+    return str(value)
+
+
 def _to_poi(item: Dict[str, Any], poi_type: str = "景点") -> POI:
     """高德 POI 结果 -> 内部 POI 模型。"""
     biz_ext = item.get("biz_ext") or {}
     cost = biz_ext.get("cost")
-    price = float(cost) if cost else None
+    try:
+        price = float(cost) if cost else None
+    except (TypeError, ValueError):
+        price = None
     tips = f"参考消费约 {price:.0f} 元" if price else ""
     return POI(
-        name=item.get("name", ""),
+        name=_as_text(item.get("name")),
         type=poi_type,
         location=_parse_location(item["location"]),
-        city=item.get("cityname") or item.get("adname") or "",
-        description=item.get("address", ""),
+        city=_as_text(item.get("cityname")) or _as_text(item.get("adname")),
+        description=_as_text(item.get("address")),
         tips=tips,
         price=price,
     )
@@ -91,11 +114,11 @@ def _to_recommendation(item: Dict[str, Any], kind: str) -> POI:
         check_in = "14:00"
         check_out = "12:00"
     return POI(
-        name=item.get("name", ""),
+        name=_as_text(item.get("name")),
         type=kind,
         location=_parse_location(item["location"]),
-        city=item.get("cityname") or item.get("adname") or "",
-        description=item.get("address", ""),
+        city=_as_text(item.get("cityname")) or _as_text(item.get("adname")),
+        description=_as_text(item.get("address")),
         tips=tips,
         price=price,
         tier=tier,

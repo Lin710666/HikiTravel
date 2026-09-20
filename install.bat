@@ -11,8 +11,8 @@ REM
 REM Why this is needed: "pip install -e ." writes a .pth file that
 REM stores the project path in UTF-8, but site.py reads .pth with the
 REM locale code page (GBK on Chinese Windows). When the project sits
-REM in a path containing non-ASCII characters (this one is under
-REM "?????"), the venv python dies inside init_import_site with a
+REM in a path containing non-ASCII characters (this project's folder name
+REM is Chinese), the venv python dies inside init_import_site with a
 REM fatal UnicodeDecodeError that never mentions the path, so it looks
 REM like a broken Python install.
 REM
