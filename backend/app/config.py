@@ -9,6 +9,7 @@
 """
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -31,5 +32,15 @@ class Settings:
     # ---- 前端静态目录（生产环境托管 dist/）----
     static_dir: str = os.getenv("STATIC_DIR", "")
 
+    # ---- 运行期数据目录（角色卡、SQLite 等可变文件）----
+    # 默认 backend/data；不写死绝对路径，目录整体拷走也能跑。
+    data_dir: str = os.getenv("DATA_DIR", "")
+
 
 settings = Settings()
+
+# 数据目录留空时落到 backend/data。放在实例化之后补，是为了能用相对 __file__
+# 推导——写成 dataclass 默认值会在 import 期求值，路径容易算错。
+if not settings.data_dir:
+    _backend_root = Path(__file__).resolve().parents[1]
+    settings.data_dir = str(_backend_root / "data")

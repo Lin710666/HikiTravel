@@ -1,8 +1,14 @@
+import { useEffect } from 'react'
 import { Alert, Button, Card, Col, DatePicker, Form, Input, InputNumber, Row, Select } from 'antd'
 import type { UserPreference } from '../types/preference'
+import { subscribeGenerate, subscribePreference } from '../bridge'
 
 // 可选值配置
-const PREFERENCE_OPTIONS = ['人文历史', '自然风光', '美食', '娱乐']
+//
+// 兴趣里补了「文艺打卡 / 购物」：这两个是词云上有的选项，原来这张表里没有，
+// 词云点过来就会变成一个没有候选的空值（antd 只会把原始值当标签显示，
+// 再点开下拉是找不到它的）。补齐之后两边的词表才是一致的。
+const PREFERENCE_OPTIONS = ['人文历史', '自然风光', '美食', '娱乐', '文艺打卡', '购物']
 const PACE_OPTIONS = ['悠闲', '适中', '特种兵']
 const TRANSPORT_OPTIONS = ['自驾', '高铁', '飞机', '本地']
 const AVOID_OPTIONS = ['爬山', '排队', '网红打卡']
@@ -44,6 +50,33 @@ function buildPartial(values: Record<string, unknown>): Partial<UserPreference> 
  */
 export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
   const [form] = Form.useForm()
+
+  /**
+   * 接外壳（词云）同步过来的条件。
+   *
+   * 词云上点「杭州 / 舒适 / 亲子」这些词，数据会从 bridge 送进来，这里写进表单，
+   * 用户就能在界面上看见自己点了什么 —— 不再只靠底下一行字幕。
+   *
+   * 两个细节：
+   *  1. setFieldsValue 是增量合并，不会清掉用户自己已经填的其它字段。
+   *  2. antd 的 setFieldsValue **不会**触发 onValuesChange，所以这里手动回调一次
+   *     onChange，否则 PlannerPage 里那份「表单已填画像」（对话生成时当底稿用）
+   *     会跟界面对不上。
+   */
+  useEffect(() => {
+    return subscribePreference((patch) => {
+      if (!patch || Object.keys(patch).length === 0) return
+      form.setFieldsValue(patch as Record<string, unknown>)
+      onChange?.(buildPartial(form.getFieldsValue()))
+    })
+  }, [form, onChange])
+
+  // 词云点「个性化方案」时，由外壳请求这里直接提交一次
+  useEffect(() => {
+    return subscribeGenerate(() => {
+      form.submit()
+    })
+  }, [form])
 
   const handleFinish = (values: Record<string, unknown>) => {
     onSubmit(buildPartial(values))

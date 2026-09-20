@@ -92,3 +92,25 @@ class Orchestrator:
             if k != "travelers":
                 data[k] = v
         return UserPreference.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
+# 共享实例
+# ---------------------------------------------------------------------------
+_SHARED: Optional[Orchestrator] = None
+
+
+def get_orchestrator() -> Orchestrator:
+    """取全局唯一的编排器实例。
+
+    为什么要有这个函数：api.py（HikiTravel 原生接口）和 routers/ui_compat.py
+    （5.0 界面兼容层）各自在模块顶层 new 了一个 Orchestrator。两个实例本身
+    没坏处——run() 用的是传进来的 ctx，实例无状态——但 RetrieveSkill 里挂着
+    Retriever，它要加载知识库、首查时还要建向量索引。建两份就是白做两遍。
+
+    返回同一个实例既省一次索引构建，也让两边共享同一份缓存。
+    """
+    global _SHARED
+    if _SHARED is None:
+        _SHARED = Orchestrator()
+    return _SHARED

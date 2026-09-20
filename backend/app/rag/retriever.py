@@ -49,14 +49,62 @@ def _cosine(a: Vector, b: Vector) -> float:
 
 
 class Retriever:
-    """知识库检索器：启动时对知识建索引，查询时按相似度返回 top_k。"""
+    """知识库检索器：首次查询时对知识建索引（懒加载），之后常驻复用。
+
+    为什么索引不在 __init__ 里建（这是本文件最重要的一条）：
+    原来的写法是在构造函数里对每一条知识单独发一次 Ollama embedding 请求。
+    而 Orchestrator 是在模块顶层 new 出来的（api.py 与 ui_compat.py 各一个），
+    于是「只是 import app.main」就要等 10 次串行 HTTP + 一次模型加载——
+    实测导入耗时 42 秒，uvicorn 迟迟不打印启动横幅，
+    看起来像服务起不来，实际上是在等 embedding。
+    现在索引改成第一次 search() 时才建，导入就只剩毫秒级。
+    """
 
     def __init__(self) -> None:
         self.chunks = get_all_chunks()
         self._ollama_ok: bool | None = None  # 缓存 Ollama 可用性
-        self._index: List[Vector] = [
-            self._embed(c["text"] + " " + " ".join(c["tags"])) for c in self.chunks
-        ]
+        self._index: List[Vector] | None = None   # 惰性：见上面的类注释
+
+    def _ensure_index(self) -> List[Vector]:
+        """首次检索时建索引，之后直接复用。"""
+        if self._index is None:
+            texts = [c["text"] + " " + " ".join(c["tags"]) for c in self.chunks]
+            dense = self._ollama_embed_many(texts)
+            if dense is not None:
+                self._ollama_ok = True
+                self._index = dense
+            else:
+                self._ollama_ok = False
+                self._index = [_bigram(t) for t in texts]
+        return self._index
+
+    def _ollama_embed_many(self, texts: List[str]) -> List[List[float]] | None:
+        """批量向量化：一次请求交一批文本。
+
+        用 /api/embed 的 input 数组，而不是逐条打 /api/embeddings ——
+        等价的结果，但往返次数从 N 次降到 1 次。
+        批量接口要是不认（老版本 Ollama），就退回逐条。
+        """
+        if not texts:
+            return []
+        try:
+            resp = httpx.post(f"{settings.ollama_base_url}/api/embed",
+                              json={"model": settings.ollama_embed_model, "input": texts},
+                              timeout=60.0)
+            resp.raise_for_status()
+            got = resp.json().get("embeddings")
+            if got and len(got) == len(texts):
+                return got
+        except Exception:  # noqa: BLE001 - 批量失败就退回逐条
+            pass
+
+        out: List[List[float]] = []
+        for t in texts:
+            one = self._ollama_embed(t)
+            if one is None:
+                return None       # 逐条都失败 → 交给 bigram 兜底
+            out.append(one)
+        return out
 
     def _ollama_embed(self, text: str) -> List[float] | None:
         """调用 Ollama embedding 接口，失败返回 None。"""
@@ -83,8 +131,9 @@ class Retriever:
 
     def search(self, query: str, top_k: int = 3) -> List[str]:
         """检索与查询最相关的知识片段正文。"""
+        index = self._ensure_index()
         q_vec = self._embed(query)
         scored = sorted(
-            enumerate(self._index), key=lambda i: _cosine(q_vec, i[1]), reverse=True
+            enumerate(index), key=lambda i: _cosine(q_vec, i[1]), reverse=True
         )
         return [self.chunks[i]["text"] for i, _ in scored[:top_k]]

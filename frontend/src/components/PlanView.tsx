@@ -1,7 +1,24 @@
 import { useState } from 'react'
-import { Alert, Button, Card, Descriptions, Divider, Statistic, Tag, Timeline } from 'antd'
+import { Alert, Button, Card, Descriptions, Divider, Statistic, Tag, Timeline, theme } from 'antd'
 import type { DailyPlan, POI, TimelineItem, TravelPlan } from '../types/plan'
 import JumpButtons from './JumpButtons'
+
+/* ==========================================================================
+ * 关于下面那些原先是写死的颜色
+ *
+ * 这份组件原本在几处内联样式里直接写了浅色：#fafafa（换景点/换餐厅/换酒店的
+ * 展开面板）、#f5f5f5（实时天气预报的每一天）、#f6ffed + #b7eb8f（当晚住宿那块
+ * 浅绿底）、以及一堆 #888 / #555 的次要文字。
+ *
+ * 自己是浅色主题时没问题，但嵌进深色外壳之后：白框在一片深色里非常刺眼，
+ * 灰字在深底上对比度也不够。而且内联样式的优先级高于任何样式表，
+ * 从外面用 CSS 去覆盖只能靠 !important 硬压，那太脆。
+ *
+ * 所以统一换成 antd 的主题 token（theme.useToken()）。token 会跟着
+ * ConfigProvider 的 algorithm 走：他自己的浅色界面上取到的基本就是原来的色
+ * （colorFillQuaternary 在浅色下 ≈ #fafafa），我们的 darkAlgorithm 下自动变暗。
+ * 两边都不需要为对方做特例。
+ * ========================================================================== */
 
 const TYPE_COLOR: Record<string, string> = {
   景点: 'blue',
@@ -58,6 +75,7 @@ function TieredList({
   pickLabel?: string
   keepJump?: boolean
 }) {
+  const { token } = theme.useToken()
   return (
     <>
       {['经济', '中档', '高档'].map((tier) => {
@@ -74,7 +92,7 @@ function TieredList({
                 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}
               >
                 <span style={{ fontWeight: 600 }}>{o.name}</span>
-                <span style={{ color: '#888', fontSize: 12 }}>{o.tips}</span>
+                <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>{o.tips}</span>
                 {onPick && (
                   <Button size="small" type="primary" ghost onClick={() => onPick(o)}>
                     {pickLabel}
@@ -100,9 +118,14 @@ function AttractionPickList({
   current: string
   onPick: (poi: POI) => void
 }) {
+  const { token } = theme.useToken()
   const others = options.filter((o) => o.name !== current)
   if (others.length === 0) {
-    return <span style={{ color: '#888', fontSize: 12 }}>暂无其他景点备选，可先移除或换个目的地</span>
+    return (
+      <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+        暂无其他景点备选，可先移除或换个目的地
+      </span>
+    )
   }
   return (
     <>
@@ -112,7 +135,7 @@ function AttractionPickList({
           style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}
         >
           <span style={{ fontWeight: 600 }}>{o.name}</span>
-          <span style={{ color: '#888', fontSize: 12 }}>{o.tips}</span>
+          <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>{o.tips}</span>
           <Button size="small" type="primary" ghost onClick={() => onPick(o)}>
             换这个
           </Button>
@@ -138,10 +161,20 @@ function TimelineNode({
   onSwapAttraction?: (poi: POI) => void
 }) {
   const { poi } = item
+  const { token } = theme.useToken()
   const isMeal = poi.type === '餐厅'
   const isAttraction = poi.type === '景点'
   const [showDining, setShowDining] = useState(false)
   const [showAttr, setShowAttr] = useState(false)
+
+  // 展开面板的底色：浅色主题下取到的 ≈ 原来的 #fafafa，深色主题下自动变暗
+  const panelStyle = {
+    marginTop: 4,
+    padding: 8,
+    background: token.colorFillQuaternary,
+    border: `1px solid ${token.colorBorderSecondary}`,
+    borderRadius: 6,
+  }
 
   return (
     <div>
@@ -158,7 +191,7 @@ function TimelineNode({
             <Button
               type="dashed"
               size="small"
-              style={{ color: '#1677ff', borderColor: '#1677ff', fontWeight: 600, padding: '0 8px' }}
+              style={{ color: token.colorPrimary, borderColor: token.colorPrimary, fontWeight: 600, padding: '0 8px' }}
               onClick={() => setShowAttr((v) => !v)}
             >
               {showAttr ? '收起' : '换一个'}
@@ -173,7 +206,7 @@ function TimelineNode({
       )}
 
       {isAttraction && showAttr && (
-        <div style={{ marginTop: 4, padding: 8, background: '#fafafa', borderRadius: 6, maxHeight: 220, overflow: 'auto' }}>
+        <div style={{ ...panelStyle, maxHeight: 220, overflow: 'auto' }}>
           <AttractionPickList options={attractionOptions} current={poi.name} onPick={onSwapAttraction!} />
         </div>
       )}
@@ -191,14 +224,14 @@ function TimelineNode({
         </div>
       )}
       {isMeal && showDining && (
-        <div style={{ marginTop: 4, padding: 8, background: '#fafafa', borderRadius: 6 }}>
+        <div style={panelStyle}>
           <TieredList options={diningOptions} onPick={onSwapMeal} />
         </div>
       )}
 
-      {item.tips && <div style={{ color: '#888', fontSize: 12 }}>{item.tips}</div>}
+      {item.tips && <div style={{ color: token.colorTextTertiary, fontSize: 12 }}>{item.tips}</div>}
       {item.transport_to_next && (
-        <div style={{ color: '#1677ff', fontSize: 12 }}>
+        <div style={{ color: token.colorPrimary, fontSize: 12 }}>
           → {item.transport_to_next.mode} {item.transport_to_next.duration}
           {item.transport_to_next.cost > 0 && ` 约 ¥${item.transport_to_next.cost}`}
         </div>
@@ -231,6 +264,7 @@ function DayCard({
   onApplyPlanB?: () => void
 }) {
   const [showHotel, setShowHotel] = useState(false)
+  const { token } = theme.useToken()
 
   return (
     <Card
@@ -278,8 +312,9 @@ function DayCard({
           style={{
             marginTop: 12,
             padding: '8px 10px',
-            background: '#f6ffed',
-            border: '1px solid #b7eb8f',
+            // 原来是 #f6ffed + #b7eb8f 的浅绿底；浅色主题下 token 取到的就是这个色系
+            background: token.colorSuccessBg,
+            border: `1px solid ${token.colorSuccessBorder}`,
             borderRadius: 6,
           }}
         >
@@ -301,16 +336,20 @@ function DayCard({
             )}
           </div>
           {(day.hotel.check_in || day.hotel.check_out) && (
-            <div style={{ color: '#555', fontSize: 12 }}>
+            <div style={{ color: token.colorTextSecondary, fontSize: 12 }}>
               🕒 入住 {day.hotel.check_in || '—'} · 退房 {day.hotel.check_out || '—'}
-              <span style={{ color: '#999' }}>（行业惯例，以酒店实际为准）</span>
+              <span style={{ color: token.colorTextTertiary }}>（行业惯例，以酒店实际为准）</span>
             </div>
           )}
-          {day.hotel.tips && <div style={{ color: '#888', fontSize: 12 }}>{day.hotel.tips}</div>}
+          {day.hotel.tips && (
+            <div style={{ color: token.colorTextTertiary, fontSize: 12 }}>{day.hotel.tips}</div>
+          )}
           <JumpButtons poi={day.hotel} />
         </div>
       ) : isLastDay ? (
-        <div style={{ marginTop: 12, fontSize: 12, color: '#999' }}>🏨 退房返程 · 当晚无需住宿</div>
+        <div style={{ marginTop: 12, fontSize: 12, color: token.colorTextTertiary }}>
+          🏨 退房返程 · 当晚无需住宿
+        </div>
       ) : (
         hotelOptions.length > 0 &&
         onSelectHotel && (
@@ -328,13 +367,21 @@ function DayCard({
       )}
 
       {showHotel && hotelOptions.length > 0 && (
-        <div style={{ marginTop: 4, padding: 8, background: '#fafafa', borderRadius: 6 }}>
+        <div
+          style={{
+            marginTop: 4,
+            padding: 8,
+            background: token.colorFillQuaternary,
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: 6,
+          }}
+        >
           <TieredList options={hotelOptions} onPick={onSelectHotel} pickLabel="选这家" keepJump />
         </div>
       )}
 
       {day.tips.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 12, color: '#555' }}>
+        <div style={{ marginTop: 12, fontSize: 12, color: token.colorTextSecondary }}>
           💡 游玩贴士：{day.tips.join('；')}
         </div>
       )}
@@ -361,6 +408,7 @@ function dayOfWeek(dateStr: string): string {
 
 // 实时天气预报（出行日逐日预报，来自高德天气 API，非硬编码）。无卡片外壳，内嵌在概览卡中，与预算紧邻
 function WeatherStrip({ days }: { days: DailyPlan[] }) {
+  const { token } = theme.useToken()
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
       {days.map((d) => (
@@ -370,16 +418,18 @@ function WeatherStrip({ days }: { days: DailyPlan[] }) {
             minWidth: 88,
             textAlign: 'center',
             padding: '6px 10px',
-            background: '#f5f5f5',
+            // 原来是写死的 #f5f5f5 浅灰块，深色主题下会变成一块块白的
+            background: token.colorFillTertiary,
+            border: `1px solid ${token.colorBorderSecondary}`,
             borderRadius: 8,
           }}
         >
-          <div style={{ fontSize: 12, color: '#555' }}>
+          <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
             {d.date.slice(5)} 周{dayOfWeek(d.date)}
           </div>
           <div style={{ fontSize: 24, lineHeight: 1.3 }}>{weatherIcon(d.weather.condition)}</div>
           <div style={{ fontSize: 13, fontWeight: 600 }}>{d.weather.condition || '暂无预报'}</div>
-          <div style={{ fontSize: 11, color: '#888' }}>{d.weather.temp}</div>
+          <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{d.weather.temp}</div>
         </div>
       ))}
     </div>
@@ -395,6 +445,7 @@ interface Props {
 }
 
 export default function PlanView({ plan, onApplySuggestions, applying, onUpdate }: Props) {
+  const { token } = theme.useToken()
   const actionable = plan.conflicts.some((c) => c.field != null)
 
   const people = plan.travelers || 1
@@ -471,7 +522,7 @@ export default function PlanView({ plan, onApplySuggestions, applying, onUpdate 
           <Descriptions.Item label="住宿">¥{plan.budget_breakdown.hotel}</Descriptions.Item>
         </Descriptions>
         {nights > 0 && (
-          <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+          <div style={{ marginTop: 8, fontSize: 12, color: token.colorTextTertiary }}>
             住宿：{nights} 晚 · {rooms} 间
             {stayHotels.length > 0
               ? ` · ${stayHotels.join(' / ')}`

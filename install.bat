@@ -1,19 +1,35 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Travel Planner - One-Click Deploy
+title Wenlv Assistant (HikiTravel + AIRI UI) - One-Click Deploy
 
 cd /d "%~dp0"
 
+REM ============================================================
+REM Force UTF-8 mode for Python.
+REM
+REM Why this is needed: "pip install -e ." writes a .pth file that
+REM stores the project path in UTF-8, but site.py reads .pth with the
+REM locale code page (GBK on Chinese Windows). When the project sits
+REM in a path containing non-ASCII characters (this one is under
+REM "?????"), the venv python dies inside init_import_site with a
+REM fatal UnicodeDecodeError that never mentions the path, so it looks
+REM like a broken Python install.
+REM
+REM Keep the quotes: writing  set PYTHONUTF8=1 && ...  would leave a
+REM trailing space in the value and python rejects it as invalid.
+REM ============================================================
+set "PYTHONUTF8=1"
+
 echo.
 echo  ==================================================
-echo    Travel Planner - One-Click Deploy
+echo    Wenlv Assistant - One-Click Deploy
+echo    Backend: HikiTravel (FastAPI)  UI: AIRI (static)
 echo  ==================================================
 echo.
 
 REM ============================================================
-REM 1. Locate Python (for running) and uv (for installing)
-REM    order: project venv - uv - py launcher - PATH - common dirs
+REM 1. Locate Python: project venv - uv - py launcher - PATH - common dirs
 REM ============================================================
 set "PYEXE="
 set "PYARGS="
@@ -56,96 +72,48 @@ if not defined PYEXE (
 :py_ready
 if not defined PYEXE (
     echo [ERROR] Python 3.10+ was not found.
-    echo.
-    set "ANS="
-    set /p "ANS=Try to auto-install Python 3.12 via winget? [Y/N] "
-    if /i "!ANS!"=="Y" (
-        where winget >nul 2>nul
-        if errorlevel 1 (
-            echo [ERROR] winget not found. Install Python manually:
-            echo         https://www.python.org/downloads/
-            echo         then tick "Add python.exe to PATH" and re-run.
-            goto :fail
-        )
-        echo Installing Python 3.12 via winget [user scope]...
-        winget install -e --id Python.Python.3.12 --scope user --silent --accept-source-agreements --accept-package-agreements
-        echo.
-        echo [INFO] After installation, please re-run this script.
-        goto :fail
-    )
-    echo [ERROR] Python is required. Download: https://www.python.org/downloads/
+    echo         Download: https://www.python.org/downloads/
+    echo         Tick "Add python.exe to PATH" during setup, then re-run.
     goto :fail
 )
-echo [1/5] Python found
+echo [1/3] Python found: %PYEXE%
 
 REM ============================================================
-REM 2. Locate npm
+REM 2. Create the virtualenv when it is missing
 REM ============================================================
-set "NPMCMD="
-for /f "delims=" %%i in ('where npm 2^>nul') do if not defined NPMCMD set "NPMCMD=%%i"
-if not defined NPMCMD if exist "%ProgramFiles%\nodejs\npm.cmd" set "NPMCMD=%ProgramFiles%\nodejs\npm.cmd"
-if not defined NPMCMD if exist "%ProgramFiles(x86)%\nodejs\npm.cmd" set "NPMCMD=%ProgramFiles(x86)%\nodejs\npm.cmd"
-if not defined NPMCMD if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" set "NPMCMD=%LOCALAPPDATA%\Programs\nodejs\npm.cmd"
-
-if not defined NPMCMD (
-    echo [ERROR] Node.js / npm was not found.
-    echo.
-    set "ANS="
-    set /p "ANS=Try to auto-install Node.js LTS via winget? [Y/N] "
-    if /i "!ANS!"=="Y" (
-        where winget >nul 2>nul
+if not exist "backend\.venv\Scripts\python.exe" (
+    if defined HAS_UV (
+        echo [2/3] uv detected - dependencies will be installed with uv sync
+    ) else (
+        echo [2/3] Creating virtualenv at backend\.venv ...
+        pushd backend
+        "%PYEXE%" %PYARGS% -m venv .venv
         if errorlevel 1 (
-            echo [ERROR] winget not found. Install Node.js LTS manually:
-            echo         https://nodejs.org/  then re-run.
+            popd
+            echo [ERROR] Failed to create the virtualenv.
             goto :fail
         )
-        echo Installing Node.js LTS via winget...
-        winget install -e --id OpenJS.NodeJS.LTS --scope user --silent --accept-source-agreements --accept-package-agreements
-        echo.
-        echo [INFO] After installation, please re-run this script.
-        goto :fail
+        popd
+        set "PYEXE=%~dp0backend\.venv\Scripts\python.exe"
+        set "PYARGS="
     )
-    echo [ERROR] Node.js is required. Download: https://nodejs.org/
-    goto :fail
-)
-echo [2/5] npm found
-
-REM ============================================================
-REM 3. Write AMap API key (first run only)
-REM ============================================================
-if not exist "backend\.env" (
-    echo.
-    echo [3/5] Writing built-in AMap API key...
-    (
-        echo # AMap Web Service API key
-        echo AMAP_API_KEY=e15977855225aaaedebd91c466a3c39e
-        echo.
-        echo # Ollama local inference - empty means fall back to rule engine
-        echo OLLAMA_BASE_URL=http://localhost:11434
-        echo OLLAMA_MODEL=qwen2.5:7b
-        echo OLLAMA_EMBED_MODEL=nomic-embed-text
-        echo OLLAMA_TIMEOUT=30
-    ) > "backend\.env"
-    echo Created backend\.env
 ) else (
-    echo [3/5] backend\.env exists, skipped
+    echo [2/3] Virtualenv already exists, reusing it
 )
 
-for /f "usebackq eol=# tokens=*" %%a in ("backend\.env") do set %%a
-echo [4/5] Environment loaded
-
 REM ============================================================
-REM 4. Install dependencies and build
+REM 3. Install backend dependencies
+REM    The frontend is plain static files under public\ - there is
+REM    no npm build step at all, which is why this script is short.
 REM ============================================================
-echo.
-echo [5/5] Installing dependencies and building (first run: 1-2 min)...
+echo [3/3] Installing backend dependencies (first run: about 1 minute) ...
 
 if defined HAS_UV (
     pushd backend
     uv sync
     if errorlevel 1 (
         popd
-        echo [ERROR] Backend dependencies install failed [uv sync].
+        echo [ERROR] Backend dependency install failed [uv sync].
         goto :fail
     )
     popd
@@ -154,45 +122,59 @@ if defined HAS_UV (
     "%PYEXE%" %PYARGS% -m pip install -e . --quiet
     if errorlevel 1 (
         popd
-        echo [ERROR] Backend dependencies install failed [pip].
+        echo [ERROR] Backend dependency install failed [pip].
         goto :fail
     )
     popd
 )
 
-pushd frontend
-call "%NPMCMD%" install
-if errorlevel 1 (
-    popd
-    echo [ERROR] Frontend dependencies install failed.
-    goto :fail
+REM ============================================================
+REM 4. backend\.env
+REM    AMAP_API_KEY is deliberately NOT hard-coded here: a key baked
+REM    into a public repo gets scraped and the daily quota runs out,
+REM    which is exactly what happens on demo day. Fill in your own.
+REM ============================================================
+if not exist "backend\.env" (
+    (
+        echo # AMap Web Service key - REQUIRED for POI / weather / routing.
+        echo # Apply for a free one at https://console.amap.com/dev/key/app
+        echo AMAP_API_KEY=
+        echo.
+        echo # Ollama local inference
+        echo OLLAMA_BASE_URL=http://localhost:11434
+        echo OLLAMA_MODEL=qwen2.5:7b
+        echo OLLAMA_EMBED_MODEL=nomic-embed-text
+        echo # 30s is fine for chat; plan generation needs a longer budget
+        echo OLLAMA_TIMEOUT=180
+    ) > "backend\.env"
+    echo.
+    echo  ==================================================
+    echo    backend\.env was created - it still needs a key.
+    echo    Open it and set AMAP_API_KEY=your_own_key
+    echo    Then run start.bat.
+    echo  ==================================================
+    echo.
+    pause
+    exit /b 0
 )
-call "%NPMCMD%" run build
-if errorlevel 1 (
-    popd
-    echo [ERROR] Frontend build failed. See messages above.
-    goto :fail
+
+set "AMAP_OK="
+for /f "usebackq eol=# tokens=1,* delims==" %%a in ("backend\.env") do (
+    if /i "%%a"=="AMAP_API_KEY" if not "%%b"=="" set "AMAP_OK=1"
 )
-popd
+if not defined AMAP_OK (
+    echo.
+    echo [WARN] backend\.env has no AMAP_API_KEY.
+    echo        POI / weather / route lookups will fail with HTTP 503.
+    echo        The app still starts; fill the key in and re-run.
+    echo.
+)
 
 echo.
 echo  ==================================================
-echo    Deploy done! Starting service...
-echo    Open http://localhost:8000 in your browser.
-echo    Health check: http://localhost:8000/api/health
-echo    Press Ctrl+C to stop.
+echo    Deploy done. Run start.bat to launch.
 echo  ==================================================
 echo.
-
-set "STATIC_DIR=%~dp0frontend\dist"
-set "DB_PATH=%~dp0backend\data\travelplanner.db"
-
-pushd backend
-"%PYEXE%" %PYARGS% -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-popd
-
-echo.
-echo Service stopped.
 pause
 exit /b 0
 

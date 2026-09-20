@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Alert, Button, Card, Space, Tag } from 'antd'
+import { Alert, Button, Card, Space, Tag, theme } from 'antd'
 import type { Location, POI, TravelPlan } from '../types/plan'
 import { useAppJump, type AppTarget } from '../hooks/useAppJump'
 
@@ -47,6 +47,9 @@ const JUMP_ACTIONS: { target: AppTarget; label: string }[] = [
 ]
 
 export default function MapView({ plan }: { plan: TravelPlan }) {
+  // 这张图是本地画出来的示意图（不是真瓦片），所以配色得自己跟主题走：
+  // 原来背景写死 #eef3f7、标注文字写死 #333，深色外壳里就是一块白板加一片看不见的黑字。
+  const { token } = theme.useToken()
   const { jump, copyKeyword } = useAppJump()
   const [selected, setSelected] = useState<POI | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -88,20 +91,35 @@ export default function MapView({ plan }: { plan: TravelPlan }) {
       {!points.length ? (
         <Alert type="warning" message="暂无带坐标的打卡点" />
       ) : (
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ background: '#eef3f7', borderRadius: 8 }}>
+        <svg
+          width="100%"
+          viewBox={`0 0 ${W} ${H}`}
+          style={{
+            background: token.colorFillQuaternary,
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: 8,
+          }}
+        >
           <polyline
             points={polylinePoints}
             fill="none"
-            stroke="#1677ff"
+            stroke={token.colorPrimary}
             strokeWidth="2"
             strokeDasharray="6 4"
           />
           {coords.map((c, i) => {
-            const fill = points[i].type === '住宿' ? '#fa8c16' : i === 0 ? '#52c41a' : '#1677ff'
+            // 点位颜色是"语义色"：起点绿、住宿橙、其余用主色。
+            // 不用 token.colorPrimary 之外的东西，是为了在深底上也能看清。
+            const fill =
+              points[i].type === '住宿'
+                ? token.colorWarning
+                : i === 0
+                  ? token.colorSuccess
+                  : token.colorPrimary
             return (
               <g key={i} onClick={() => setSelected(points[i])} style={{ cursor: 'pointer' }}>
                 <circle cx={c.x} cy={c.y} r={i === 0 ? 9 : 7} fill={fill} />
-                <text x={c.x + 11} y={c.y + 4} fontSize="11" fill="#333">
+                <text x={c.x + 11} y={c.y + 4} fontSize="11" fill={token.colorText}>
                   {i + 1}. {points[i].name}
                 </text>
               </g>

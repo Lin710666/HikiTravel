@@ -28,6 +28,40 @@ class LLMClient:
         except httpx.HTTPError:
             return False
 
+    def chat_text(self, system: str, user: str, temperature: float = 0.7,
+                  num_predict: int = 2560, timeout: float = 0.0) -> Optional[str]:
+        """调用 Ollama 生成自由文本（Markdown）。
+
+        与 chat_json 的区别：那个用 format=json 强制结构化输出，供规划流水线解析；
+        这个不加 format 约束，用来生成「给人看的」Markdown 正文
+        （营销文案 / 产品概念卡 / 集中追问）。
+
+        超时单独放宽：OLLAMA_TIMEOUT 默认 30 秒是给「结构化短输出」定的，
+        而营销文案要一次生成 A/B 两版、系统提示词又有 20 KB 上下，
+        本机 7B 模型实测会超过 30 秒 —— 沿用同一个值会稳定失败。
+
+        失败返回 None，由调用方决定怎么降级。
+        """
+        eff_timeout = timeout or max(float(self.timeout), 180.0)
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": temperature, "num_predict": num_predict},
+                },
+                timeout=eff_timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()["message"]["content"]
+        except (httpx.HTTPError, KeyError, ValueError):
+            return None
+
     def chat_json(self, system: str, user: str) -> Optional[Dict[str, Any]]:
         """调用 Ollama 生成结构化 JSON。
 
