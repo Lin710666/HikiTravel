@@ -1498,6 +1498,67 @@ luotianyi-BV1MYCaYXEWf.mp4             列了 · 在 ✅
 随仓库分发、限定比赛与本机演示、如权利人提出就移除、换片用 `首选.txt`。
 **要不要真的把这两个视频从仓库里摘掉（恢复忽略 `data/videos`），请主人定。**
 
+> **1.2 的实际决定：这一版推上去时没有带 `data/`。** 与已发布的 1.1 保持一致
+> （1.1 的分支里本来就没有 `data/`），理由两条：148 MB 的体积，以及"随仓库分发"
+> 本身就是借物表里禁止的再分发。`.gitignore` 里已恢复 `/data/`，并写明怎么改回去。
+
+---
+
+## 发布到 GitHub（流程 + 一个把克隆 `.git` 删掉的坑）
+
+推的是 `https://github.com/Lin710666/HikiTravel` 仓库的**同名分支**
+（`HikiTravel-AIRI-1.2`）。内容在**仓库根目录**（不是子目录）。
+
+### 流程
+
+```bat
+git clone https://github.com/Lin710666/HikiTravel.git
+cd HikiTravel
+git checkout HikiTravel-AIRI-1.2
+:: 清空工作区（只留 .git），再把产品目录的内容复制进来 —— 用 /E，不要用 /MIR
+git add -A
+git status --porcelain      :: 逐条核一遍，确认没有敏感文件
+git commit -F 提交信息.txt
+git push origin HikiTravel-AIRI-1.2
+```
+
+### ⚠️ 坑：`robocopy /MIR` 把克隆的 `.git` 删了
+
+第一遍我用 `robocopy <产品目录> <克隆> /MIR /XD "<产品目录>\.git" ...` 同步，
+**结果克隆的 `.git` 整个没了**，`git status` 报 `fatal: not a git repository`。
+
+原因：`/MIR` = `/E` + **`/PURGE`**，它会删掉"目标里有、源里没有"的东西。
+我只在 `/XD` 里排除了**源目录**的 `.git`（那本来就不存在），
+于是 `/MIR` 把**目标目录**的 `.git` 当成"源里没有的多余目录"清掉了。
+
+**正确做法**（最后实际用的）：
+
+```powershell
+# 1. 清空工作区，只留 .git
+Get-ChildItem $clone -Force | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurse -Force
+# 2. 复制（/E 只增不删，不会碰 .git）
+robocopy $src $clone /E /XD $clone\.git ... /XF *.pyc .env qwen-tts-home.txt
+# 3. git add -A —— 删除交给 git 算，不让 robocopy 去猜
+```
+
+> 好在远端是完整的：`git ls-remote` 确认 `origin/HikiTravel-AIRI-1.1` 的提交和本地克隆
+> 的 HEAD 一致（没有本地独有的提交），所以删掉重克隆就恢复了。
+> **教训**：做这种镜像同步之前先 `git ls-remote` —— 否则删掉 `.git` 就等于丢掉没推的历史。
+
+### 提交前必做的三项检查
+
+```powershell
+# ① 敏感文件一个都不能进
+git status --porcelain | Select-String '\.env|qwen-tts-home|models/cangyixiu|models/mudan|models3d/luotianyi|data/'
+# ② 大文件（>2MB）
+# ③ 新增/删除逐条扫（这次删了 haru 示例模型 48 个文件、江南古风少女头像、ask-bubbles.js，都是该删的）
+```
+
+`data/`（148 MB 演示素材）、`backend/.env`（高德 Key）、`qwen-tts-home.txt`（本机路径）、
+以及三个**授权不允许二次配布**的 Live2D 模型，都由 `.gitignore` 挡住了。
+
+---
+
 ## 三个 .bat：检查环境 / 安装 / 启动
 
 原来只有 `install.bat`（建 venv + 装 Python 依赖）和 `start.bat`（只起后端），
