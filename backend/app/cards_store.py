@@ -116,8 +116,10 @@ class CardStore:
                 "numPredict": int(model.get("numPredict") or 1024),
             },
             "live2d": {
-                "kind": live2d.get("kind") or "lake",
-                "model": live2d.get("model") or "lake-boatwoman",
+                "kind": live2d.get("kind") or "live2d",
+                # 卡片没写用哪个形象时的兜底。给「深闺藏衣袖」——
+                # 国风形象和文旅主题更贴（原先是 Live2D 官方示例 mao）。
+                "model": live2d.get("model") or "cangyixiu",
                 "scale": float(live2d.get("scale") or 1),
                 "x": float(live2d.get("x") or 0),
                 "y": float(live2d.get("y") or 0),

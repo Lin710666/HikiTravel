@@ -1,10 +1,27 @@
 # 3D 模型放这里
 
-这个目录默认是空的。脚本会安装的两套 3D 形象来自 VRM 官方规范仓库
-[`vrm-c/vrm-specification`](https://github.com/vrm-c/vrm-specification)，同样属于第三方素材，
-和 Live2D 模型一样没有随仓库分发。
+这个目录当前**是空的**，没有随仓库分发的第三方 3D 模型。
 
-## 怎么拿到
+## 为什么是空的
+
+原先放过一个本机自用的「洛天依」GLB（由 PMX 经 Blender + mmd_tools 转换）。
+它的原作者配布规则禁止二次配布与商用，**仅限本机演示**，已在 `.gitignore` 中排除，
+因此从未进入版本库；本机也不再保留副本。
+
+## 换成自己的模型
+
+有两种方式：
+
+1. **界面上传（推荐）**：点舞台右上角「形象」→「上传 VRM / GLB」，选一个 `.vrm` 或 `.glb`。
+   文件会存到本机 `data/models3d/`，不进仓库，也不会被 `git` 跟踪。
+2. **放进这个目录**：`public/models3d/<名字>/<文件>.vrm`，再补一个 `manifest.json`，
+   并在 `backend/app/data/models3d.json` 里加一条登记。
+
+## 想要官方示例模型
+
+两套 VRM 官方示例（Seed-san、VRM 1.0 约束/扭转测试模型）来自 VRM 官方规范仓库
+[`vrm-c/vrm-specification`](https://github.com/vrm-c/vrm-specification)，属于第三方素材，
+没有随仓库分发，需要时再下载：
 
 双击 **`tools\获取示例模型.bat`**，或者：
 
@@ -12,7 +29,7 @@
 pwsh -File tools\获取示例模型.ps1 -SkipLive2D   # 只要 3D
 ```
 
-脚本会下载两个 `.vrm`（约 22MB）到：
+脚本会把两个 `.vrm`（约 22MB）放回：
 
 ```
 public/models3d/
@@ -24,11 +41,16 @@ public/models3d/
     └── manifest.json
 ```
 
+> 注意：脚本只是把文件放回磁盘，**还要在 `backend/app/data/models3d.json` 里补回对应条目**
+> 才会出现在界面的形象选择器里（后端按 url 里的目录名去比对目录是否存在，
+> 目录不在的条目会被自动过滤掉）。
+
 `manifest.json` 是可选的，用来给界面提供显示名与说明：
 
 ```json
 { "label": "我的模型", "note": "出处", "tags": ["自制"], "kind": "3d" }
 ```
+
 
 ## 换成自己的模型
 

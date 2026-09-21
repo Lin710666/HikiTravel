@@ -15,13 +15,24 @@ from dotenv import load_dotenv
 
 # 载入 backend/.env（若存在）。必须在 Settings 默认值求值前调用，
 # 否则 os.getenv 会拿到空值。进程环境变量优先，不会被 .env 覆盖。
-load_dotenv()
+#
+# 这里**显式给出路径**，不用 load_dotenv() 的默认行为：默认是「按当前工作目录
+# 找 .env」，于是只有从 backend/ 目录启动才读得到。实测从别的目录启动
+# （例如 uvicorn 的 --app-dir、或宿主机换 cwd）会静默读到空 Key，
+# 表现就是「高德未配置」——但环境变量本身没配错，很难查。
+# 改成以本文件位置为锚点后就与启动目录无关了。
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 @dataclass
 class Settings:
     # ---- AI 本地推理（Ollama）----
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    # ★ 默认用 127.0.0.1 而不是 localhost。
+    #   装了 IPv6 的机器上 localhost 会先解析到 ::1，而 Ollama 只监听 IPv4，
+    #   每次探测都要先等 IPv6 连接超时（实测恒定 2 秒）——
+    #   /api/status 要探两次，启动就被拖慢 4.5 秒、后面的界面渲染全在等它。
+    #   写成 IP 直接命中，省掉这段白等。
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
     ollama_timeout: float = float(os.getenv("OLLAMA_TIMEOUT", "30"))

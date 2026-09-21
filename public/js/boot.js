@@ -85,7 +85,9 @@
 
   /** 页签 id → 中文名。用在入口按钮上标出"点了会去哪" */
   const PANE_LABEL = {
-    chat: '对话页',
+    // 「对话」页签已并进「文旅」，所以这里不再有 chat 这一项。
+    // 但入口的 id 仍然叫 chat（Esc 那个 `choose('chat')` 依赖它），
+    // 只是它现在落到「文旅」页 —— 见下面 ENTRIES 里的 target。
     tools: '文旅页',
     look: '外观页',
     memory: '记忆页',
@@ -97,7 +99,7 @@
    * 三个功能入口。
    *
    * `motion` 写成"名字 + 一组降级动作组"而不是一个字符串，是因为
-   * **只有西湖船娘有「招手」这种中文动作名**：
+   * **只有程序化绘制的那套舞台才有「招手」这种中文动作名**（那套已删，这里留作降级链的例子）**：
    *   · Live2D 模型的动作名是 `00_idle`、`tap_body_01` 这种
    *   · 3D 模型是 Blender 导出的 clip 名
    * 直接按名字找在它们身上必然落空，表现就是"鼠标划过菜单、形象毫无反应"。
@@ -110,12 +112,20 @@
    *   folds    顺带展开哪些折叠区（details 的 id）
    *   scrollTo 滚到哪个元素（可选）
    *   focus    要聚焦的输入框（可选）
+   *   compact  进来时把对话输出区收回默认大小（可选，只有对话页要）
    */
   const ENTRIES = [
     {
-      id: 'chat', icon: '💬', title: '对话', desc: '问行程、问景点、问天气',
+      // id 仍叫 chat：boot.js 的 Esc 处理里写的是 `choose('chat')`（"别让用户被开屏困住"）。
+      // 但它落的页签已经改成 tools —— 「对话」并进「文旅」了。
+      id: 'chat', icon: '🧭', title: '文旅', desc: '填偏好或说一句话，出方案与地图',
       motion: { name: '招手', groups: ['TapBody', 'Idle', 'Greet'] },
-      target: { pane: 'chat', focus: '#chat-input' },
+      // compact: true —— 把对话输出区收回默认大小，人物占满一屏（用户要的"大屏"）。
+      // ⚠️ 这里**不要**写 kiosk: true：那会把顶栏和人物条藏掉，
+      //    而用户要的恰恰是"顶栏在、人物条在、底部面板矮"。kiosk 手动点才进。
+      // 落到「文旅」页签。注意**不写 focus** —— 底部输入框已按需求移除，
+      // `#chat-input` 不存在了（见 index.html 里那段说明）。
+      target: { pane: 'tools', compact: true },
     },
     {
       id: 'settings', icon: '⚙️', title: '设置', desc: '人物设定、音色、形象与背景',
@@ -301,24 +311,65 @@
       document.body.appendChild(root);
       videoEl = root.querySelector('.boot-video');
       bgEl = root.querySelector('.boot-video-bg');
+      // 交给全局静音中枢：开屏视频、功能页配乐、朗读共用一个状态。
+      //
+      // ★ 开屏视频**不能**标 keepMuted。
+      //   标了就等于"它永远静音、谁都开不了声"：全局状态切到有声时
+      //   sync() 仍会把它按回 muted=true —— 表现就是"点声音键没反应、
+      //   这个界面一直没有声音"（实测调用栈 syncAll→sync 把 muted 写成 true）。
+      //   它的初始静音由 syncVideos() 负责（自动播放的硬前提），
+      //   用户点一次之后由全局状态接管。
+      //   真正需要 keepMuted 的只有下面那路**模糊铺底**视频 —— 它是纯装饰，
+      //   出声只会和主视频叠成两重音。
+      if (window.WenlvMute) {
+        window.WenlvMute.apply(videoEl);
+        window.WenlvMute.apply(bgEl, { keepMuted: true });
+      }
       muteBtn = root.querySelector('#boot-mute');
       // 静音开关。这一次点击是**真实用户手势**，浏览器到这时才允许出声 ——
       // 所以自动播放策略下，"先静音起播、让用户自己点开声音"是唯一稳的做法。
       if (muteBtn) {
+        /**
+         * 开屏这个键的语义：**它说的是"这个视频现在有没有声音"**。
+         *
+         * 为什么不能直接看全局状态：开屏起播出于自动播放策略一定是静音的，
+         * 而全局状态默认是"有声" —— 两者天然错位。若按全局态渲染文案，
+         * 就会显示「有声」但实际没声音；点一下反而先把它**静音**（用户体感：
+         * 点了没反应，或多点一次才有声）。所以按钮文案跟 videoEl.muted 走。
+         */
+        const reconcileMuteBtn = () => {
+          const audiblyMuted = videoEl ? videoEl.muted : Boolean(window.WenlvMute && window.WenlvMute.isMuted());
+          updateMuteBtn(audiblyMuted, !audiblyMuted);
+        };
+
         muteBtn.addEventListener('click', () => {
-          // ★ 依据**视频当前实际的静音状态**来翻转，而不是依据偏好。
-          //
-          // 踩过的坑：原来用偏好判断，而开屏起播时出于自动播放策略一定是静音的，
-          // 于是偏好说"有声"、实际是静音，按钮显示"点击开启声音"，
-          // 点下去却把它**静音**了 —— 用户看到的是"点了没反应"。
-          // 按钮的语义必须跟着听感走：现在没声 → 点一下有声。
-          const next = !(videoEl && videoEl.muted);
-          applyMute(next);
-          // 用户手动做了选择之后，就别再让"首次手势自动开声"插手 ——
-          // 否则他刚点了静音，下一次点击又给开回来。
-          if (root) root.dataset.soundArmed = '1';
-          if (onMutedChange) onMutedChange(next);
+          // 点击意图由**当前听感**决定：现在没声 → 这次要开声。
+          const wantSound = Boolean(videoEl && videoEl.muted);
+          const v = videoEl;
+          if (window.WenlvMute) {
+            // 把"要听到的结果"写进全局状态；真实手势已经拿到，所以能开得起来
+            window.WenlvMute.set(!wantSound);
+            if (v && wantSound) {
+              v.volume = 1;
+              const p = v.play();
+              if (p && p.catch) p.catch(() => { /* 仍被拒就保持静音 */ });
+            }
+          } else if (v) {
+            v.muted = !wantSound;
+            if (wantSound) {
+              v.volume = 1;
+              const p = v.play();
+              if (p && p.catch) p.catch(() => { /* 忽略 */ });
+            }
+          }
+          reconcileMuteBtn();
+          if (onMutedChange) onMutedChange(!wantSound);
         });
+
+        // 右上角悬浮键（或别处）改了全局状态时，这里跟着重算，文案与听感始终一致
+        if (window.WenlvMute) {
+          window.WenlvMute.onChange(() => reconcileMuteBtn());
+        }
       }
       canvasEl = root.querySelector('.boot-canvas');
       loadingEl = root.querySelector('#boot-loading');
@@ -577,7 +628,10 @@
       if (!v) return;
       const fit = (getFit && getFit()) || 'cover';
       root.dataset.fit = fit;
-      const wantSound = !Boolean(getMuted && getMuted());
+      // 全局静音中枢优先：它同时管着开屏视频、功能页配乐与朗读
+      const wantSound = window.WenlvMute
+        ? !window.WenlvMute.isMuted()
+        : !Boolean(getMuted && getMuted());
 
       // ★ 永远先静音起播。
       //
@@ -657,6 +711,18 @@
       root.dataset.soundArmed = '1';
       const go = () => {
         if (getMuted && getMuted()) return;         // 用户选了静音就别开
+        if (window.WenlvMute) {
+          // "开声"是用户的意图，所以写进**全局**状态 —— 否则会出现
+          // 开屏有声音、进了功能页配乐却是静音的割裂。
+          window.WenlvMute.set(false);
+          const v0 = videoEl;
+          if (v0) {
+            const p0 = v0.play();
+            if (p0 && p0.catch) p0.catch(() => { /* 仍被拒就保持静音 */ });
+          }
+          updateMuteBtn(false, true);
+          return;
+        }
         const v = videoEl;
         if (!v) return;
         v.muted = false;
@@ -700,6 +766,15 @@
      * 这是真实手势，所以"开声"这条路径一定能成。
      */
     function applyMute(muted) {
+      if (window.WenlvMute) {
+        // 全局状态说了算；它会把状态刷到开屏视频、配乐、朗读所有元素上
+        window.WenlvMute.set(Boolean(muted));
+        const m = Boolean(window.WenlvMute.isMuted());
+        // 第二个参数只影响"偏好有声但暂时静音"那句提示文案；
+        // 这里已经明确设成 muted 了，所以两处同值即可，避免参数错位。
+        updateMuteBtn(m, m);
+        return;
+      }
       const v = videoEl;
       if (!v) return;
       v.muted = muted;
@@ -751,6 +826,18 @@
     function show({ replay } = {}) {
       if (!root) build();
       root.hidden = false;
+      // 开屏出现时，把**全局静音状态对齐到"用户将听到的实际情况"**：
+      // 出于自动播放策略，开屏视频一定是静音起播的；而此时全局状态可能仍是
+      // 上次留下的"有声"。两者不统一的话，右上角悬浮键会显示「有声」而
+      // 开屏自带的键显示「点击开启声音」—— 同一屏两个说法互相矛盾。
+      // 这里以开屏视频的实际 muted 为准回写全局，两边就一致了。
+      if (window.WenlvMute && videoEl) {
+        const wantSound = !videoEl.muted;
+        if (window.WenlvMute.isMuted() === wantSound) window.WenlvMute.set(!wantSound);
+      }
+      if (window.WenlvMute && window.WenlvMute.setScene) {
+        window.WenlvMute.setScene('boot');
+      }
       t0 = performance.now();
       applyTemplate(state.template);
       // ★ 遮罩要在**开屏一出现**就亮，不能等 syncVideos ——
@@ -792,6 +879,10 @@
     function hide() {
       if (!root) return;
       root.hidden = true;
+      // 回到功能页：这时候才允许配乐出声（开屏期间它是暂停的，见 audio-mute 的 setScene）
+      if (window.WenlvMute && window.WenlvMute.setScene) {
+        window.WenlvMute.setScene('main');
+      }
       root.classList.remove('boot-in');
       stopCanvas();
       if (videoEl) { try { videoEl.pause(); } catch { /* 忽略 */ } }

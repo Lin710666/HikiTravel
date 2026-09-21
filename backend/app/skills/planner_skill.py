@@ -154,6 +154,37 @@ class PlannerSkill(Skill):
             return None
 
     # ---------------- 规则引擎生成（稳健降级）----------------
+    #: 一天排到几点算"排太满"。超过它就该少放一个景点，而不是把晚饭挤到深夜。
+    DAY_END = "20:30"
+
+    @staticmethod
+    def _safe_per_day(pref: Any, want: int) -> int:
+        """按**当天真实可用时间**反算一天能放几个景点。
+
+        为什么需要：原来直接取 PACE_COUNT（悠闲2 / 适中3 / 特种兵4），
+        默认「适中」就是 3 个景点/天。而每个景点按 DURATION_BY_TYPE 是 2.5 小时，
+        再加两餐 3 小时、景点间接驳，从 09:00 出发算下来是 11 小时以上 ——
+        实测成都的方案里，第三天的晚餐被排到了 **23:20-00:50**，
+        第二天的晚餐 21:33 开始。一天塞 3 个景点就是会排到半夜。
+
+        算法：可用时长 = 出发 → DAY_END；减去两餐；剩下的按
+        「单个景点 + 一次接驳」平摊。算出来至少留 1 个。
+        """
+        try:
+            hh, mm = (pref.departure_time or "09:00").split(":")[:2]
+            start = int(hh) * 60 + int(mm)
+            eh, em = PlannerSkill.DAY_END.split(":")
+            end = int(eh) * 60 + int(em)
+            free = end - start
+        except Exception:                       # noqa: BLE001 - 时间格式怪就用默认窗口
+            free = 690                          # 09:00 → 20:30
+        meal_min = int(DURATION_BY_TYPE["餐厅"] * 60) * 2      # 午餐 + 晚餐
+        per_item = int(DURATION_BY_TYPE["景点"] * 60) + 30     # 景点 + 接驳
+        if per_item <= 0:
+            return want
+        fits = (free - meal_min) // per_item
+        return max(1, min(want, int(fits)))
+
     def _generate_rules(self, ctx: dict[str, Any]) -> TravelPlan:
         pref = ctx["preference"]
         attractions: List[POI] = ctx.get("attractions", [])
@@ -162,9 +193,13 @@ class PlannerSkill(Skill):
         rag_tips: List[str] = ctx.get("rag_tips", [])
 
         # 1. 按节奏选取景点数量；必去景点必须全部纳入，均匀分摊到各天
-        per_day = PACE_COUNT.get(pref.pace, 3)
+        #
+        # 「节奏」只决定**上限**，真正放几个还要看一天装不装得下（_safe_per_day）。
+        # 不夹这一道的话，"适中"会把晚饭排到 23 点之后（实测踩过）。
+        per_day = self._safe_per_day(pref, PACE_COUNT.get(pref.pace, 3))
         must: List[POI] = ctx.get("must_visit_pois", [])
         if must:
+            # 必去景点是用户点名要的，装不下也得装（超时交给输出层质检提示）
             per_day = max(per_day, math.ceil(len(must) / pref.duration_days))
         capacity = per_day * pref.duration_days
         others = [p for p in attractions if p.name not in {m.name for m in must}]
@@ -194,7 +229,9 @@ class PlannerSkill(Skill):
             days.append(
                 DailyPlan(
                     date=day_date, weather=weather, timeline=timeline,
-                    plan_b=plan_b, tips=rag_tips,
+                    plan_b=plan_b,
+                    # 按天分发，不要每天贴同一份（见 _split_tips 的注释）
+                    tips=self._split_tips(rag_tips, pref.duration_days, i),
                     hotel=hotels[i] if i < nights else None,
                 )
             )
@@ -234,6 +271,22 @@ class PlannerSkill(Skill):
             return [None] * nights
         mids = [h for h in hotel_options if h.tier == "中档"] or list(hotel_options)
         return [mids[i % len(mids)] for i in range(nights)]
+
+    @staticmethod
+    def _split_tips(tips: List[str], days: int, i: int) -> List[str]:
+        """把检索到的贴士**按天分发**，而不是每天贴同一份。
+
+        原来写的是 `tips=rag_tips` —— 把同一个列表对象塞进每一天，
+        于是方案里同一条贴士出现 N 次（实测：2 天方案 10 条贴士里 5 条重复）。
+        贴士本来就该是"今天这几条"，不是"每天全部"。
+
+        分发方式：按天取模切片（第 i 天拿 tips[i::days]、再按天去重），
+        条数够就雨露均沾，条数不够就后面的天少几条 —— 总之不重复。
+        """
+        if not tips:
+            return []
+        per_day = tips if days <= 1 else tips[i::days]
+        return list(dict.fromkeys(per_day))     # 去重但保持原顺序
 
     def _build_timeline(
         self, pref: Any, day_pois: List[POI], lunch: POI, dinner: POI

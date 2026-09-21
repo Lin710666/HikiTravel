@@ -307,107 +307,15 @@ body:not(.debug) .plan-body.output { font-size: 13px; line-height: 1.75; }
 body.debug .chat-expand { display: none !important; }
 
 /* ----------------------------------------------------------------------------
- * 对话引导气泡（js/ask-bubbles.js）
+ * 对话引导气泡（js/ask-bubbles.js）—— **已删除**
  *
- * 设计意图：把"一次点一下到底、点完就生成"改成**有引导感**的分批问答。
- *   · 一批里并排几个气泡，每个气泡是一个问题 + 它的可选项
- *   · 选项点下去只改高亮，**不推进** —— 推进交给「我选好了」
- *   · 每批底部一个固定的「我选好了」，最后一批文案变成"出方案"
- * 所以视觉上要能区分三级：批 > 气泡 > 选项。
+ * 「让 AI 先问我」那条分批气泡问答按需求去掉了，改为直接调用文旅模块本体
+ * （见 app.js 的 startWorkbenchInChat）。原先这一整段 .ask-* 样式
+ * （.ask-step / .ask-title / .ask-bubbles / .ask-bubble / .ask-q /
+ *  .ask-opts / .ask-opt / .ask-note / .ask-hint / .ask-next-tip / .ask-done）
+ * 也随之移除 —— 留着只会让人以为还有这个功能。
  * --------------------------------------------------------------------------*/
-/* ==========================================================================
- * 对话引导（分批气泡）—— 按**文旅工作台**那套设计语言排
- *
- * 需求：对话框里的输出内容要和文旅工作台一个样式。
- * 工作台是 antd + 我给它定的暗色 token，这里直接照着那份取值，
- * 免得同一个界面里出现两套配色（原来是 AIRI 的青色 --primary + 圆胶囊）：
- *
- *   卡片底   rgba(255,255,255,.035)   卡片边框 rgba(255,255,255,.08)
- *   卡片圆角 12px                     标题字号 12.5px / 600
- *   主色     #54c8b1（外壳给「文旅」语义留的青绿，也是工作台 colorPrimary）
- *   正文     rgba(255,255,255,.94)    次要文字 rgba(255,255,255,.62)
- *
- * 选项也从「圆胶囊」改成 antd 小按钮的方角（圆角 6px），
- * 因为工作台里的 chip / 按钮都是那个形状。
- * ========================================================================== */
-.ask-step {
-  font-size: 11px; color: rgba(255, 255, 255, 0.38);
-  font-weight: 400; margin-left: 8px;
-}
 
-/* 批标题：排成工作台卡片头那一行（12.5px / 600 + 下边线） */
-.ask-title {
-  font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.94);
-  padding-bottom: 8px; margin-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.ask-bubbles {
-  display: flex; flex-wrap: wrap; gap: 10px;
-  margin: 10px 0 12px;
-}
-/* 每个问题 = 一张工作台样式的小卡片 */
-.ask-bubble {
-  flex: 1 1 240px; min-width: 200px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.035);
-  transition: border-color 150ms var(--ease);
-}
-.ask-bubble:hover { border-color: rgba(255, 255, 255, 0.16); }
-
-.ask-q { font-size: 12.5px; color: rgba(255, 255, 255, 0.94); margin-bottom: 9px; font-weight: 600; }
-.ask-opts { display: flex; flex-wrap: wrap; gap: 6px; }
-
-/* 选项 = antd 小按钮的样子（方角、浅底、细边） */
-.ask-opt {
-  padding: 3px 11px; border-radius: 6px; cursor: pointer;
-  font-size: 12px; font-family: inherit; line-height: 20px;
-  color: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.04);
-  transition: all 150ms var(--ease);
-}
-.ask-opt:hover {
-  color: #54c8b1;
-  border-color: #54c8b1;
-  background: rgba(84, 200, 177, 0.10);
-}
-/* 选中态要明显：这是"我选了什么"的唯一反馈。用工作台的主色实心。 */
-.ask-opt.on {
-  color: #04121a;
-  background: #54c8b1;
-  border-color: #54c8b1;
-  font-weight: 600;
-}
-
-.ask-note { margin-top: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.38); }
-.ask-hint { font-size: 11px; color: rgba(255, 255, 255, 0.38); margin: 6px 0 2px; }
-.ask-next-tip { font-size: 11px; color: rgba(255, 255, 255, 0.28); margin-top: 6px; cursor: pointer; }
-.ask-next-tip:hover { color: rgba(255, 255, 255, 0.62); }
-
-/* 每批底部的固定选项 = 工作台的主按钮（整条、主色实心） */
-.ask-done {
-  display: block; width: 100%; margin-top: 4px;
-  padding: 8px 14px; border-radius: 10px; cursor: pointer;
-  font-size: 12.5px; font-family: inherit; font-weight: 600;
-  color: #04121a; background: #54c8b1; border: 1px solid #54c8b1;
-  transition: filter 150ms var(--ease);
-}
-.ask-done:hover { filter: brightness(1.1); }
-
-/* 底部对话框里横向空间小，气泡改成竖排单列，别挤成一条。
- *
- * 但"横向空间小"这个前提只对**没收起**的底部聊天条成立：
- * 主人点 ⤢ 放大（body.chat-tall）之后，聊天区有近千像素宽，
- * 再竖排就是白白占掉两倍高度、逼着主人滚动 —— 而文旅工作台里
- * 卡片本来就是并排铺开的。所以放大之后改回并排。
- *
- * 注：宽度放开之前（见文件末尾 .chat-log .msg:has(.ask-bubbles)），
- * 这里即使不强制竖排也只会得到一个 290px 的窄条，那时并排也放不下。 */
-body:not(.debug):not(.chat-tall) .ask-bubbles { flex-direction: column; }
-body:not(.debug):not(.chat-tall) .ask-bubble { flex: 1 1 auto; min-width: 0; }
 body.chat-tall .chat-expand {
   color: var(--primary);
   border-color: color-mix(in srgb, var(--primary) 50%, transparent);
@@ -460,6 +368,14 @@ body.chat-tall:not(.debug) .composer { padding-bottom: 14px; }
   border-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }
 .aud-btn.primary:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }
+/* 删除键：默认低调（避免一排红叉太吵），悬停才变红示警 */
+.aud-btn.danger { min-width: 26px; padding: 0 6px; color: var(--text-dim); }
+.aud-btn.danger:hover {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 55%, transparent);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+.aud-btn.danger:disabled { opacity: .5; cursor: default; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
@@ -534,13 +450,10 @@ body[data-vfit="rotate"] #bg-video {
 /* 视频背景默认透明且不吃指针事件（它是纯背景，不该拦住舞台上的点击） */
 #bg-video { opacity: 0; pointer-events: none; background: #000; }
 
-/* 舞台三块画布互斥显示：谁来渲染就显示谁，其余 none。
-   #live2d-canvas 与 #lake-canvas 初始都给 none，由 showCanvas() 按当前形象决定 ——
-   默认形象是西湖船娘，所以真正显示的是 #lake-canvas。 */
+/* 舞台两块画布互斥显示：谁来渲染就显示谁，其余 none。
+   两个初始都是 none，由 showCanvas() 按当前形象决定。
+   （原来还有第三块 #lake-canvas，「西湖船娘」那套形象删掉之后它也没了。） */
 #live2d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; z-index: 1; }
-/* 西湖船娘（2D 绘制）。与 Live2D 分开是因为一块 canvas 只能有一种绘图上下文 */
-#lake-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
-/* 3D 舞台与上面两块互斥显示，默认隐藏 */
 #stage3d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; z-index: 1; }
 #wordcloud-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 #wordcloud-layer .wc-word { pointer-events: auto; }
@@ -2381,26 +2294,92 @@ body:not(.debug) .side {
   box-shadow: 0 14px 40px rgb(0 0 0 / 0.45);
   overflow: hidden;
 }
-/* ★ 默认形态的底部卡片 = **对话输出栏 + 输入栏**。
+/* ★ 默认形态的底部卡片 = **文旅工作台 + 方案输出 + 输入栏**。
    上一版只留了输入栏、把 .panes 整个藏掉，于是打完字看不到任何输出，
    展示栏也没了（"没给对话输出栏和展示栏做出来，按键没反应"）。
-   现在只藏页签和其它面板，#pane-chat（对话与方案输出）留着。 */
+   现在只藏页签和其它面板，#pane-tools（合并后的「文旅」）留着。
+
+   ★ 「对话」页签并进「文旅」之后这里也跟着改了：
+   原来藏的是"除 #pane-chat 以外的所有面板"，现在藏的是"除 #pane-tools 以外的"。
+   不改的话一个面板都不显示 —— 整个底部栏只剩输入框，中间一片空。 */
 body:not(.debug) .side .tabs { display: none !important; }
-body:not(.debug) .side .pane:not(#pane-chat) { display: none !important; }
-body:not(.debug) #pane-chat {
+body:not(.debug) .side .pane:not(#pane-tools) { display: none !important; }
+body:not(.debug) #pane-tools {
   display: flex !important;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
   padding: 10px 14px 0;
-}
-body:not(.debug) #pane-chat > h3,
-body:not(.debug) #pane-chat > .sub { display: none; }
-body:not(.debug) #pane-chat .chat-log {
-  flex: 1 1 auto;
-  min-height: 0;
+  /* 合并之后这个面板里装了三样：工作台（表单很高）、方案输出、历史对话。
+     让**面板自己滚**，而不是让输出区抢固定高度 —— 抢高度的结果是表单被挤没，
+     用户看不到"填偏好"那一块（那是这个页签的主要入口）。 */
   overflow-y: auto;
+}
+body:not(.debug) #pane-tools > h3,
+body:not(.debug) #pane-tools > .sub { display: none; }
+/* 输出区按内容长（不再 flex:1 撑满），由面板统一滚动 */
+body:not(.debug) #pane-tools .chat-log {
+  flex: 0 0 auto;
+  min-height: 48px;
+  max-height: none;
+  overflow: visible;
   padding-right: 4px;
 }
+
+/* ★ 工作台**不许被 flex 压扁**。
+   这是"历史对话那一行叠在表单中间"的真正原因，实测数据：
+     #wenlv-planner 的盒子高 = 373px，而它内部内容高 = 854px
+   `#pane-tools` 是 flex 列容器，工作台作为 flex item 默认 flex-shrink:1，
+   于是被压到 373px；而它的内容是**溢出到盒子外面**继续画的，
+   后画的 #chat-log / #chat-hist 就正好压在溢出的表单上面 ——
+   看起来就是"历史对话 / 新对话 / 清空 那一行跑到表单中间去了"。
+   给 flex:0 0 auto 让它按自己内容高，超出部分交给面板滚动。 */
+body:not(.debug) #pane-tools #wenlv-planner,
+body.dock #pane-tools #wenlv-planner {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+/* 历史对话那块同样不许被压扁（实测被压到 10px、内容 32px，标题和按钮叠在一起）。
+   它里面的 .hist-list 自己有 max-height + 滚动，所以不会无限长。 */
+body:not(.debug) #pane-tools .hist,
+body.dock #pane-tools .hist {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/* ---- 工作台的展开开关 ----
+   底部面板只有 300px（用户要的"人物大"），完整工作台要约 700px，
+   直接铺开会把字段切掉、还挤掉方案结果区。所以默认折起来，只留这一行。
+   分栏布局（.debug）下不折叠：那里 520px 宽、纵向也宽松。 */
+.wb-toggle {
+  display: none;            /* 只在底部面板布局里出现，见下面的 :not(.debug) 规则 */
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.045);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.wb-toggle:hover { border-color: color-mix(in srgb, var(--primary) 55%, transparent); }
+.wb-toggle .wb-toggle-arrow { margin-left: auto; color: var(--text-dim); }
+.wb-toggle.open {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  color: var(--primary);
+}
+
+body:not(.debug) .wb-toggle { display: flex; }
+/* 折叠状态：工作台收起来，只留开关那一行 */
+body:not(.debug).wb-collapsed #wenlv-planner { display: none; }
+/* 分栏布局下永远展开（开关也不显示） */
+body.debug.wb-collapsed #wenlv-planner { display: block; }
 /* ★ 高度链必须接上。.side 是**固定高**的 flex 列，中间的 .panes 不给 flex:1 的话，
    里面 #pane-chat 的 .chat-log 会塌成 0 高 —— 对话框其实还在、但里面是空的，
    看起来就是"切回来对话栏没了"。这条漏了很久，是"看着没反应"的真凶。 */
@@ -2410,7 +2389,7 @@ body:not(.debug) .side .panes {
   min-height: 0;
   overflow: hidden;
 }
-body:not(.debug) #pane-chat { height: 100%; }
+body:not(.debug) #pane-tools { height: 100%; }
 body:not(.debug) .side .composer {
   border-top: none;
   background: transparent;
@@ -2471,18 +2450,21 @@ body.dock .side {
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
 }
 
-/* 底部只留对话：页签、以及其它面板全部让位 */
+/* 底部只留「文旅」（对话已并进来）：页签、以及其它面板全部让位 */
 body.dock .side .tabs { display: none; }
-body.dock .side .pane:not(#pane-chat) { display: none !important; }
-body.dock #pane-chat {
+body.dock .side .pane:not(#pane-tools) { display: none !important; }
+body.dock #pane-tools {
   display: flex !important;
   flex-direction: column;
   min-height: 0;
+  height: 100%;
   padding: 12px 16px 0;
+  /* 和默认布局同理：面板自己滚，别让输出区抢固定高度把工作台挤没 */
+  overflow-y: auto;
 }
-/* 标题和说明在底部条里太占地方，去掉；只留消息和输入 */
-body.dock #pane-chat > h3,
-body.dock #pane-chat > .sub { display: none; }
+/* 标题和说明在底部条里太占地方，去掉；只留工作台、消息和输入 */
+body.dock #pane-tools > h3,
+body.dock #pane-tools > .sub { display: none; }
 
 /* 消息气泡自己带底：对话条已经半透明了，气泡再透明就彻底糊在背景上没法读 */
 body.dock .chat-log { padding-right: 4px; }
@@ -2494,10 +2476,11 @@ body.dock .chat-log .msg .bd {
 }
 body.dock .chat-log .msg.me .bd { background: color-mix(in srgb, var(--primary) 26%, rgb(4 7 11 / 0.55)); }
 
-body.dock #pane-chat .chat-log {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+body.dock #pane-tools .chat-log {
+  flex: 0 0 auto;
+  min-height: 48px;
+  max-height: none;
+  overflow: visible;
 }
 body.dock .side .composer {
   padding: 10px 16px 12px;
@@ -2524,6 +2507,23 @@ body.tools-collapsed .tools-toggle {
   color: var(--primary);
 }
 
+/* ---- 静音键：归在功能页的工具排里 ----
+ *
+ * 它就是个普通 .tool-btn，外观由上面那条统一给，不需要额外样式。
+ *
+ * ★ 开屏期间藏起来：开屏（主页）自己有底部那个「🔇 点击开启声音」，
+ *   右上角再来一个既重复、又跟开屏标题栏挤在一起。
+ *   用 :has() 直接读开屏的显隐属性，不额外维护 body class ——
+ *   少一处"忘记同步"的状态。
+ *
+ * 备注：它曾经是 position:fixed + z-index:2600 的悬浮层，为的是
+ * "开屏盖住工具排时也能点到"。既然开屏不该出现这个键，那个绕法就没必要了。 */
+body:has(#boot-screen:not([hidden])) #btn-mute { display: none; }
+
+/* 收纳（折叠）时，静音键和收纳键一起留在外面 —— 声音开关是现场最常按的一个，
+   藏进"设置"里要多点一次才够得着。优先级要压过上面那条通配隐藏规则。 */
+body.tools-collapsed .stage-tools > #btn-mute { display: inline-flex; }
+
 /* ---- 会转的小齿轮 ----
  * 静态的齿轮图标看不出是齿轮，转起来一眼就知道"这是设置、而且能点"。
  * 收起状态下转快一点当作提示；展开后慢下来，避免一排按钮里有个东西一直在动。
@@ -2549,13 +2549,12 @@ body.tools-collapsed .tools-toggle .ico { animation-duration: 3.4s; }
  * ==========================================================================*/
 
 body.avatar-hidden #live2d-canvas,
-body.avatar-hidden #lake-canvas,
 body.avatar-hidden #stage3d-canvas {
   opacity: 0;
   pointer-events: none;
   transition: opacity 260ms var(--ease);
 }
-#live2d-canvas, #lake-canvas, #stage3d-canvas { transition: opacity 260ms var(--ease); }
+#live2d-canvas, #stage3d-canvas { transition: opacity 260ms var(--ease); }
 body.avatar-hidden #btn-avatar-hide { opacity: .55; }
 
 /* ============================================================================
@@ -2680,9 +2679,10 @@ body.avatar-hidden #btn-avatar-hide { opacity: .55; }
   .subtitle { font-size: 17px; }
 }
 
-/* ---- Kiosk（展厅全屏宣传）：藏掉所有"操作界面"，只留舞台与字幕 ----
-   进入方式：点顶栏的「全屏展示」，或在设置里打开。用 body.kiosk 一个开关控制，
-   因为大屏场景下用户要的是一块"会说话的展板"，不是一堆可点的设置项。 */
+/* ---- Kiosk（展厅大屏）：藏掉所有"操作界面"，只留舞台与底部对话栏 ----
+   进入方式：点顶栏的「大屏」，或从开屏点「对话页」进来（默认就开）。
+   用 body.kiosk 一个开关控制，因为大屏场景下用户要的是一块"会说话的展板"，
+   不是一堆可点的设置项。 */
 /* ★ 大屏：藏掉**右侧操作面板**，但底部对话栏要留着。
    原来写的是 `body.kiosk .side { display: none }`，把整条侧栏连对话栏一起藏了 ——
    于是大屏变成"只放片子、没法跟观众说话"。
@@ -2703,18 +2703,32 @@ body.kiosk .topbar,
 body.kiosk .stage { border-radius: 0; margin: 0; }
 /* 大屏下底部对话栏的左右留边也收窄一点，别浪费屏幕 */
 body.kiosk .side { left: clamp(8px, 1.2vw, 24px); right: clamp(8px, 1.2vw, 24px); }
-body.kiosk .topbar { opacity: 0; transition: opacity 260ms var(--ease); }
-/* ★ 必须写成"悬停到顶栏自己身上"，不能写成 `body.kiosk:hover`。
-   鼠标基本一直待在页面上，body 的 :hover 就永远成立 —— 顶栏一直是显示状态，
-   大屏模式看上去像"根本没生效"（实测确认过：kiosk 类挂上了、侧栏也藏了，
-   但顶栏还在）。opacity:0 不影响命中测试，所以改成悬停自身是有效的。 */
-body.kiosk .topbar:hover,
-body.kiosk .topbar:focus-within { opacity: 1; }
+
+/* ★ 顶栏整条**藏掉**，不是淡出。
+   原来是 `opacity: 0` + "悬停到顶栏自身再亮回来"，想的是"给个退路"。
+   实际用起来的问题是：鼠标只要不小心划到屏幕顶部，那一行
+   「🏔️ 文旅智能辅助 HikiTravel-AIRI-1.2」加一排气泡就冒出来了 ——
+   大屏里观众会看到"怎么突然多了个标题栏"。
+   现在直接 display:none，彻底不出现。
+   退路改用 Esc（见 app.js 的 keydown：`if (e.key === 'Escape' && body.kiosk) setKiosk(false)`）。 */
+body.kiosk .topbar { display: none; }
+
+/* ★ 舞台左上角那条「🏔️ 小文 浙江文旅向导，陪你玩得明白…」也藏。
+   它原来**根本没被 kiosk 规则盖到**，所以大屏下一直显示着 ——
+   这才是用户截图里"说好只剩人物和对话栏、上面却还挂着一行字"的那块。
+   大屏上观众不需要知道"这是谁"。 */
+body.kiosk .char-plate { display: none; }
+
+/* ★ 但右上角那排工具**要留着**（设置 / 静音 / 词云开关 / 全屏放大词云…）。
+   保持原来"平时透明、鼠标移上去才出现"的做法：
+   · 平时看不见 → 画面干净
+   · 移过去能露出来 → 功能还在，不用先按 Esc 才有得点
+   注意这里**不能改成 display:none** —— 那会让那排按钮彻底点不到，
+   「全屏放大词云」这类功能就废了（实测踩过：验收脚本点 #wc-full 直接超时）。 */
 body.kiosk .stage-tools { opacity: 0; transition: opacity 260ms var(--ease); }
 /* 这里用 :has(:focus-visible) 而不是 :focus-within：
-   鼠标点一下「大屏」会把焦点留在那个按钮上，:focus-within 立刻匹配，
-   工具排就又亮着不走了 —— 用户看到的就是"点了大屏没什么变化"。
-   :focus-visible 只在键盘导航时才成立：鼠标点完不残留，Tab 进去仍然看得见。 */
+   鼠标点一下会把焦点留在那个按钮上，:focus-within 立刻匹配、
+   于是鼠标一移开它也不消失；:focus-visible 只在键盘导航时才成立。 */
 body.kiosk .stage-tools:hover,
 body.kiosk .stage-tools:has(:focus-visible) { opacity: 1; }
 
@@ -2770,31 +2784,9 @@ body.kiosk .stage-tools:has(:focus-visible) { opacity: 1; }
   padding: 0;
 }
 
-/* ----------------------------------------------------------------------------
- * 对话引导气泡也要**占满整行** —— 和上面方案卡片同一个毛病。
- *
- * .msg 是 flex（头像 + 气泡），.bd 又是"按内容定宽"，于是 .ask-bubbles
- * 这个 flex-wrap 容器只拿到 290px：两个问题卡片只能一上一下地叠着，
- * 选项挤成好几行，看着完全不像工作台里那种并排的卡片。
- * 实测 290px 宽 / 280px 高，卡片本该并排。
- *
- * 这里同样把外层的"聊天气泡"壳去掉：工作台的美术本身就是卡片，
- * 外面再套一层气泡底 + 描边，两层边框离得很近会显脏。
- * -------------------------------------------------------------------------- */
-.chat-log .msg:has(.ask-bubbles) { width: 100%; }
-.chat-log .msg:has(.ask-bubbles) .bd {
-  flex: 1 1 auto;
-  width: 100%;
-  max-width: none;
-  background: transparent;
-  border: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  padding: 0;
-}
-
-/* 气泡容器自身也别再被压：让它铺满，卡片按 flex-basis 自己排 */
-.chat-log .msg .ask-bubbles { width: 100%; min-width: 0; }
+/* 注：气泡引导（.ask-bubbles）已按需求删除，原先针对它的两条"占满整行"规则
+   （.chat-log .msg:has(.ask-bubbles) …）一并移除。
+   工作台那条（:has(.workbench-host)）仍在，它才是现在的对话内容形态。 */
 
 /* ----------------------------------------------------------------------------
  * 对话框里的「文旅工作台本体」（app.js → startWorkbenchInChat）
@@ -2875,13 +2867,14 @@ body:not(.debug) .side:has(.plan-view-host) {
  *
  * 排除四类：
  *   .me / .sys / .err —— 主人自己的话、系统提示、错误，各自有语义色，不动；
- *   带方案 / 气泡 / 工作台的消息 —— 它们自己就是工作台卡片，外面再套一层会显脏
+ *   带方案 / 工作台的消息 —— 它们自己就是工作台卡片，外面再套一层会显脏
  *     （那几条规则在文件更靠前的位置，被这条高优先级的压住就坏了）。
+ *   （原条件里还有 :not(:has(.ask-bubbles)) —— 气泡引导已按需求删除，去掉这个已死的排除项。）
  *
  * 也**刻意排除 body.dock**：那个模式下对话框是浮在宣传片上的，
  * 用半透明浅底会看不清字 —— 那层的深色底是出于可读性，不是审美。
  * -------------------------------------------------------------------------- */
-body:not(.dock) .chat-log .msg:not(.me):not(.sys):not(.err):not(:has(.plan-view-host)):not(:has(.ask-bubbles)):not(:has(.workbench-host)) .bd {
+body:not(.dock) .chat-log .msg:not(.me):not(.sys):not(.err):not(:has(.plan-view-host)):not(:has(.workbench-host)) .bd {
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;

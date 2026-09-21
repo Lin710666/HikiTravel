@@ -1,4 +1,9 @@
 @echo off
+REM ★ chcp 65001 不能省：本文件是 UTF-8（无 BOM），里面有中文提示，
+REM 而中文 Windows 的控制台默认是 GBK(936) —— 不切到 65001 的话，
+REM 那些中文会以 UTF-8 字节被当成 GBK 显示，整段变成乱码
+REM （"一键部署.bat" 就是因为带了这句才正常）。原来这里少了它。
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 title Wenlv Assistant (HikiTravel + AIRI UI) - One-Click Deploy
@@ -141,7 +146,9 @@ if not exist "backend\.env" (
         echo AMAP_API_KEY=
         echo.
         echo # Ollama local inference
-        echo OLLAMA_BASE_URL=http://localhost:11434
+        echo # 用 127.0.0.1 而不是 localhost：装了 IPv6 的机器上 localhost 先解析到 ::1，
+        echo # 而 Ollama 只监听 IPv4，每次探测都要白等 IPv6 超时（约 2 秒/次）。
+        echo OLLAMA_BASE_URL=http://127.0.0.1:11434
         echo OLLAMA_MODEL=qwen2.5:7b
         echo OLLAMA_EMBED_MODEL=nomic-embed-text
         echo # 30s is fine for chat; plan generation needs a longer budget

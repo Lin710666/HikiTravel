@@ -5,10 +5,10 @@
     "focus-group": "点亮/收起该组，只改透明度不重排",
     "days-stepper": "游玩天数的加减控件",
     "gen-plan": "让工作台按当前表单生成方案",
-    "intake": "信息缺失时集中追问",
     "export": "导出当前方案为 Markdown",
     "focus": "滚到工作台里对应的那块并高亮（payload.target 见下）",
-    "panel": "切到外壳的某个面板"
+    "panel": "切到外壳的某个面板",
+    "open-tools": "直接打开文旅工作台本体（和右侧「文旅」页同一套表单）"
   },
   "groups": [
     {
@@ -97,12 +97,12 @@
       "hint": "直接说一句话，由意图识别抽出画像"
     },
     {
-      "word": "让 AI 先问我",
+      "word": "开始规划",
       "weight": 78,
-      "action": "intake",
+      "action": "open-tools",
       "group": "核心功能",
       "role": "core",
-      "hint": "什么都不填，演示信息缺失时的集中追问"
+      "hint": "直接打开文旅工作台本体（和右侧「文旅」页是同一套表单）"
     },
     {
       "word": "一键导出",
