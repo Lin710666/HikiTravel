@@ -56,11 +56,43 @@ class OutputGuardSkill(Skill):
         found += self._time_order(plan)
         found += self._late_meal(plan)
         found += self._same_scenic(plan)
+        found += self._round_trip_note(plan, pref)
         # 和输入层的警告合并：ctx["conflicts"] 是输入层已经放好的
         ctx["conflicts"] = list(ctx.get("conflicts") or []) + found
         return ctx
 
     # ------------------------------------------------------------------ 各项
+
+    @staticmethod
+    def _round_trip_note(plan: TravelPlan, pref: Any) -> List[Conflict]:
+        """没填出发地时，**明确告诉用户往返大交通是估的**。
+
+        为什么要有这一条：预算里的"往返大交通"要靠「出发地 → 目的地」的距离算，
+        而工作台里出发地是**选填**，多数人不会填。没填时只能退回到一个固定值
+        （高铁 150 元/人·单程），跟实际距离可能差很多 —— 杭州→上海约 73 元、
+        杭州→乌鲁木齐要上千。
+
+        与其让用户对着一个不知从哪来的数字发愣，不如把口径摆出来：
+        填上出发地就会按实际距离重算。
+        """
+        if pref is None:
+            return []
+        mode = str(getattr(pref, "transportation", "") or "")
+        origin = str(getattr(pref, "origin", "") or "").strip()
+        if mode in ("", "本地") or origin:
+            return []
+        bd = getattr(plan, "budget_breakdown", None)
+        est = float(getattr(bd, "transport", 0) or 0) if bd else 0.0
+        if est <= 0:
+            return []
+        return [Conflict(
+            id="round_trip_estimated",
+            message=(
+                f"没填出发地，交通里的「往返大交通」是按 {mode} 的固定值估的"
+                f"（共 {est:.0f} 元）—— 跟实际距离可能差很多"
+            ),
+            suggestion="填上「出发地」后会按出发地到目的地的实际距离重算（同城则为 0）",
+        )]
 
     @staticmethod
     def _budget(plan: TravelPlan, pref: Any) -> List[Conflict]:

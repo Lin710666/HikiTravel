@@ -1,10 +1,35 @@
 # 文旅智能辅助 · 融合版（HikiTravel 后端 + AIRI 网页界面）
 
-**版本：`HikiTravel-AIRI-1.2`**（本地目录名与 `HikiTravel` 仓库的分支同名。
-代码内容取自组员在 `yidongbei_jhc` 上的分支 `v6.6` —— 从 `HikiTravel-AIRI-1.2`
+**版本：`HikiTravel-AIRI-1.3`**（本地目录名与 `HikiTravel` 仓库的分支同名。
+代码内容取自组员在 `yidongbei_jhc` 上的分支 `v6.6` —— 从 `HikiTravel-AIRI-1.3`
 那条线一路长过来的，所以两边的东西都没有丢。）
 
 赛题 **JBGS-2026-06**（发榜方：杭州网易智企）的比赛工程。
+
+### 1.3 相对 1.2 改了什么
+
+**交通费虚高**（用户反馈："杭州到上海会默认从杭州打车去上海"）。查下来不是单个
+bug，是**四层叠在一起**，每层都能单独把预算推高：
+
+| 层 | 问题 | 后果 |
+| --- | --- | --- |
+| ① 计费方式 | `_transport()` 只要两点 >1.5km 就一律取高德的 `taxi_cost`（**打车费**） | 40 公里的跨区、甚至城际都按打车算 |
+| ② 餐厅选址 | 餐厅按天数轮换（`restaurants[i % len]`），**完全不看位置** | 排出"在松江玩完、打车 40 公里回人民广场吃饭"，那一段 138 元 |
+| ③ 景点分天 | 按相关度顺序**按个数切片**，没有地理聚类 | 同一天横跨 40 公里 |
+| ④ 往返大交通 | 拍脑袋的固定值（高铁一律 150/人），**而且从来没读过「出发地」** | 杭州→上海和杭州→乌鲁木齐估得一样；**同城游也收 600 元** |
+
+修法与实测见下面「[交通费为什么虚高](#交通费为什么虚高已修)」一节。效果：
+
+```
+成都4天   交通 1468 →  487.8    总预算 8548 → 3661.8
+苏州2天   交通  112 →   24.3
+杭州1天   交通   16 →    4.0
+杭州→上海（165km，2人往返）  固定 600 → 293.4（真实高铁 73×2×2 = 292 ✅）
+同城（出发地=目的地）        凭空 600 → 0
+```
+
+顺带把每天的景点排成了**地理连贯的片区**，餐厅也从"轮换"改成"就近"
+（出现「文殊院 + 文殊院美食街」这种合理搭配）。
 
 ### 1.2 相对 1.1 改了什么
 
@@ -21,6 +46,11 @@
 | **地图文字全叠在一起** | 市区 8 个餐厅其实在同一个商场；改成**先合并再避让**，标签重叠 43 对 → **0 对** |
 | **开屏视频挑片规则** | 原来是"看文件名首字母"（推荐规则形同虚设）；改成关键词 + `首选.txt` 点名 |
 | **三个 .bat** | 新增**环境检查**；`start.bat` 现在会**拉起语音服务**；`install.bat` 补了漏掉的 `chcp` |
+
+> 1.2 分支之后还补过几次（这些提交同时存在于 1.2 与 1.3）：
+> **`.bat` 换行事故**（仓库里存的是 LF，别人 clone 下来三个脚本全废 —— 见
+> 「发布到 GitHub」一节）、**随仓库分发模型与演示视频**、**默认形象改为深闺藏衣袖**、
+> 以及 README 的「快速开始（新用户看这里）」。
 
 ---
 
@@ -156,7 +186,7 @@ fatal error，报的还是 `UnicodeDecodeError: 'gbk' codec can't decode ...`，
 ## 目录结构
 
 ```
-HikiTravel-AIRI-1.2/
+HikiTravel-AIRI-1.3/
 ├─ install.bat              一键部署（建 venv、装依赖、生成 .env 模板）
 ├─ start.bat                一键启动（起服务 + 开浏览器）
 ├─ public/                  5.0 的 AIRI 界面，纯静态
@@ -1125,7 +1155,7 @@ stopTalking 之后   最大开口 0.000                        ✅ 已闭嘴
   底部对话栏保留，地址栏和标签页该在还在。要真全屏请自己按 **F11**。
   （全项目已无任何 `requestFullscreen` 调用，可用 `grep -r requestFullscreen public/` 复核。）
 - **顶栏整条 `display: none`**，不是淡出。原来是 `opacity:0` + 悬停自动亮回来，
-  鼠标划到屏幕顶部就会把「🏔️ 文旅智能辅助 HikiTravel-AIRI-1.2」冒出来。
+  鼠标划到屏幕顶部就会把「🏔️ 文旅智能辅助 HikiTravel-AIRI-1.3」冒出来。
 - **左上角那条「🏔️ 小文 浙江文旅向导，陪你玩得明白…」（`.char-plate`）也藏**。
   它原来**根本没被 kiosk 规则盖到**，所以大屏下一直显示着 ——
   表现就是"说好只剩人物和对话栏，上面却还挂着一行字"。
@@ -1510,7 +1540,7 @@ Wanwea、超级姜胖胖·环球中心、大董·SKP、烤匠·环球中心、�
 > copy /Y dist-embed\style.css        ..\public\planner-embed.css
 > rmdir /S /Q dist-embed
 > ```
-> 注意 frontend 在 `HikiTravel-AIRI-1.2\frontend\`，所以目标是 `..\public\`。
+> 注意 frontend 在 `HikiTravel-AIRI-1.3\frontend\`，所以目标是 `..\public\`。
 
 ## 开屏/背景放的是哪条视频（已修）
 
@@ -1580,19 +1610,19 @@ luotianyi-BV1MYCaYXEWf.mp4             列了 · 在 ✅
 ## 发布到 GitHub（流程 + 一个把克隆 `.git` 删掉的坑）
 
 推的是 `https://github.com/Lin710666/HikiTravel` 仓库的**同名分支**
-（`HikiTravel-AIRI-1.2`）。内容在**仓库根目录**（不是子目录）。
+（`HikiTravel-AIRI-1.3`）。内容在**仓库根目录**（不是子目录）。
 
 ### 流程
 
 ```bat
 git clone https://github.com/Lin710666/HikiTravel.git
 cd HikiTravel
-git checkout HikiTravel-AIRI-1.2
+git checkout HikiTravel-AIRI-1.3
 :: 清空工作区（只留 .git），再把产品目录的内容复制进来 —— 用 /E，不要用 /MIR
 git add -A
 git status --porcelain      :: 逐条核一遍，确认没有敏感文件
 git commit -F 提交信息.txt
-git push origin HikiTravel-AIRI-1.2
+git push origin HikiTravel-AIRI-1.3
 ```
 
 ### ⚠️ 坑：`robocopy /MIR` 把克隆的 `.git` 删了
@@ -1774,6 +1804,107 @@ start.bat        → OK 已经在跑（http://127.0.0.1:7860）
   fatal（项目在中文路径下，见 `install.bat` 里的长注释），于是"Python 版本读不到、
   依赖被误报成没装齐"。`start.bat` / `install.bat` 都有这句，**新脚本也得带上**。
 
+## 交通费为什么虚高（已修）
+
+用户反馈：「杭州到上海会默认从杭州打车去上海，导致预算虚高」。
+查下来**不是一个 bug，是四层叠在一起**，每层都能单独把预算推高。都是实测出来的。
+
+### 四层根因
+
+**① `_transport()` 只要超过 1.5km 就一律按「打车」计费**
+
+原代码取的是高德驾车路线里的 `route.taxi_cost`（**打车费**）：
+
+```python
+if dist < 1.5:
+    return TransportToNext(mode="步行", ...)      # 走路
+# 其余全部走这里
+cost = float(route.get("taxi_cost") or 0)          # ← 打车费
+return TransportToNext(mode="打车", cost=cost)
+```
+
+于是 40 公里的跨区移动也是打车、城际也是打车。实测上海会出现
+「从松江广富林打车 40 公里回人民广场吃饭」，**那一段就是 138 元**。
+
+**② 餐厅按天轮换，完全不看位置**
+
+```python
+def _pick(self, restaurants, i):
+    return restaurants[i % len(restaurants)]   # 只按天数轮换
+```
+
+同一天的餐厅和景点可以相隔 40 公里 —— 上面那 138 元就是这么来的。
+
+**③ 景点按相关度切片，没有地理聚类**
+
+```python
+day_pois = selected[i * per_day : (i + 1) * per_day]   # 直接按个数切
+```
+
+`selected` 是高德的相关度顺序，于是一天之内可能横跨 40 公里
+（实测：松江广富林 + 市中心城隍庙同一天）。
+
+**④ 往返大交通是拍脑袋的固定值，而且完全无视「出发地」**
+
+```python
+if pref.transportation == "高铁": return 150 * people * 2    # 固定 150/人
+if pref.transportation == "飞机": return 500 * people * 2
+```
+
+- 杭州→上海（170km）和杭州→乌鲁木齐（3900km）**估出来一模一样**
+- **同城游也照收 600 元"往返高铁"**（实测：杭州市内 2 天 2 人，交通分项 830
+  = 接驳 230 + 凭空多出来的往返 600）
+- `origin`（出发地）在表单里让用户填，**后端从来没读过它**（全项目搜 `origin`
+  只有字段定义和一句提示词）
+
+### 改了什么
+
+| # | 改动 | 位置 |
+| --- | --- | --- |
+| 1 | 接驳**按距离分档**：<1.5km 步行 / ≤12km 地铁（按人 2~8 元）/ ≤60km 打车（高德真实出租车费）/ **>60km 城际**（不打车，按高铁价） | `_transport()` |
+| 2 | 餐厅**就近选**（锚在当天景点的地理中心），且**午餐锚上午那半、晚餐锚下午那半** | `_pick()` |
+| 3 | 景点先**最近邻排序**再按天切片 —— 每天变成一条地理连贯的路线 | `_nearest_neighbour_order()` |
+| 4 | 往返大交通按**出发地→目的地的实际距离**算（给高德客户端新增了 `geocode()`）；**同城 → 0**；拿不到距离才回退旧固定值 | `_round_trip()` / `AmapClient.geocode()` |
+| 5 | 出发地是选填 —— 没填时在方案里**明确提示**这个数是怎么估的 | `OutputGuardSkill._round_trip_note()` |
+
+### 实测（同一套真实编排器，改前 → 改后）
+
+```
+成都 4天   交通 1468   →  487.8      总预算 8548 → 3661.8
+苏州 2天   交通  112   →   24.3
+杭州 1天   交通   16   →    4.0
+```
+
+往返大交通的口径（2 人往返）：
+
+```
+杭州→上海（出发地填杭州，约 165km）  固定 600  →  293.4
+    真实参考：杭州→上海高铁二等座 73 元 → 73×2人×2 = 292   ✅ 基本一致
+同城（出发地=目的地）                 凭空 600  →  0
+没填出发地                            600      →  600 + 一条说明口径的警告
+```
+
+每天的地理连贯性也顺带好了（成都 4 天）：
+
+```
+Day1  东郊记忆 → 烤匠麻辣烤鱼 → 文殊院 → 洞子口张老二凉粉(文殊院美食街)
+Day2  人民公园 → 将军府鸡毛店(人民公园店) → 武侯祠博物馆 → 锦里小吃街
+Day3  大熊猫繁育研究基地 → 小妹滋补蹄花 → 南桥 → 太平张醪糟(都江堰总店)
+Day4  都江堰景区 → 食门小厨 → 青城山景区 → 大学城小吃街
+```
+
+餐厅从"按天轮换"变成"就近"之后，还会出现「文殊院 + 文殊院美食街」
+「人民公园 + 人民公园店」这种合理搭配。
+
+### 还剩一处**不是计费问题**的（已告知，未改）
+
+上海方案里仍可能看到一段 32 公里的打车（135~138 元）。那是**真实成本**：
+广富林文化遗址在松江，离市中心 32 公里，而检索到的餐厅**全在市区**
+（松江附近没有命中），所以晚餐只能安排在 32 公里外。
+
+要彻底消除它需要改**排程策略**（按地理聚类分天、远郊点单独成天、或剔除当日无法
+覆盖的点），那是行程质量问题、不是计费公式问题，留待下一步。
+
 ---
 
 ## 重新构建并更新工作台
@@ -1783,8 +1914,8 @@ start.bat        → OK 已经在跑（http://127.0.0.1:7860）
 ```bat
 cd HikiTravel\frontend
 node node_modules\vite\bin\vite.js build --config vite.embed.config.ts
-copy /Y dist-embed\planner-embed.js  ..\HikiTravel-AIRI-1.2\public\
-copy /Y dist-embed\style.css         ..\HikiTravel-AIRI-1.2\public\planner-embed.css
+copy /Y dist-embed\planner-embed.js  ..\HikiTravel-AIRI-1.3\public\
+copy /Y dist-embed\style.css         ..\HikiTravel-AIRI-1.3\public\planner-embed.css
 rmdir /S /Q dist-embed
 ```
 

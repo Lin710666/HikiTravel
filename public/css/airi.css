@@ -2707,7 +2707,7 @@ body.kiosk .side { left: clamp(8px, 1.2vw, 24px); right: clamp(8px, 1.2vw, 24px)
 /* ★ 顶栏整条**藏掉**，不是淡出。
    原来是 `opacity: 0` + "悬停到顶栏自身再亮回来"，想的是"给个退路"。
    实际用起来的问题是：鼠标只要不小心划到屏幕顶部，那一行
-   「🏔️ 文旅智能辅助 HikiTravel-AIRI-1.2」加一排气泡就冒出来了 ——
+   「🏔️ 文旅智能辅助 HikiTravel-AIRI-1.3」加一排气泡就冒出来了 ——
    大屏里观众会看到"怎么突然多了个标题栏"。
    现在直接 display:none，彻底不出现。
    退路改用 Esc（见 app.js 的 keydown：`if (e.key === 'Escape' && body.kiosk) setKiosk(false)`）。 */
