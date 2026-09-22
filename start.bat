@@ -63,6 +63,36 @@ if not defined PYEXE (
     exit /b 1
 )
 
+REM ============================================================
+REM  确认这个 python 真能跑起后端。
+REM
+REM  为什么需要这一道：上面那串查找是「项目 venv → uv → py → python → …」，
+REM  一个**刚 clone 下来**的人没有 backend\.venv、也没装 uv，于是会落到系统
+REM  Python 上；而系统 Python 里通常没有本项目的依赖，启动时抛的是
+REM      ModuleNotFoundError: No module named 'uvicorn'
+REM  这种跟"你还没装依赖"完全看不出关系的报错。
+REM  （实测：从 GitHub 克隆一份直接双击 start.bat，就是这个问题。）
+REM
+REM  用的确实是项目 venv、或走 uv 的，跳过这道检查。
+REM ============================================================
+set "PY_IS_PROJECT_VENV="
+echo %PYEXE% | findstr /i "\.venv" >nul 2>nul && set "PY_IS_PROJECT_VENV=1"
+if not defined PY_IS_PROJECT_VENV if /i not "%PYEXE%"=="uv" (
+    "%PYEXE%" %PYARGS% -c "import uvicorn, fastapi" >nul 2>nul
+    if errorlevel 1 (
+        echo.
+        echo [错误] 项目依赖还没装 —— 当前的 Python 是 %PYEXE%
+        echo.
+        echo        请先双击  install.bat      （只装 Python 依赖）
+        echo        或双击      一键部署.bat    （连本地大模型一起装）
+        echo.
+        echo        装完再运行本脚本。想先看看缺什么，可以双击 检查环境.bat
+        echo.
+        pause
+        exit /b 1
+    )
+)
+
 if not exist "public\index.html" (
     echo [错误] 缺少 public\index.html —— 前端界面是必需的。
     pause
