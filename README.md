@@ -38,33 +38,97 @@ Node 后端说话，一共要 60 多个接口；后端换成 FastAPI 之后两�
 
 ---
 
-## 快速开始
+## 快速开始（新用户看这里）
 
-### 一键（推荐）
+### 第一次用：三步
 
-1. 双击 `install.bat` —— 建虚拟环境、装后端依赖、生成 `backend\.env` 模板
-2. 按提示把高德 Key 填进 `backend\.env` 的 `AMAP_API_KEY`
-3. 双击 `start.bat` —— 起服务并自动打开浏览器
+```
+1. 双击  检查环境.bat     ← 先看看缺什么（只检查，不改动任何东西）
+2. 双击  install.bat      ← 装依赖
+3. 双击  start.bat        ← 起服务，会自动打开浏览器
+```
 
 浏览器打开 <http://localhost:8000>。
 
-### 手动
+> 也可以直接跳到第 2 步，但**先跑一次 `检查环境.bat` 能省很多时间** ——
+> 它会把「缺 Ollama / 缺模型 / 没填高德 Key / 没装语音」这几件事一次列清楚。
+> 这些缺一样，界面照样能打开，但一点生成就报错，很难猜到是哪里不对。
+
+### 四个脚本分别在什么时候用
+
+| 脚本 | 干什么 | 什么时候用 |
+| --- | --- | --- |
+| **`检查环境.bat`** | 8 步逐项体检（Python / 依赖 / Ollama / 模型 / 高德 Key / 前端产物 / 语音 / 素材与端口）。**只检查、不改动环境** | 第一次拿到项目；或界面不对劲时先跑它 |
+| **`install.bat`** | 建 `backend\.venv`、装 Python 依赖、生成 `backend\.env` | 第一次，或依赖变了之后 |
+| **`一键部署.bat`** | `install.bat` 的全部 + **拉起 Ollama 并下模型**（`qwen2.5:7b` 约 4.4 GB） | 想一次装齐、机器上还没有模型 |
+| **`start.bat`** | 起**语音服务**（装了的话）+ **后端**，并打开浏览器 | 每次要用的时候 |
+
+`install.bat` 和 `一键部署.bat` **只需要跑一次**（两个都跑也行，后者会认出已装好的部分）。
+
+### 每次要用的时候
+
+双击 `start.bat`。它会：
+
+1. 探一下 `http://127.0.0.1:7860`，**已经在跑就不重复起**语音服务（重复起会抢端口、还白占显存）
+2. 没跑就自动找语音服务的安装位置，用**最小化窗口**起一个
+3. 没装语音就跳过并提示 —— 不影响其它功能
+4. 起后端，并自动打开 `http://localhost:8000`
+
+**想省显存**（语音服务和 Ollama 共用同一张显卡）：用 **`start.bat notts`** 跳过语音。
+8 GB 卡上两个都开，显存只剩两三百 MB（实测 7720 / 8188 MiB），生成会变慢但能用。
+
+**没装依赖就跑 `start.bat`** 会直接告诉你「请先双击 install.bat」，不会让你对着
+`ModuleNotFoundError: No module named 'uvicorn'` 发愣。
+
+### 怎么停
+
+- **后端**：在 `start.bat` 那个窗口按 <kbd>Ctrl</kbd>+<kbd>C</kbd>
+- **语音服务**：单独关掉那个最小化的窗口（它是个独立进程）
+
+### 依赖
+
+- **Python 3.10+**（<https://www.python.org/downloads/>，安装时勾选 *Add python.exe to PATH*）
+- **Ollama**（本机推理，默认 `http://localhost:11434`；对话模型 `qwen2.5:7b`、
+  向量模型 `nomic-embed-text`）—— 全部离线、零成本。
+  装：<https://ollama.com/download>
+- **高德开放平台 Web 服务 Key**（POI / 天气 / 路线，免费申请：
+  <https://console.amap.com/dev/key/app>）—— 不填的话页面能开，但景点/天气/路线会 503
+
+### 可选：语音合成（Qwen TTS WebUI）
+
+不装也能用，只是**形象全程静音、嘴也不会动**（口型是拿音频的频谱驱动的，
+没有音频就没得分析）。装了之后 `start.bat` 会自动帮你拉起它。
+
+- 项目：<https://github.com/licyk/qwen-tts-webui>
+- 装完在项目根目录建一个 `qwen-tts-home.txt`，里面写安装路径（一行）
+- 或者双击 `tools\start-tts.bat` 单独启动
+
+### 没有 `data\` 素材是正常的
+
+仓库里**没有** `data/videos`（演示宣传片）和 `data/audio`（配乐）——
+共约 148 MB，且其中一部分的授权只允许本机演示、不允许再分发，所以没有随仓库提交。
+缺了它们不影响使用：
+
+- **开屏 / 舞台背景**：会用**程序化的西湖场景**代替视频（不是坏了）
+- **「外观 → 配乐」**：列表是空的
+
+想补上的话，把视频放进 `data\videos\`、音频放进 `data\audio\` 即可，不用改代码。
+
+### 出问题先看这里
+
+- **`.bat` 双击一闪而过 / 报 `'xxx' is not recognized` / `&& was unexpected`**
+  → 多半是**换行符**问题（`.bat` 必须是 CRLF）。仓库已用 `.gitattributes`
+  强制 CRLF，所以**请用 `git clone` 拿项目，不要下载 ZIP 后手工复制**。
+  详见下面「发布到 GitHub」一节里的实测记录。
+- **页面能开，但一点生成就报错** → 跑 `检查环境.bat`，看是哪一项缺
+- **没有声音 / 嘴不动** → 语音服务没起，见上面「可选：语音合成」
+
+### 手动启动（不想用 .bat）
 
 ```bat
 cd backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-
-### 依赖
-
-- **Python 3.10+**
-- **Ollama**（本机推理，默认 `http://localhost:11434`，对话模型 `qwen2.5:7b`，
-  embedding 用 `nomic-embed-text`）—— 全部离线、零成本
-- **高德开放平台 Web 服务 Key**（POI / 天气 / 路线，免费申请：
-  <https://console.amap.com/dev/key/app>）
-
-三个前端接口用不到 Ollama 也能开：页面能打开、词云能点、目录类接口正常，
-只有真正生成方案时才会用到模型。
 
 ### 为什么 `.bat` 里要写 `PYTHONUTF8=1`
 
