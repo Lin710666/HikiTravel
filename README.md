@@ -108,7 +108,7 @@ Node 后端说话，一共要 60 多个接口；后端换成 FastAPI 之后两�
 | 素材 | 位置 | 说明 |
 | --- | --- | --- |
 | **演示视频**（2 个） | `data\videos\` | 开屏宣传片 + 舞台动态背景。**已随仓库提供**，clone 下来就能用 |
-| **Live2D 形象**（4 个） | `public\models\` | `mao`（默认）、`hiyori`、`cangyixiu`（深闺藏衣袖）、`mudan`（唯有牡丹真国色） |
+| **Live2D 形象**（4 个） | `public\models\` | `cangyixiu`（深闺藏衣袖，**默认形象**）、`mudan`（唯有牡丹真国色）、`mao`、`hiyori` |
 
 **唯一没随仓库提交的是配乐**（`data\audio\`，6 首）—— 都是商业音乐，授权不允许再分发。
 所以「外观 → 配乐」列表是空的，不影响其它功能。想补的话把音频放进 `data\audio\` 即可，不用改代码。
@@ -164,7 +164,7 @@ HikiTravel-AIRI-1.2/
 │  ├─ js/                   app.js / wordcloud.js / lake.js / live2d.js / nav.js …
 │  ├─ css/
 │  ├─ vendor/               pixi.js + pixi-live2d-display（本地内置，不联网）
-│  ├─ models/               Live2D 模型（haru / hiyori / mao）
+│  ├─ models/               Live2D 模型（cangyixiu / mudan / mao / hiyori）
 │  ├─ models3d/             3D 模型
 │  ├─ backgrounds/  avatars/
 │  ├─ planner-embed.js      ★ 组员新做的 React 工作台（构建产物，原生挂载进「文旅」面板）
