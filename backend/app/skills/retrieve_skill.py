@@ -51,6 +51,30 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _as_price(value: Any) -> Optional[float]:
+    """把高德的 `biz_ext.cost` 安全地转成价格。
+
+    ★ 这条是合并两条线时补回来的：原来两处都写的是
+
+        price = _as_price(cost)
+
+    而高德这个字段**不保证是数字** —— 实测会遇到空 list `[]`、
+    字符串（如 `"暂无"`）、甚至一个 dict。`float([])` / `float("暂无")`
+    会直接抛 TypeError / ValueError，而这两处都在 POI 转换的主干上，
+    一抛整条 `/api/plan` 就 500，报的还是看不懂的类型错误。
+    （组员那条线的 `_to_rating` 已经做了同样的防御，价格这里漏了。）
+    """
+    if isinstance(value, (int, float)):
+        return float(value) if value > 0 else None
+    if isinstance(value, str):
+        try:
+            f = float(value.strip())
+        except ValueError:
+            return None
+        return f if f > 0 else None
+    return None      # 空 list / dict / None 都算"拿不到价"
+
+
 def _parse_location(loc: str) -> Location:
     """高德返回的 "lng,lat" 字符串 -> Location。"""
     lng, lat = loc.split(",")
@@ -61,7 +85,7 @@ def _to_poi(item: Dict[str, Any], poi_type: str = "景点") -> POI:
     """高德 POI 结果 -> 内部 POI 模型。"""
     biz_ext = item.get("biz_ext") or {}
     cost = biz_ext.get("cost")
-    price = float(cost) if cost else None
+    price = _as_price(cost)
     rating = _to_rating(biz_ext.get("rating"))
     tips = f"参考消费约 {price:.0f} 元" if price else ""
     return POI(
@@ -104,7 +128,7 @@ def _to_recommendation(item: Dict[str, Any], kind: str) -> POI:
     """构建餐饮/酒店推荐项：带价位档 + 参考价/评分。"""
     biz_ext = item.get("biz_ext") or {}
     cost = biz_ext.get("cost")
-    price = float(cost) if cost else None
+    price = _as_price(cost)
     rating = item.get("rating") or biz_ext.get("rating")
     check_in = ""
     check_out = ""
@@ -272,7 +296,12 @@ class RetrieveSkill(Skill):
         ]
 
         # 5. 本地 RAG 知识（防坑 / 拍照 / 动线），按城市过滤避免串到别的目的地
-        rag_query = " ".join(pref.preferences) + " " + city_name
+        #
+        # ★ 查询里**不再拼城市名**（合并两条线时把这一点带过来的）。
+        # 城市过滤由 search(..., city=...) 自己做，而把城市名拼进查询反而会把
+        # 低相关条目的分数拉高 —— 原来就是这么把杭州的贴士送进成都方案的
+        # （实测："去成都玩"的贴士是「杭帮菜代表有西湖醋鱼、东坡肉、龙井虾仁」）。
+        rag_query = " ".join(pref.preferences) or city_name
         ctx["rag_tips"] = self.retriever.search(rag_query, top_k=5, city=city_name)
 
         ctx["attractions"] = attractions
