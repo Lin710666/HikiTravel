@@ -1545,6 +1545,82 @@ robocopy $src $clone /E /XD $clone\.git ... /XF *.pyc .env qwen-tts-home.txt
 > 的 HEAD 一致（没有本地独有的提交），所以删掉重克隆就恢复了。
 > **教训**：做这种镜像同步之前先 `git ls-remote` —— 否则删掉 `.git` 就等于丢掉没推的历史。
 
+### ⚠️⚠️ 更严重的一个：仓库里的 `.bat` 是 LF，别人 clone 下来全用不了
+
+**用户反馈**：「检查环境.bat / 一键部署.bat / start.bat 都用不了」。
+
+**根因**：仓库里存的 `.bat` **全是 LF 换行**，而且当时没有 `.gitattributes`。
+cmd.exe 不认 LF —— LF 版 `.bat` 会以各种离奇方式炸掉。
+
+复现方式（`core.autocrlf=false` 克隆之后直接跑）：
+
+```
+检查环境.bat  →  '&& was unexpected at this time.'
+                 '??，实测就踩到了。' is not recognized as an internal or external command
+一键部署.bat  →  'The syntax of the command is incorrect.'
+start.bat     →  'The system cannot find the path specified.'
+```
+
+**三个脚本全废，和用户描述完全一致。**
+
+**为什么本机测不出来**：开发机上 `core.autocrlf=true`，checkout 时会自动把 LF 转成 CRLF，
+所以本地双击一切正常 —— **只有别人 clone 下来才会踩到**。这类问题不能靠"我这能跑"来判断。
+
+**修法**：新增 `.gitattributes`
+
+```
+*.bat -text
+*.cmd -text
+```
+
+用 `-text` 关掉一切换行转换，让**仓库里保存的字节就是 CRLF**。
+这样不管对方的 `core.autocrlf` 是 `true` / `false` / `input`，甚至不用 git 直接下 ZIP，
+拿到的都是 CRLF。（只写 `text eol=crlf` 也能在 checkout 时转，但仓库里仍是 LF，
+下 ZIP 仍有风险，所以这里选 `-text`。）
+
+改完要 `git add --renormalize .` —— 否则 git 以为"内容没变"、跳过重新入库，
+仓库里存的还是 LF（实测：直接 `git add` 只有真正改过的那一个文件被重新入库）。
+
+**验证**（就是上面那套失败条件，改完之后）：
+
+```
+autocrlf=false 克隆 → 六个 .bat 全部 CRLF ✅
+检查环境.bat       → 正常跑完，正确报出「还没有 venv / 依赖没装齐 / 没有高德 Key」并给出怎么补
+start.bat          → 见下（这条是改完之后又发现的一个问题）
+```
+
+### 顺带修的第二个问题：`start.bat` 在新克隆上给的是报错堆栈
+
+`start.bat` 找 Python 的顺序是「项目 venv → uv → `py` → `python` → …」。
+一个**刚 clone 下来**的人没有 `backend\.venv`、也没装 uv，于是落到**系统 Python** 上 ——
+而系统 Python 里通常没有本项目的依赖，启动时抛的是：
+
+```
+ModuleNotFoundError: No module named 'uvicorn'
+```
+
+这跟"你还没装依赖"完全看不出关系。**实测：从 GitHub 克隆一份直接双击 `start.bat`，就是这个。**
+
+**修法**：如果用的不是项目 venv、也不走 uv，就先 `python -c "import uvicorn, fastapi"` 探一下；
+不通就明确提示「请先双击 install.bat（或一键部署.bat）」，并指向 `检查环境.bat`。
+
+**验证**（全新克隆，`autocrlf=false`）：
+
+```
+[错误] 项目依赖还没装 —— 当前的 Python 是 py
+
+       请先双击  install.bat      （只装 Python 依赖）
+       或双击      一键部署.bat    （连本地大模型一起装）
+       装完再运行本脚本。想先看看缺什么，可以双击 检查环境.bat
+```
+
+### 顺带修 `一键部署.bat` 自身的两处
+
+- 标题还写着 `v6.0`（那是 5.0 时代的版本号），改成当前版本
+- `timeout /t 6 /nobreak` 换成 `ping -n 7`：`timeout.exe` 在 stdin 不是真实控制台时
+  （重定向、CI、后台任务）会直接报 `Input redirection is not supported` 并**立刻返回**，
+  于是 Ollama 还没起来就去 pull 模型了。全项目统一用 `ping -n` 当 `sleep`
+
 ### 提交前必做的三项检查
 
 ```powershell
