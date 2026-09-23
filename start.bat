@@ -5,7 +5,7 @@ REM （一键部署.bat 就是这么做的，install.bat 原来漏了这句、�
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-title 智能文旅辅助系统 - 启动
+title 浙里智慧游 - 启动
 
 cd /d "%~dp0"
 

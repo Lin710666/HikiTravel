@@ -36,7 +36,13 @@ from .base import Skill
 # 往返大交通"算不出来"的原因由规划器写在这里（见 planner_skill._ROUND_TRIP_ISSUES）。
 # 直接读它的原因，而不是自己再查一遍接口 —— 那会多打两个网络请求，
 # 而且未必能还原规划时的现场。
-from .planner_skill import _ROUND_TRIP_ISSUES
+try:
+    from .planner_skill import _ROUND_TRIP_ISSUES
+except ImportError:
+    # 旅游后端换成组员 main 那版之后，planner_skill 里没有这个旁路了
+    # （那是我们为"出发地国外/查不到"加的原因传递）。这里降级成空字典：
+    # 输出层照样跑，只是不再有"往返大交通没估出来"的那条提示。
+    _ROUND_TRIP_ISSUES: dict = {}
 
 
 class OutputGuardSkill(Skill):

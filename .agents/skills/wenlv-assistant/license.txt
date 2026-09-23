@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 文旅智能辅助 Skill 项目
+Copyright (c) 2026 浙里智慧游 Skill 项目
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,239 +1,171 @@
 """Skill1：用户意图识别与信息采集（输入层）。
 
-将用户的自然语言对话或极简表单转换为结构化 UserPreference 画像。
-优先用 LLM（Ollama）做结构化抽取，LLM 不可用时退化为规则抽取，
-保证无 AI 环境下也能跑通。
+这里**不使用任何正则或关键词硬编码**：
+自然语言的说法无穷无尽（「带娃」「老人腿脚不便」「想拍拍照」「别安排爬山」…），
+写死的规则既容易漏，也容易把意思理解歪，更没法覆盖没预想到的表达。
+所以只保留一条路径——把用户原话和结构化字段说明交给大模型，由它输出结构化画像。
+
+大模型不可用时**不再退化为规则抽取**，而是抛出 LLMUnavailableError，
+由 API 层明确提示用户（不静默降级、不猜）。
 """
-import re
+import json
 from typing import Any, Optional
 
 from ..llm.client import LLMClient
-from ..models.preference import Travelers, UserPreference
+from ..models.preference import UserPreference
 from .base import Skill
+from .errors import LLMOutputError, LLMUnavailableError, MissingRequiredInfoError
 
-#: 扫描「输入框里提到的城市」用。只影响 parse_partial（输入框优先那条路），
-#: 组员原有的 _parse_rules 行为不变 —— 见那个函数的说明。
-_KNOWN_CITIES = (
-    "杭州", "苏州", "成都", "丽江", "西安", "北京", "上海", "广州", "深圳", "重庆",
-    "厦门", "三亚", "桂林", "青岛", "南京", "长沙", "昆明", "大理", "武汉", "天津",
-    "大连", "哈尔滨", "拉萨", "西宁", "银川", "贵阳", "南宁", "福州", "济南", "郑州",
-    "太原", "沈阳", "长春", "兰州", "银川", "海口", "珠海", "宁波", "无锡", "黄山",
-    "张家界", "敦煌", "呼伦贝尔", "伊犁", "香格里拉", "西双版纳", "平遥", "婺源",
-)
+#: 输出结构说明（与 models/preference.py 的 UserPreference 字段一一对应）
+_SCHEMA_HINT = """{
+  "travelers": {"adults": 0, "children": 0, "elderly": 0},
+  "destination": "",
+  "duration_days": 0,
+  "budget": 0,
+  "preferences": [],
+  "must_visit": [],
+  "pace": "悠闲|适中|特种兵",
+  "transportation": "自驾|高铁|飞机|本地",
+  "dietary_restrictions": [],
+  "avoidances": [],
+  "start_date": "YYYY-MM-DD 或空字符串",
+  "departure_time": "HH:MM"
+}"""
 
-#: 中文数字 → 阿拉伯数字。原来只认 "\d+天"，所以「两天」「三日游」一律解析不出来
-#: （这是反复被提到的老问题）。中文里这两种写法同样常见，必须一起认。
-_CN_DIGIT = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
-             "六": 6, "七": 7, "八": 8, "九": 9}
-_CN_NUM_RE = r"[0-9]+|[一二两三四五六七八九十]+"
+_SYSTEM_PROMPT = f"""你是一个旅游需求结构化助手。请从用户的一句话需求里抽取字段，
+只输出一个合法 JSON 对象，不要输出任何解释文字、不要用 markdown 代码块包裹。
 
+输出结构必须严格如下（字段名、层级都不要改）：
+{_SCHEMA_HINT}
 
-def _cn_to_int(s: str) -> Optional[int]:
-    """把「3」/「三」/「十二」/「二十」/「三十三」转成整数；认不出返回 None。"""
-    s = (s or "").strip()
-    if not s:
-        return None
-    if s.isdigit():
-        return int(s)
-    if s == "十":
-        return 10
-    if "十" in s:
-        left, _, right = s.partition("十")
-        tens = _CN_DIGIT.get(left, 0) if left else 1     # 「十五」左空 = 1
-        ones = _CN_DIGIT.get(right, 0) if right else 0
-        return tens * 10 + ones
-    return _CN_DIGIT.get(s)
+抽取规则：
+1. destination（目的地）：只有用户明确说了目的地才填。用户没说就**必须留空字符串**，
+   绝对不要猜测、不要默认任何城市——系统会据此提示用户补充目的地。
+2. must_visit（特别想去的景点）：这是最重要的字段。凡是用户表达出
+   「想去 / 必去 / 一定要去 / 点名要去 / 特别想去 / 顺便打卡」的**具体景点名**，
+   都要逐个完整列进数组，一个都不能漏，也不要合并同类项。
+   例如「想去雷峰塔和西湖，顺便看看灵隐寺」→ ["雷峰塔", "西湖", "灵隐寺"]。
+   用户没有点名具体景点时留空数组，不要编造景点名。
+3. preferences（兴趣导向）：取值只能是 ["人文历史", "自然风光", "美食", "娱乐"] 的子集。
+   用户明确表达兴趣时按原意填；用户没有表达时，请结合目的地与同行人特征
+   推断 1~3 个最合适的方向填进去（这一项不要留空）。
+4. travelers / duration_days / budget：用户没说就填 0（或 0 人），**不要替用户编造**。
+   「情侣 / 夫妻 / 两个人」= adults 2；「带老人」= elderly 至少 1；「带孩子」= children 至少 1。
+   注意：除非用户明确说是"帮别人规划 / 替我爸妈安排"，否则**用户本人也是同行人**，
+   adults 至少为 1（例如「带 80 岁老人游杭州」= adults 1 + elderly 1，共 2 人）。
+5. pace（节奏）：用户说了按原意填；用户没说时，结合同行人推断
+   （有老人或幼儿倾向「悠闲」，年轻人结伴且强调多玩可判为「特种兵」），否则用「适中」。
+6. dietary_restrictions（饮食禁忌）：如「海鲜过敏」「清真」「素食」「不吃辣」等。
+7. avoidances（极其讨厌的项目）：如「爬山」「排队」「网红打卡」等。
+8. 其余未提及的字段用空字符串 / 空数组，不要编造。
+
+只输出 JSON。"""
+
+_REVISION_PROMPT = """你是一个旅游需求修订助手。用户已经有一版行程规划，现在提出了新的要求。
+请输出**修订后的完整用户画像 JSON**：结构与「当前画像」完全一致，只改用户新要求涉及到的部分，
+其余字段原样保留。
+
+规则：
+1. 只输出一个合法 JSON 对象，不要解释文字、不要用 markdown 代码块。
+2. 字段名、层级、取值必须与原画像一致（枚举字段只能取原有取值：
+   pace 只能是 悠闲/适中/特种兵，transportation 只能是 自驾/高铁/飞机/本地）。
+3. 用户新要求里没提到的字段**保持原值**，不要顺手改。
+4. 常见的修改意图请这样落到字段上：
+   - "预算压到 2500 / 控制在 3000 以内" → 改 budget；
+   - "不要爬山 / 别安排排队的地方" → 加到 avoidances；
+   - "有老人，别太赶 / 想悠闲一点" → 改 pace（必要时也补 travelers.elderly）；
+   - "带小孩 / 加一个人" → 改 travelers；
+   - "换成室内 / 少走户外" → 加到 avoidances 或调整 preferences；
+   - "想去 XX / 一定要去 XX" → 加到 must_visit；
+   - "改成 4 天 / 多玩一天" → 改 duration_days；
+   - "坐高铁去 / 改成自驾" → 改 transportation。
+   - "想早点出发 / 8 点半出门" → 改 departure_time（HH:MM）；
+   - "晚上想早点回酒店 / 9 点前回酒店" → 改 return_hotel_time（HH:MM）。
+5. 用户是在已有规划基础上提要求，不要凭空重写整个需求。
+
+只输出 JSON。"""
 
 
 class IntentSkill(Skill):
     """意图识别与信息采集。"""
+
     name = "intent"
-    description = "从对话/表单中提取用户画像 UserPreference"
+    description = "从用户原话提取结构化画像 UserPreference（纯大模型抽取，无正则）"
 
     def __init__(self, llm: Optional[LLMClient] = None):
         self.llm = llm or LLMClient()
 
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:
-        # 若上游已直接给出结构化画像（表单模式），跳过解析
+        # 表单模式：上游已经给出结构化画像，不需要再做语言解析
         if ctx.get("preference") is not None:
             return ctx
 
-        raw = ctx.get("raw_text", "")
-        pref = self._parse_llm(raw)
-        if pref is None:
-            pref = self._parse_rules(raw)
-        ctx["preference"] = pref
+        raw = (ctx.get("raw_text") or "").strip()
+        if not raw:
+            raise MissingRequiredInfoError(
+                "没有收到行程描述。请告诉我目的地、天数、同行人和想去的地方。"
+            )
+
+        if not self.llm.available():
+            raise LLMUnavailableError(
+                "未接入大模型 API（本地 Ollama 未启动或未安装），无法解析你的需求。"
+                "请先启动大模型服务，或改用左侧表单逐项填写。"
+            )
+
+        ctx["preference"] = self._extract(raw)
         return ctx
 
-    # ---------------- LLM 结构化抽取 ----------------
-    def _parse_llm(self, raw: str) -> Optional[UserPreference]:
-        system = (
-            "你是旅游需求结构化抽取助手。从用户描述中提取字段，只输出合法 JSON，"
-            "结构如下："
-            '{"travelers":{"adults":0,"children":0,"elderly":0},'
-            '"destination":"","duration_days":0,"budget":0,'
-            '"preferences":[],"must_visit":[],"pace":"悠闲|适中|特种兵",'
-            '"transportation":"自驾|高铁|飞机|本地",'
-            '"dietary_restrictions":[],"avoidances":[],'
-            '"start_date":"","origin":""}。'
-            "缺省字段用合理默认值，preferences 取值限于：人文历史/自然风光/美食/娱乐；"
-            "must_visit 为用户特别想去的景点名列表（如「想去雷峰塔和西湖」应提取为 [\"雷峰塔\",\"西湖\"]），无则留空。"
+    def _extract(self, raw: str) -> UserPreference:
+        """调用大模型抽取画像；失败即报错，不再用规则兜底。"""
+        # 温度 0：抽取任务要的是稳定复现，不需要发挥
+        data = self.llm.chat_json(
+            _SYSTEM_PROMPT, raw, options={"temperature": 0, "num_ctx": 4096}
         )
-        data = self.llm.chat_json(system, raw)
         if data is None:
-            return None
+            raise LLMOutputError(
+                "大模型没有返回可解析的 JSON 画像"
+                + (f"：{self.llm.last_error}" if self.llm.last_error else "")
+                + "。请重试，或改用左侧表单逐项填写。"
+            )
         try:
             return UserPreference.model_validate(data)
-        except Exception:
-            return None
+        except Exception as exc:  # 字段类型 / 取值不符约定
+            raise LLMOutputError(
+                f"大模型返回的画像字段不符合约定（{exc}）。请重试，或改用表单填写。"
+            ) from exc
 
-    # ---------------- 规则抽取（降级）----------------
-    def parse_partial(self, raw: str) -> dict[str, Any]:
-        """**只返回文字里真的说到的字段**，没提到的键根本不出现。
+    # ---------------- 对话式修改规划：在既有画像上应用新要求 ----------------
+    def apply_revision(
+        self, current: UserPreference, plan_digest: str, instruction: str
+    ) -> UserPreference:
+        """把用户的新要求合并进当前画像（例如"预算压到 2500""第二天换室内"）。
 
-        和 _parse_rules 的区别很关键：_parse_rules 返回的是完整画像，
-        没提到的字段也会被填上默认值（travelers 默认 1 人、preferences 默认
-        ["人文历史","自然风光"]）。所以拿它的结果无法判断"用户到底说没说这一项"。
-
-        这里要判断的是"输入框优先"：用户在输入框里说的话，要盖过气泡里点过的
-        选项，但**只能盖过他真说到的那些字段** —— 否则输入框里随便一句话就会把
-        气泡选的城市/天数一起冲掉。
-
-        规则与 _parse_rules 同源（同一套正则），改的时候两边要一起改；
-        _parse_rules 现在就是基于这个函数实现的。
+        这样做的好处是"上下文"有地方存：修完的画像会跟着新规划一起返回并入库，
+        用户下次还能继续在此基础上改，不需要重填表单。
         """
-        out: dict[str, Any] = {}
-
-        # 目的地：优先认"已知城市名"，其次才是「去/到/游/玩 + 地名」。
-        #
-        # 为什么把城市名放前面：光靠动词正则，像「苏州 · 3 天」这种没有动词的句子
-        # 根本认不出城市，而「想去雷峰塔和西湖，杭州，2天」会被抓成
-        # destination="雷峰塔和西湖"（把景点当成了城市）。
-        # 这两句都是实际会出现的输入，所以先扫已知城市名更稳。
-        m = re.search(r"(?:去|到|游|玩)\s*([一-龥]{2,8})", raw)
-        verb_city = m.group(1).rstrip("市县") if m else ""
-        hit_city = next((c for c in _KNOWN_CITIES if c in raw), "")
-        if hit_city:
-            out["destination"] = hit_city
-        elif verb_city:
-            out["destination"] = verb_city
-
-        # 人数与同行人构成（阿拉伯数字与中文数字都认，中间允许「个/位」：
-        # 「两个人」「3个人」「三位」都是常见说法）
-        m = re.search(rf"({_CN_NUM_RE})\s*[个位]?\s*人", raw)
-        hit_people = bool(m) or bool(re.search(r"情侣|夫妻|两口子|二人|两人|双人", raw)) \
-            or bool(re.search(r"老人|奶奶|爷爷|外婆|外公|[7-9]0岁", raw)) \
-            or bool(re.search(r"小孩|孩子|儿童|宝宝", raw))
-        if hit_people:
-            total = _cn_to_int(m.group(1)) if m else None
-            if re.search(r"情侣|夫妻|两口子|二人|两人|双人", raw):
-                total = 2
-            if not total:
-                total = 1
-            elderly = 1 if re.search(r"老人|奶奶|爷爷|外婆|外公|[7-9]0岁", raw) else 0
-            children = 1 if re.search(r"小孩|孩子|儿童|宝宝", raw) else 0
-            adults = max(total - elderly - children, 0) if (elderly or children) else total
-            out["travelers"] = {"adults": adults, "children": children, "elderly": elderly}
-
-        # 天数
-        m = re.search(rf"({_CN_NUM_RE})\s*天", raw)
-        if m:
-            n = _cn_to_int(m.group(1))
-            if n:
-                out["duration_days"] = n
-
-        # 预算（支持「2000元」与「预算2000」两种写法）
-        m = re.search(r"(\d+)\s*(?:元|块钱|块)", raw) or re.search(r"预算\s*(\d+)", raw)
-        if m:
-            out["budget"] = float(m.group(1))
-
-        # 特别想去的景点
-        m = re.search(r"(?:想去|必去|一定要去|特别想去)\s*([^。，,；;]+)", raw)
-        if m:
-            seg = re.split(r"[、，,和与及]|\s+", m.group(1))
-            names = [s.strip(" 的了啊呀吧").strip() for s in seg if s.strip()]
-            if names:
-                out["must_visit"] = names
-
-        # 兴趣导向
-        tags = []
-        if re.search(r"人文|历史|文化|古迹|博物馆", raw):
-            tags.append("人文历史")
-        if re.search(r"自然|风光|山水|风景|公园", raw):
-            tags.append("自然风光")
-        if re.search(r"美食|小吃|餐厅|吃", raw):
-            tags.append("美食")
-        if re.search(r"娱乐|演出|主题|乐园", raw):
-            tags.append("娱乐")
-        if tags:
-            out["preferences"] = tags
-
-        # 节奏
-        if re.search(r"特种兵|紧凑|打卡|暴走", raw):
-            out["pace"] = "特种兵"
-        elif re.search(r"悠闲|轻松|躺平|慢|度假", raw):
-            out["pace"] = "悠闲"
-
-        # 交通
-        if "自驾" in raw:
-            out["transportation"] = "自驾"
-        elif "高铁" in raw:
-            out["transportation"] = "高铁"
-        elif "飞机" in raw or "航班" in raw:
-            out["transportation"] = "飞机"
-
-        # 饮食禁忌
-        diet = []
-        if re.search(r"海鲜|过敏", raw):
-            diet.append("海鲜")
-        if "清真" in raw:
-            diet.append("清真")
-        if "素食" in raw:
-            diet.append("素食")
-        if diet:
-            out["dietary_restrictions"] = diet
-
-        # 避雷
-        avoid = []
-        if "爬山" in raw:
-            avoid.append("爬山")
-        if "排队" in raw:
-            avoid.append("排队")
-        if "网红" in raw:
-            avoid.append("网红打卡")
-        if avoid:
-            out["avoidances"] = avoid
-
-        return out
-
-    def _parse_rules(self, raw: str) -> UserPreference:
-        """基于 parse_partial 拼出完整画像（没提到的字段留默认值，行为与原来一致）。
-
-        注意 destination 这里**仍然用原来的动词正则**，没有跟着 parse_partial 走
-        「优先认已知城市名」：那是给"输入框优先"那条新路用的。
-        组员这套规则解析的行为保持原样，免得悄悄改掉别的链路的输出。
-        """
-        pref = UserPreference()
-        m = re.search(r"(?:去|到|游|玩)\s*([一-龥]{2,8})", raw)
-        if m:
-            pref.destination = m.group(1).rstrip("市县")
-
-        p = self.parse_partial(raw)
-        p.pop("destination", None)     # 上面已经按原语义处理过
-        # 没提到同行人时保持原来的默认：1 名成人
-        t = p.get("travelers") or {"adults": 1, "children": 0, "elderly": 0}
-        pref.travelers = Travelers(**t)
-        if "duration_days" in p:
-            pref.duration_days = p["duration_days"]
-        if "budget" in p:
-            pref.budget = p["budget"]
-        if "must_visit" in p:
-            pref.must_visit = p["must_visit"]
-        pref.preferences = p.get("preferences") or ["人文历史", "自然风光"]
-        if "pace" in p:
-            pref.pace = p["pace"]
-        if "transportation" in p:
-            pref.transportation = p["transportation"]
-        pref.dietary_restrictions = list(p.get("dietary_restrictions") or [])
-        pref.avoidances = list(p.get("avoidances") or [])
-        return pref
+        if not self.llm.available():
+            raise LLMUnavailableError(
+                "未接入大模型 API（本地 Ollama 未启动或未安装），无法理解你的修改要求。"
+                "请先启动大模型服务后重试。"
+            )
+        payload = json.dumps(
+            {
+                "当前画像": current.model_dump(),
+                "当前行程（供参考）": plan_digest,
+                "用户的新要求": instruction,
+            },
+            ensure_ascii=False,
+        )
+        data = self.llm.chat_json(
+            _REVISION_PROMPT, payload, options={"temperature": 0, "num_ctx": 4096}
+        )
+        if data is None:
+            raise LLMOutputError(
+                "大模型没有返回可解析的画像 JSON"
+                + (f"：{self.llm.last_error}" if self.llm.last_error else "")
+                + "。请重试。"
+            )
+        try:
+            return UserPreference.model_validate(data)
+        except Exception as exc:
+            raise LLMOutputError(f"大模型返回的画像字段不符合约定（{exc}）。请重试。") from exc

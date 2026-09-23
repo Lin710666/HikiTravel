@@ -1,7 +1,7 @@
 {
   "name": "hikitravel-airi-desktop",
   "version": "7.0.0",
-  "description": "智能文旅辅助系统 桌面版（HikiTravel × AIRI 融合版）",
+  "description": "浙里智慧游 桌面版（HikiTravel × AIRI 融合版）",
   "main": "main.js",
   "author": "Lin710666",
   "license": "MIT",
@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.lin710666.hikitravel.airi",
-    "productName": "智能文旅辅助系统",
+    "productName": "浙里智慧游",
     "directories": {
       "output": "dist",
       "buildResources": "buildResources"
@@ -51,7 +51,7 @@
         }
       ],
       "icon": "app.ico",
-      "artifactName": "智能文旅辅助系统-${version}-安装包.${ext}",
+      "artifactName": "浙里智慧游-${version}-安装包.${ext}",
       "sign": false,
       "signAndEditExecutable": false
     },
@@ -62,7 +62,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "智能文旅辅助系统",
+      "shortcutName": "浙里智慧游",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
     },

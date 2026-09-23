@@ -6,6 +6,8 @@ from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .preference import UserPreference
+
 
 class Location(BaseModel):
     """经纬度坐标，供前端地图打点使用。"""
@@ -27,6 +29,7 @@ class POI(BaseModel):
     description: str = Field(default="", description="简介")
     tips: str = Field(default="", description="游玩贴士 / 避坑提醒")
     price: Optional[float] = Field(default=None, description="参考消费/票价（元，来自 API 动态获取）")
+    rating: Optional[float] = Field(default=None, description="高德评分（0-5，用于口碑/热度排序）")
     check_in: str = Field(default="", description="入住时间（住宿类，如 14:00，行业通行惯例，以酒店实际为准）")
     check_out: str = Field(default="", description="退房时间（住宿类，如 12:00，行业通行惯例，以酒店实际为准）")
 
@@ -91,6 +94,27 @@ class Conflict(BaseModel):
     suggested_value: Optional[Any] = Field(default=None, description="建议值")
 
 
+class CheckIssue(BaseModel):
+    """规划体检（CheckSkill）发现的一条问题。
+
+    设计原则：只报告、不返工。系统发现问题后明确告诉用户，
+    而不是在后台悄悄重排——用户有权知道系统改了什么、为什么改。
+    """
+
+    category: str = Field(description="问题类型：路径 / 地点 / 重复 / 覆盖 / 时间 / 预算 / 其他")
+    severity: Literal["high", "medium", "low"] = Field(default="medium", description="严重程度")
+    message: str = Field(description="问题描述")
+    suggestion: str = Field(default="", description="给用户的修改建议")
+
+
+class PlanCheck(BaseModel):
+    """规划体检结果（由大模型二次审查 + 系统规则校验汇总）。"""
+
+    passed: bool = Field(description="是否未发现明显问题")
+    summary: str = Field(default="", description="体检结论一句话")
+    issues: List[CheckIssue] = Field(default_factory=list, description="发现的问题清单")
+
+
 class TravelPlan(BaseModel):
     """旅游规划输出模型（顶层）。"""
 
@@ -104,5 +128,12 @@ class TravelPlan(BaseModel):
     attraction_options: List[POI] = Field(default_factory=list, description="景点备选池（供用户编辑时换景点）")
     travelers: int = Field(default=1, description="出行人数（供前端预算实时重算）")
     user_budget: Optional[float] = Field(default=None, description="用户输入的总预算（用于结余/超出对比）")
-    warnings: List[str] = Field(default_factory=list, description="异常拦截提示（加分项）")
     conflicts: List[Conflict] = Field(default_factory=list, description="需求矛盾检测结果（用户可选择是否采纳建议）")
+    checks: Optional[PlanCheck] = Field(default=None, description="规划体检结果（CheckSkill）")
+    # 生成这份规划时用的画像：随规划一起返回并入库，用户不满意时可以直接在此基础上
+    # 用对话提新要求（"把第二天换成室内""预算压到 2500"），不用重新填表
+    user_preference: Optional[UserPreference] = Field(
+        default=None, description="生成该规划时的用户画像（用于对话式修改）"
+    )
+    # 往返大交通的估算口径说明：把"机票/高铁票未计入真实票价"这件事显示在预算栏
+    transport_note: str = Field(default="", description="往返大交通估算口径说明")

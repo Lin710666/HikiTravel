@@ -26,7 +26,3 @@
 
 # PowerShell 两种换行都能跑，但 Windows 上统一成 CRLF 更省事。
 *.ps1 text eol=crlf
-
-# 图标是二进制，明确关掉换行转换（免得被 text=auto 误判）
-*.ico -text
-*.png -text

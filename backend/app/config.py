@@ -36,9 +36,22 @@ class Settings:
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
     ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
     ollama_timeout: float = float(os.getenv("OLLAMA_TIMEOUT", "30"))
-    #: 生成模型用完多久卸载。Ollama 默认留 5 分钟，单卡上那段时间会挡着
-    #: 别的模型加载 —— 默认收到 30 秒。
-    ollama_keep_alive: str = os.getenv("OLLAMA_KEEP_ALIVE", "30s")
+    #: 生成模型用完多久卸载。Ollama 默认留 5 分钟。
+    #:
+    #: ★ 实测把这它收到 30 秒是有代价的：qwen2.5:7b 有 4.36GB，
+    #   卸载后再问一句就得**重新加载**（实测冷启 6 秒、热着 0.4 秒，
+    #   差 15 倍）。用户感受到的就是"发一句要卡十来秒"，
+    #   而且如果刚好卡在超时边缘，还会掉进兜底回答。
+    #   所以放宽到 5 分钟 —— 聊天是有来有回的，那几分钟里模型大概率还要用。
+    #   显存紧张的机器可以自己调小（或在 .env 里设 OLLAMA_KEEP_ALIVE=30s）。
+    ollama_keep_alive: str = os.getenv("OLLAMA_KEEP_ALIVE", "5m")
+
+
+    # ---- 组员 main 那条线新增（9-23 大优化）----
+    #: 规划体检（check_skill）用的模型。留空 = 用主模型 ollama_model。
+    ollama_check_model: str = os.getenv("OLLAMA_CHECK_MODEL", "")
+    #: 体检发现问题后，最多重建几次规划。0 = 只体检不重建。
+    plan_max_regenerate: int = int(os.getenv("PLAN_MAX_REGENERATE", "1"))
 
     # ---- 模型路由：云端优先，本地兜底 ----
     #: auto = 配了云端就先用云端，超时/连不上自动落到本地

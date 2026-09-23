@@ -5,7 +5,7 @@
 from typing import Dict
 
 from ..models.plan import Weather
-from .amap import AmapClient, AmapError
+from .amap import AmapClient
 
 
 class WeatherService:

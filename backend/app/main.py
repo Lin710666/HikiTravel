@@ -26,7 +26,7 @@ from .routers.api import router
 from .routers.ui_compat import router as ui_router
 
 app = FastAPI(
-    title="文旅智能辅助 - 个性化可交互旅游规划系统",
+    title="浙里智慧游 - 个性化可交互旅游规划系统",
     version="0.1.0",
 )
 
@@ -234,7 +234,7 @@ else:
     @app.get("/")
     def root():
         return {
-            "name": "文旅智能辅助 - 个性化可交互旅游规划系统",
+            "name": "浙里智慧游 - 个性化可交互旅游规划系统",
             "docs": "/docs",
             "health": "/api/health",
             "hint": "没有找到前端。融合版需要 public/index.html，或配置 STATIC_DIR。",

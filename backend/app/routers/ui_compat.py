@@ -44,7 +44,7 @@ from ..cards_store import CardStore
 from ..config import settings
 from ..llm.client import LLMClient
 from ..models.preference import Travelers, UserPreference
-from ..orchestrator import get_orchestrator
+from ..orchestrator import UnsupportedOriginError, get_orchestrator
 
 router = APIRouter(prefix="/api")
 # 模块级 logger。
@@ -285,10 +285,35 @@ def _models3d_bundled() -> List[Dict[str, Any]]:
 # 一、状态与能力清单
 # ---------------------------------------------------------------------------
 def _match_model(models: List[str], needle: str) -> str:
-    """在 ollama 已装模型里找一个名字含 needle 的，返回它的完整名字（带 tag）。"""
-    for name in models:
-        if needle in name:
-            return name
+    """在 ollama 已装模型里找一个匹配 needle 的，返回完整名字（带 tag）。
+
+    ★ 匹配要按优先级，不能只做子串包含。踩过的坑：
+      期望 "qwen2.5:7b"，而本机还装了 "qwen2.5vl:3b" ——
+      子串匹配时 "qwen2.5" in "qwen2.5vl:3b" 也成立，
+      而 vl 在列表里排在前面，于是**状态灯显示成了 3b 的视觉模型**。
+      （实际调用用的是 settings.ollama_model，不受影响，但显示是错的。）
+    所以顺序：完全相等 -> 去掉 tag 后相等 -> 同名前缀且**不是**视觉模型 -> 宽松包含。
+    """
+    def base(n: str) -> str:
+        return n.split(":")[0].strip().lower()
+
+    nd = (needle or "").strip().lower()
+    if not nd:
+        return ""
+    for n in models:
+        if n.lower() == nd:
+            return n
+    for n in models:
+        if base(n) == nd:
+            return n
+    # 前缀匹配，但把视觉模型排除掉（它们该走 _pick_vision_model）
+    for n in models:
+        low = n.lower()
+        if low.startswith(nd) and "vl" not in low and "vision" not in low:
+            return n
+    for n in models:
+        if nd in n.lower():
+            return n
     return ""
 
 
@@ -662,9 +687,42 @@ def prefs() -> Dict[str, Any]:
 # 目录取**项目根**下的 data/videos/，不是 backend/data/：
 # 用户的片子是从 5.0 带过来的，本来就在那儿；指到 backend/data 会找不到。
 # ---------------------------------------------------------------------------
-VIDEO_DIR = Path(__file__).resolve().parents[3] / "data" / "videos"
+def _pick_data_dir() -> Path:
+    """项目根下的 `data/`（视频与音轨在这儿），要能适配打包后的 exe。
+
+    ★ 与 `_pick_public_dir()` 是同一类坑：源码布局下
+      `Path(__file__).parents[3]` 正好是项目根；但 PyInstaller 把代码放进
+      `_MEIPASS`，parents[3] 就指到临时目录外面了，而 data/ 是随 exe 放在旁边的。
+
+      后果同样是**静默的**：后端照常启动、页面照常打开，只是
+      `/api/videos` 返回空列表、`/api/audio` 也是空的 ——
+      桌面版因此"没有默认背景片"，而同一份代码用源码跑却正常。
+
+      候选顺序：STATIC_DIR 的兄弟目录（桌面壳设的 public/ 就在 data/ 旁边）
+      → `__file__` 推断（源码）→ exe 同级 / 上级（打包）。
+    """
+    cands = []
+    if settings.static_dir:
+        # 桌面版把 public/ 放在 resources/public，data/ 在 resources/data，
+        # 两者同级，所以从 STATIC_DIR 往上一级找最稳。
+        cands.append(Path(settings.static_dir).resolve().parent / "data")
+    if not getattr(sys, "frozen", False):
+        cands.append(Path(__file__).resolve().parents[3] / "data")
+    else:
+        exe_dir = Path(sys.executable).resolve().parent
+        meipass = Path(getattr(sys, "_MEIPASS", exe_dir))
+        cands += [meipass / "data", exe_dir / "data", exe_dir.parent / "data"]
+
+    for c in cands:
+        if (c / "videos").is_dir() or (c / "audio").is_dir():
+            return c
+    return cands[0] if cands else Path("data")
+
+
+_DATA_DIR_ROOT = _pick_data_dir()
+VIDEO_DIR = _DATA_DIR_ROOT / "videos"
 #: 抽取出来的音轨。和视频并列放，前者是"画面"，后者是"配乐"。
-AUDIO_DIR = Path(__file__).resolve().parents[3] / "data" / "audio"
+AUDIO_DIR = _DATA_DIR_ROOT / "audio"
 VIDEO_MAX_MB = 300
 _VIDEO_EXT = {".mp4", ".webm", ".mov", ".m4v", ".ogv"}
 _VIDEO_MIME = {
@@ -1962,6 +2020,13 @@ def _chat_stream(body: Dict[str, Any]) -> Iterator[str]:
         plan = orchestrator.run(raw_text=message, base=base)
         text = _render_plan_markdown(plan, {})
         warnings = list(plan.warnings or [])
+    except UnsupportedOriginError as exc:
+        # ★ 出发地用不了 → 直接把原因当回答返回。
+        #   不能落到下面那个 except：那会套上"规划链路暂时不可用，改用本机模型直接回答"，
+        #   然后真的去问模型要一份行程 —— 用户就会拿到一份**没有出发地、缺往返**的方案，
+        #   正是我们要避免的。
+        text = str(exc)
+        warnings = []
     except Exception as exc:  # noqa: BLE001 - 检索失败也要给用户一个回答，不能只报错
         yield _sse({"type": "notice",
                     "text": f"规划链路暂时不可用（{exc}），改用本机模型直接回答。"})
@@ -2009,8 +2074,153 @@ def chat(body: Dict[str, Any]) -> Any:
 
 @router.post("/agent")
 def agent(body: Dict[str, Any]) -> Any:
-    """带工具的对话（SSE）。融合版没有外部工具链，行为与 /chat 相同。"""
-    return _sse_response(_chat_stream(body))
+    """智能体对话（SSE）。
+
+    ★ 7.0 改版：这里原来只是 `_chat_stream` 的别名 —— 两者完全一样，
+      都无条件走规划链路。后果是"随便说句话也被排一份行程"，
+      而且**完全不读角色卡的人设**，所以它不像个旅游顾问、只像个规划器。
+
+      现在拆成两种模式（见 app/agent_talk.py 的说明）：
+        · 对话（默认）—— 带人设与真实资料，像旅游顾问一样聊
+        · 规划        —— 用户明确要行程时，走原来的规划链路
+      前端可以显式传 `mode`（对话页的「AI 规划」按钮就是传 plan）。
+    """
+    return _sse_response(_agent_stream(body))
+
+
+def _agent_stream(body: Dict[str, Any]) -> Iterator[str]:
+    """智能体对话的 SSE 生成器：人设对话 / 简版行程 / 规划 三种模式。
+
+    ★ 关于「要不要在对话里直接出完整方案」，绕了一圈才定下来，记一下：
+
+      原来判据是 `want_plan(message, mode)` —— **关键词命中就走完整规划链路**。
+      实际后果是：用户说一句"帮我做个旅游规划"，后端就自顾自跑起完整规划
+      （要检索 POI、要天气、要 LLM 排行程，一二十秒），界面上表现成
+      **"我什么都没说它就自己生成了"**，而且出来的是完整方案，
+      用户在对话区想要的只是"先大概看看"。
+
+      而真正要完整方案的地方是**文旅抽屉**：对话页点「AI 规划」→ 打开抽屉
+      → 里面那个「生成我的旅行规划」。前端调这个接口时**并不传 mode**，
+      也就是说对话区从来没有"显式要完整方案"这条路径。
+
+      所以现在：
+        · 显式 `mode=plan`（留着给将来/别的调用方）→ 完整规划链路
+        · 消息像"要行程"但没显式说   → **简版**（每天去哪儿 + 估算）
+          + 一句"要完整方案请点下方 AI 规划"
+        · 其它                        → 人设对话
+    """
+    from .. import agent_talk as AT
+
+    t0 = time.time()
+    message = str(body.get("message") or "").strip()
+    mode = str(body.get("mode") or "").strip().lower()
+    history = body.get("history") or []
+
+    #: 只有**显式**要方案才走完整链路。前端目前不传，所以实际都是"简版或对话"。
+    explicit_plan = mode in ("plan", "wenlv")
+    looks_like_plan = AT.want_plan(message, mode)
+    shown_mode = "plan" if explicit_plan else "chat"
+    yield _sse({"type": "start", "model": settings.ollama_model, "mode": shown_mode})
+
+    if not message:
+        yield _sse({"type": "error", "code": "EMPTY", "error": "没有收到内容，请先说点什么。"})
+        yield "data: [DONE]\n\n"
+        return
+
+    # ---------- 规划模式：沿用原链路（它是这个项目的核心能力，不改） ----------
+    if explicit_plan:
+        yield _sse({"type": "notice", "text": "正在检索真实景点与天气，生成行程…"})
+        base = _to_partial_base(body.get("preference") or {})
+        try:
+            plan = orchestrator.run(raw_text=message, base=base)
+            text = _render_plan_markdown(plan, {})
+            warns = list(plan.warnings or [])
+        except UnsupportedOriginError as exc:
+            # ★ 出发地用不了 → 不出方案。**别套"规划链路暂时不可用"那句** ——
+            #   链路好得很、是出发地的问题，套上去会让用户去查错方向。
+            yield _sse({"type": "error", "code": "BAD_ORIGIN", "error": str(exc)})
+            yield "data: [DONE]\n\n"
+            return
+        except Exception as exc:  # noqa: BLE001
+            yield _sse({"type": "error", "code": "PLAN_ERROR",
+                        "error": f"规划链路暂时不可用：{exc}"})
+            yield "data: [DONE]\n\n"
+            return
+        for piece in _chunks(text, 120):
+            yield _sse({"type": "delta", "text": piece})
+            time.sleep(0.01)
+        yield _sse({"type": "done", "content": text, "warnings": warns,
+                    "mode": "plan", "model": settings.ollama_model,
+                    "elapsed": round(time.time() - t0, 1)})
+        yield "data: [DONE]\n\n"
+        return
+
+    # ---------- 对话模式：带人设回答 ----------
+    try:
+        card = CARD_STORE.active() or {}
+    except Exception:
+        card = {}
+    name = (card or {}).get("name") or "小文"
+
+    # ★ 用户在对话里要行程 → 给**简版**（每天去哪儿 + 估算），
+    #   并把"要完整方案就去点 AI 规划"说清楚。
+    #   这条**不经过对话模型**：它是确定性的，模型好不好的时候表现一致，
+    #   也不会出现"一句闲聊等了十几秒"。
+    if looks_like_plan:
+        brief = AT.brief_plan_reply(message, card)
+        if brief:
+            yield _sse({"type": "notice", "text": "正在按你说的搭一份简版行程…"})
+            for piece in _chunks(brief, 120):
+                yield _sse({"type": "delta", "text": piece})
+                time.sleep(0.01)
+            yield _sse({"type": "done", "content": brief, "mode": "chat",
+                        "model": "rules", "elapsed": round(time.time() - t0, 1)})
+            yield "data: [DONE]\n\n"
+            return
+        # 认不出目的地（比如只说"帮我规划一下"）→ 交给下面的对话链路，
+        # 由模型追问"想去哪儿、玩几天"
+
+    poi = AT.gather_poi(message)
+    yield _sse({"type": "notice",
+                "text": (f"{name}正在查{city_hint(message)}的资料…" if poi
+                         else f"{name}正在想怎么回你…")})
+
+    try:
+        text = AT.agent_reply(message, card, history, llm)
+    except Exception as exc:  # noqa: BLE001
+        # 对话模型不可用不该是死路：先用**不依赖模型**的规则链路给一份简版行程，
+        # 拿不出来（比如没认出目的地）再退回纯文字兜底。
+        why = f"{type(exc).__name__}: {exc}"
+        yield _sse({"type": "notice",
+                    "text": "对话模型不可用，正在用不依赖模型的方式给你搭一份简版行程…"})
+        text = AT.brief_plan_reply(message, card, reason=why) or \
+            AT.fallback_reply(message, card, reason=why)
+
+    if not text:
+        # ★ 这里原来只调 fallback_reply()，**不带原因** —— 而 llm 层失败时是
+        #   静默返回空串的（见 LLMClient._run），于是兜底文案只能自己猜，
+        #   猜出来的是"Ollama 未运行"，实际上它好得很。现在把真实原因带上，
+        #   并且先试一次"简版行程"，让用户至少拿到点有用的东西。
+        why = getattr(llm, "last_error", "") or "模型返回了空内容"
+        yield _sse({"type": "notice",
+                    "text": f"对话模型这次没返回内容（{why}），正在给你搭一份简版行程…"})
+        text = AT.brief_plan_reply(message, card, reason=why) or \
+            AT.fallback_reply(message, card, reason=why)
+
+    for piece in _chunks(text, 120):
+        yield _sse({"type": "delta", "text": piece})
+        time.sleep(0.01)
+    yield _sse({"type": "done", "content": text, "mode": "chat",
+                "model": settings.ollama_model, "elapsed": round(time.time() - t0, 1)})
+    yield "data: [DONE]\n\n"
+
+
+def city_hint(text: str) -> str:
+    try:
+        from .. import agent_talk as AT
+        return AT.pick_city(text) or "当地"
+    except Exception:
+        return "当地"
 
 
 def _chunks(text: str, size: int = 180) -> Iterator[str]:
@@ -2187,6 +2397,9 @@ def quick_plan(request: Request) -> Any:
         plan = orchestrator.run(preference=_to_preference(params))
         content = _render_plan_markdown(plan, params)
         warnings = list(plan.warnings or [])
+    except UnsupportedOriginError as exc:
+        # 出发地用不了 → 400（输入问题），不是 500（服务坏了）
+        return _quick_response(str(exc) + "\n", status=400)
     except Exception as exc:  # noqa: BLE001 - 引擎那边需要看到原因，不是空体 500
         return _quick_response(f"【生成失败】{type(exc).__name__}: {exc}\n", status=500)
     return _quick_response(_quick_head("plan", params, warnings) + content + "\n")

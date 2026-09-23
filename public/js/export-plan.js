@@ -72,7 +72,7 @@
     '</style></head><body>',
     '<div class="sheet">',
     '  <header class="cover">',
-    '    <div class="kicker">HIKITRAVEL · 智能文旅辅助系统</div>',
+    '    <div class="kicker">HIKITRAVEL · 浙里智慧游</div>',
     '    <h1>{{title}}</h1>',
     '    <div class="meta"><span>📅 {{date}} {{time}}</span><span>🧭 {{who}} 生成</span>',
     '      {{extra_meta}}</div>',
@@ -207,7 +207,7 @@
       '---',
       'title: ' + r.title,
       'date: ' + r.date,
-      'generator: 智能文旅辅助系统',
+      'generator: 浙里智慧游',
       '---', '',
     ].join('\n');
     var foot = '\n\n---\n\n> 本方案由本机大模型生成，行程与价格请以现场为准。\n';

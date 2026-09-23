@@ -8,7 +8,7 @@
 双击  desktop\打包桌面版.bat
 ```
 
-产物：`desktop\dist\智能文旅辅助系统-<版本>-安装包.exe`（约 130 MB）
+产物：`desktop\dist\浙里智慧游-<版本>-安装包.exe`（约 130 MB）
 
 也可以分步做：
 
@@ -24,7 +24,7 @@ node node_modules\electron-builder\cli.js --win nsis            :: 出安装包
 ## 它由哪几块拼成
 
 ```
-智能文旅辅助系统.exe           Electron 主程序（窗口 + 生命周期）
+浙里智慧游.exe           Electron 主程序（窗口 + 生命周期）
 resources\app.asar             外壳源码：main.js / preload.js / renderer/
 resources\backend\hiki-backend.exe   FastAPI 后端（PyInstaller 打成自包含）
 resources\public\              整个前端（AirI 界面 + Live2D 模型与素材）

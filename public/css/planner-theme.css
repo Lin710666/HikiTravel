@@ -1,0 +1,287 @@
+/* ============================================================================
+ * planner-theme.css —— 让「组员那版规划页」融进 AIRI 的深色界面
+ *
+ * 背景：文旅抽屉里嵌的是他那套独立前端（Vite 单页应用，antd 浅色主题）。
+ *      直接嵌进来就像"深色界面里贴了一块白纸"，所以要统一。
+ *
+ * 做法：同源 iframe，父页面能拿到 contentDocument，于是**从外面往里注入**这份样式 ——
+ *      不用去改他的工程、也不用重新构建他那一套。
+ *
+ * 注意：antd v5 是 CSS-in-JS，样式挂在注入的 <style> 里、优先级是 (0,1,0) 级的选择器，
+ *      所以这里靠 `!important` 压过去（比调优先级更省事，也不容易漏）。
+ *      变量跟着 AIRI 那边取色：深蓝底 + 青色主色。
+ * ==========================================================================*/
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  background: #0b1a26 !important;
+  color: #e6f2fa !important;
+}
+
+/* ---- 外层容器 / 标题 ---- */
+#root, .app, .page, .wrap, main, .container {
+  background: transparent !important;
+}
+h1, h2, h3, .title, .page-title {
+  color: #e6f2fa !important;
+}
+p, span, label, .sub, .hint, .desc {
+  color: #a8c6d8 !important;
+}
+
+/* ---- antd 卡片 / 面板 ---- */
+.ant-card, .ant-card-body, .ant-form, .ant-modal-content {
+  background: rgb(255 255 255 / 0.04) !important;
+  border-color: rgb(255 255 255 / 0.10) !important;
+  color: #e6f2fa !important;
+}
+.ant-card-head, .ant-modal-header {
+  background: transparent !important;
+  border-bottom-color: rgb(255 255 255 / 0.10) !important;
+  color: #e6f2fa !important;
+}
+.ant-card-head-title { color: #e6f2fa !important; }
+
+/* ---- 表单标签 ---- */
+.ant-form-item-label > label,
+.ant-form-item-label > label.ant-form-item-required {
+  color: #cfe6f2 !important;
+}
+.ant-form-item-extra, .ant-form-item-explain {
+  color: #7fa6bb !important;
+}
+
+/* ---- 输入框 / 下拉 / 日期 ---- */
+.ant-input, .ant-input-affix-wrapper,
+.ant-input-number, .ant-input-number-input,
+.ant-select-selector, .ant-picker,
+.ant-input-outlined, textarea.ant-input {
+  background: rgb(255 255 255 / 0.06) !important;
+  border-color: rgb(255 255 255 / 0.14) !important;
+  color: #e6f2fa !important;
+}
+
+/* ★ antd 的「带前后缀」输入框是**两层**：外层 .ant-input-affix-wrapper + 内层 input。
+ *   只给外层上色的话，内层那个 input 还留着 antd 的白底 ——
+ *   实测就是「总预算」那个带 ¥ 前缀的框，别的框都黑了、就它还是白的。
+ *   所以这里内层也要点一遍（并且前后缀那格别再有底色）。 */
+.ant-input-affix-wrapper > input.ant-input,
+.ant-input-affix-wrapper .ant-input,
+.ant-input-group .ant-input,
+.ant-input-group-addon,
+.ant-input-number-input-wrap,
+.ant-input-number-input {
+  background: transparent !important;
+  color: #e6f2fa !important;
+  border-color: rgb(255 255 255 / 0.14) !important;
+}
+.ant-input-affix-wrapper .ant-input-prefix,
+.ant-input-affix-wrapper .ant-input-suffix,
+.ant-input-group-addon {
+  color: #7fa6bb !important;
+  background: transparent !important;
+}
+
+/* ★ 兜底：不管他后面加了什么控件，只要是在这个 iframe 里的原生输入控件，
+ *   一律按深色处理 —— 免得又冒出一个白框来（这次就是漏了内层才被发现的）。 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea,
+select {
+  background: rgb(255 255 255 / 0.06) !important;
+  color: #e6f2fa !important;
+  border-color: rgb(255 255 255 / 0.14) !important;
+  caret-color: #2ec5c5 !important;
+}
+input::placeholder, textarea::placeholder { color: #6f93a6 !important; }
+
+/* ★★ antd 的数字输入框是**另一族类名** —— .ant-input-number-*，
+ *    和普通的 .ant-input-* 不共用。带前缀时更是 .ant-input-number-affix-wrapper。
+ *    实测踩到：「总预算（元）」正好是这个（数字 + ¥ 前缀），
+ *    别的框都黑了、就它整块是白的。
+ *    还有右边的上下调节条 .ant-input-number-handler-wrap 也是自带白底的。 */
+.ant-input-number,
+.ant-input-number-affix-wrapper,
+.ant-input-number-group-wrapper,
+.ant-input-number-input-wrap,
+.ant-input-number-input {
+  background: rgb(255 255 255 / 0.06) !important;
+  color: #e6f2fa !important;
+  border-color: rgb(255 255 255 / 0.14) !important;
+}
+.ant-input-number-input { background: transparent !important; }
+.ant-input-number-affix-wrapper .ant-input-number-prefix,
+.ant-input-number-affix-wrapper .ant-input-number-suffix {
+  color: #7fa6bb !important;
+  background: transparent !important;
+}
+/* 上下调节条：默认白底 + 灰箭头，跟着深色走 */
+.ant-input-number-handler-wrap {
+  background: transparent !important;
+  border-inline-start-color: rgb(255 255 255 / 0.14) !important;
+  opacity: 1 !important;
+}
+.ant-input-number-handler {
+  border-color: rgb(255 255 255 / 0.10) !important;
+  color: #7fa6bb !important;
+}
+.ant-input-number-handler:hover,
+.ant-input-number-handler-up:hover,
+.ant-input-number-handler-down:hover {
+  background: rgb(255 255 255 / 0.08) !important;
+}
+.ant-input-number-handler-up-inner,
+.ant-input-number-handler-down-inner { color: #7fa6bb !important; }
+
+/* ★★ 日期 / 时间选择器的**弹层面板**。
+ *    上次只盖了外层 .ant-picker-dropdown，漏了里面的 .ant-picker-panel-container ——
+ *    那个才是真正画背景的那一层，所以点开之后还是一整块白的（实测扫出来的）。
+ *    这一族类名不少：外层容器 / 头部（年月切换）/ 星期行 / 日期格 / 时间列 / 底部按钮。 */
+.ant-picker-panel-container,
+.ant-picker-panel,
+.ant-picker-date-panel,
+.ant-picker-time-panel,
+.ant-picker-datetime-panel,
+.ant-picker-decade-panel,
+.ant-picker-year-panel,
+.ant-picker-month-panel,
+.ant-picker-quarter-panel,
+.ant-picker-week-panel {
+  background: #12283a !important;
+  border: 1px solid rgb(255 255 255 / 0.12) !important;
+  color: #e6f2fa !important;
+}
+.ant-picker-header {
+  background: transparent !important;
+  border-bottom-color: rgb(255 255 255 / 0.10) !important;
+  color: #cfe6f2 !important;
+}
+.ant-picker-header > button,
+.ant-picker-header-view > button,
+.ant-picker-header-super-prev-btn, .ant-picker-header-super-next-btn,
+.ant-picker-header-prev-btn, .ant-picker-header-next-btn {
+  color: #9fc3d6 !important;
+}
+.ant-picker-header > button:hover { color: #2ec5c5 !important; }
+.ant-picker-content th, .ant-picker-content td { color: #a8c6d8 !important; }
+.ant-picker-cell { color: #7fa6bb !important; }
+.ant-picker-cell-in-view { color: #dbeaf3 !important; }
+.ant-picker-cell-inner {
+  background: transparent !important;
+  color: inherit !important;
+}
+.ant-picker-cell:hover:not(.ant-picker-cell-selected):not(.ant-picker-cell-range-start)
+  .ant-picker-cell-inner {
+  background: rgb(255 255 255 / 0.10) !important;
+}
+.ant-picker-cell-selected .ant-picker-cell-inner,
+.ant-picker-cell-today .ant-picker-cell-inner::before {
+  background: #2ec5c5 !important;
+  color: #04202a !important;
+  border-color: #2ec5c5 !important;
+}
+.ant-picker-cell-disabled .ant-picker-cell-inner { color: #4a6a7a !important; }
+.ant-picker-today-btn, .ant-picker-now-btn { color: #2ec5c5 !important; }
+.ant-picker-now, .ant-picker-ok > button {
+  background: linear-gradient(135deg, #1d8a99, #2ec5c5) !important;
+  border-color: transparent !important;
+  color: #04202a !important;
+}
+.ant-picker-footer {
+  background: transparent !important;
+  border-top-color: rgb(255 255 255 / 0.10) !important;
+}
+.ant-picker-footer-extra, .ant-picker-ranges { background: transparent !important; }
+/* 时间面板的三列与选中态 */
+.ant-picker-time-panel-column {
+  border-inline-start-color: rgb(255 255 255 / 0.10) !important;
+}
+.ant-picker-time-panel-column > li.ant-picker-time-panel-cell
+  .ant-picker-time-panel-cell-inner {
+  color: #cfe6f2 !important;
+}
+.ant-picker-time-panel-column > li.ant-picker-time-panel-cell
+  .ant-picker-time-panel-cell-inner:hover {
+  background: rgb(255 255 255 / 0.10) !important;
+}
+.ant-picker-time-panel-column > li.ant-picker-time-panel-cell-selected
+  .ant-picker-time-panel-cell-inner {
+  background: rgb(46 197 197 / 0.22) !important;
+  color: #7fe6e6 !important;
+}
+.ant-picker-panel input { background: transparent !important; color: #e6f2fa !important; }
+.ant-picker-input-active > input { color: #2ec5c5 !important; }
+.ant-input::placeholder, .ant-input-number-input::placeholder,
+.ant-select-selection-placeholder, .ant-picker-input > input::placeholder {
+  color: #6f93a6 !important;
+}
+.ant-select-selection-item, .ant-picker-input > input,
+.ant-input-number-input { color: #e6f2fa !important; }
+.ant-select-arrow, .ant-picker-suffix, .ant-input-suffix {
+  color: #7fa6bb !important;
+}
+/* 下拉弹层是挂到 body 上的，也在 iframe 里 */
+.ant-select-dropdown, .ant-picker-dropdown, .ant-dropdown-menu {
+  background: #12283a !important;
+  border: 1px solid rgb(255 255 255 / 0.12) !important;
+}
+.ant-select-item { color: #d7e9f3 !important; }
+.ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: rgb(255 255 255 / 0.08) !important;
+}
+.ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: rgb(45 200 200 / 0.18) !important;
+  color: #7fe6e6 !important;
+}
+
+/* ---- 按钮：主按钮用 AIRI 那支青色 ---- */
+.ant-btn-primary {
+  background: linear-gradient(135deg, #1d8a99, #2ec5c5) !important;
+  border-color: transparent !important;
+  color: #04202a !important;
+  font-weight: 600;
+}
+.ant-btn-primary:hover {
+  background: linear-gradient(135deg, #22a0b0, #46dcdc) !important;
+}
+.ant-btn-default, .ant-btn {
+  background: rgb(255 255 255 / 0.06) !important;
+  border-color: rgb(255 255 255 / 0.16) !important;
+  color: #d7e9f3 !important;
+}
+.ant-btn-default:hover {
+  border-color: #2ec5c5 !important;
+  color: #7fe6e6 !important;
+}
+
+/* ---- 提示条 / 空态 ---- */
+.ant-alert {
+  background: rgb(45 200 200 / 0.10) !important;
+  border-color: rgb(45 200 200 / 0.30) !important;
+}
+.ant-alert-message, .ant-alert-description { color: #cfe6f2 !important; }
+.ant-empty-description { color: #7fa6bb !important; }
+
+/* ---- 表格 / 分隔线（方案结果里会用到）---- */
+.ant-table, .ant-table-cell, .ant-table-thead > tr > th {
+  background: transparent !important;
+  color: #e6f2fa !important;
+  border-color: rgb(255 255 255 / 0.10) !important;
+}
+.ant-table-tbody > tr:hover > td { background: rgb(255 255 255 / 0.05) !important; }
+.ant-divider { border-color: rgb(255 255 255 / 0.10) !important; }
+.ant-tag { background: rgb(255 255 255 / 0.08) !important; border-color: transparent !important; color: #cfe6f2 !important; }
+
+/* ---- 滚动条跟着深色 ---- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.16);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgb(255 255 255 / 0.28); }
+
+/* ---- 页脚那行构建信息，压暗一点别抢注意力 ---- */
+footer, .footer, .build-info { color: #5c7f92 !important; }

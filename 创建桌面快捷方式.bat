@@ -2,10 +2,10 @@
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
-title 智能文旅辅助系统 - 创建桌面快捷方式
+title 浙里智慧游 - 创建桌面快捷方式
 
 REM ============================================================
-REM  双击一次，就在**桌面**和**开始菜单**建好「智能文旅辅助系统」的快捷方式。
+REM  双击一次，就在**桌面**和**开始菜单**建好「浙里智慧游」的快捷方式。
 REM
 REM  为什么发的是这个脚本、而不是一个现成的 .lnk：
 REM    快捷方式文件（.lnk）里存的是**绝对路径**。在我这台机器上它指向
@@ -48,12 +48,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$made = @();" ^
   "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))) {" ^
   "  if (-not (Test-Path $dir)) { continue }" ^
-  "  $lnkPath = Join-Path $dir '智能文旅辅助系统.lnk';" ^
+  "  $lnkPath = Join-Path $dir '浙里智慧游.lnk';" ^
   "  $s = $ws.CreateShortcut($lnkPath);" ^
   "  $s.TargetPath = $target;" ^
   "  $s.WorkingDirectory = $wd;" ^
   "  if (Test-Path $icon) { $s.IconLocation = $icon }" ^
-  "  $s.Description = '智能文旅辅助系统 —— Live2D 虚拟向导 + 个性化旅游规划（本机运行）';" ^
+  "  $s.Description = '浙里智慧游 —— Live2D 虚拟向导 + 个性化旅游规划（本机运行）';" ^
   "  $s.Save();" ^
   "  $made += $lnkPath" ^
   "}" ^
@@ -69,7 +69,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo   好了 —— 桌面上已经出现「智能文旅辅助系统」，双击即用。
+echo   好了 —— 桌面上已经出现「浙里智慧游」，双击即用。
 echo   （开始菜单里也放了一份）
 echo.
 echo   首次双击会补装 Electron 依赖、并打包自带后端，需要几分钟；

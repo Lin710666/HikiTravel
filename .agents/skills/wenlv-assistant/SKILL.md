@@ -1,12 +1,12 @@
 ---
 name: wenlv-assistant
-description: 文旅智能辅助 Skill。当需要为游客生成个性化"游玩·旅居·餐饮"一体化方案，或为景区/酒店/餐饮/文创产品生成营销文案素材时使用。触发词：旅游攻略、行程规划、景点推荐、酒店推荐、民宿推荐、餐厅推荐、美食推荐、文旅营销、营销文案、朋友圈文案、小红书文案、OTA文案、海报文案、活动策划、文创创意、文旅咨询。
+description: 浙里智慧游 Skill。当需要为游客生成个性化"游玩·旅居·餐饮"一体化方案，或为景区/酒店/餐饮/文创产品生成营销文案素材时使用。触发词：旅游攻略、行程规划、景点推荐、酒店推荐、民宿推荐、餐厅推荐、美食推荐、文旅营销、营销文案、朋友圈文案、小红书文案、OTA文案、海报文案、活动策划、文创创意、文旅咨询。
 license: MIT
 user-invocable: true
 metadata: { "openclaw": { "emoji": "🏔️", "os": ["darwin", "linux", "win32"], "requires": { "bins": ["node", "ollama"] } } }
 ---
 
-# 文旅智能辅助 Skill（wenlv-assistant）
+# 浙里智慧游 Skill（wenlv-assistant）
 
 ## 执行指令（在本技能被加载时，先执行这一段）
 

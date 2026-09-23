@@ -1,11 +1,78 @@
-# 文旅智能辅助 · 融合版（HikiTravel 后端 + AIRI 网页界面）
+# 浙里智慧游 · 融合版（HikiTravel 后端 + AIRI 网页界面）
 
-**版本：`HikiTravel-AIRI-1.4`**（仓库分支名就是它。
-代码一路长过来：`v6.6` / `v7.0`（组员在 `yidongbei_jhc` 上的分支）+ `HikiTravel-AIRI-1.1~1.3`
-—— 两边的东西都并进来了，谁都没丢。**本地目录名仍是 `HikiTravel-AIRI-1.3`**，
+**版本：`HikiTravel-AIRI-2.0`**（仓库分支名就是它。
+代码一路长过来：`v6.6` / `v7.0` / `v7.2`（组员在 `yidongbei_jhc` 上的分支）
++ `HikiTravel-AIRI-1.1~1.4` —— 两边的东西都并进来了，谁都没丢。
+**本地目录名仍是 `HikiTravel-AIRI-1.3`**，
 只是没跟着改名（改名要动一堆脚本里的绝对路径，不值当）。）
 
 赛题 **JBGS-2026-06**（发榜方：杭州网易智企）的比赛工程。
+
+---
+
+## 2.0 相对 1.4 改了什么
+
+一句话：**前端整体升到组员的 v7.2，后端按「我们有的保留、没有的补上」做合并。**
+
+### 一、前端 → v7.2
+
+新增 15 个文件、更新 8 个：
+
+| 新增 | 是什么 |
+|---|---|
+| `m/` | **手机版**（`mobile.html` + `mobile.css` + `mobile.js`） |
+| `app/` | 一个独立面板页 |
+| `sw.js` + `manifest.webmanifest` + `icons/` | **PWA**：手机"添加到主屏幕"后能全屏、有图标 |
+| `js/agent.js` | 对话 agent 相关 |
+| `js/template-boot.js` | 开屏模板 |
+| `__motion__/` | 动作预览页 |
+
+**Service Worker 我重点看过**（PWA 最容易出"缓存旧界面"的坑）：它写得挺稳妥 ——
+只缓存外壳静态文件、`/api` **一律不碰**（缓存了只会让用户看到过期数据）、
+而且用的是**网络优先**（作者注释里明说："这台机器上开发迭代频繁，
+cache-first 会让用户一直看到旧界面还以为是没生效"）。
+`index.html` 也没有注册它，只作用于手机页。
+
+**页签结构变了**：现在是 `💬对话 / 🎨外观 / 🧠记忆 / 🎭角色卡 / 🔊声音` ——
+**「文旅」不再是页签**，它成了 `pane-tools`，从「对话」页的工作台开关进。
+
+### 二、后端 → 只并进 4 个，其余全保留
+
+逐文件比过（只有「v7.2 有、我们没有」的才并）：
+
+| 文件 | 处理 | 他们的东西 |
+|---|---|---|
+| `models/preference.py` | **并进来** | `norm_hhmm()`：时间字段规范化。他们的注释里记了一类真 bug —— 字段声明成 `"HH:MM"` 却没有校验，`"上午"` 传进来会在**生成阶段**抛 ValueError → 整条 `/api/plan` 500（不是 400） |
+| `routers/ui_compat.py` | **并进来** | 修了 `_match_model` 的子串匹配 bug：`"qwen2.5"` 也会匹配到 `"qwen2.5vl:3b"`，导致状态灯显示成了视觉模型；另加 `_pick_data_dir()` |
+| `app/agent_talk.py` | 新文件 | |
+| `pyproject.toml` / `uv.lock` | 依赖变化 | |
+| `amap.py` / `planner_skill.py` / `retrieve_skill.py` / `output_guard.py` / `main.py` / `orchestrator.py` | **保留我们的** | 逐行比过：v7.2 那边是旧版，**没有我们缺的任何东西** |
+
+并完把我们的 `max_length=32`（`origin` / `destination`）打回了 `preference.py`。
+
+### 三、比对时踩的坑（记一笔）
+
+第一次比出来 **115 个文件"内容不同"**，看着像前端全变了 —— 其实是
+**换行符差异**：我们本地是 CRLF（`.gitattributes` 的 `* text=auto` 在 checkout 时转的），
+tar 包解出来是 LF。**归一化换行后真差异只有 8 个**。
+以后做这种跨来源比对，第一件事就该归一化换行，否则会把假差异当真差异。
+
+### 四、验证
+
+```
+✅ 30 个 Python 模块全部编译 + 导入
+✅ 之前的修复全在：国外地址驳回 / 北京景点校验 / 交通分档 / 边界值友好报错
+✅ 83 个接口无异常堆栈      ✅ 方案质量三城全过
+✅ 前端点遍页签/顶栏/工具条：0 JS 报错、0 失败请求
+✅ v7.2 新页面全部可访问：/m/ /app/ /__motion__/ manifest sw.js agent.js
+```
+
+**已知没查的**：手机版 `/m/` 的交互、TTS、3D —— 只过了主路径，没深入测。
+
+> 顺带说一件事：这次 `git fetch` 全线失败，不是 GitHub 挂了，是本机 hosts
+> 把 `github.com` / `api.github.com` / `raw.githubusercontent.com` 都指向了
+> `127.0.0.1`（Steam++ 那类加速器留下的条目，而它的服务没在跑）。
+> 绕法是走 `codeload.github.com` + `gh-proxy.com`（实测 2.37 MB/s）。
 
 ---
 
@@ -26,7 +93,7 @@ v7.0 已经包含了我们绝大部分改动（21 项特征里 15 项一致）�
 | `public/js/wenlv-net.js` | **离线重连** —— 后端中途崩了/重启时顶部出「连接已断开，正在重连…」，指数退避（1s→2s→4s，上限 8s），恢复后自动补拉 |
 | `data/videos/星空云海-…mp4` | 新的动态场景（同时改成了默认开屏背景） |
 | `public/models/hanfu/` | 新的 Live2D 形象「汉服少女（自建）」 |
-| — | 软件版改名：不再自称「网页版」，统一叫「智能文旅辅助系统」 |
+| — | 软件版改名：不再自称「网页版」，统一叫「浙里智慧游」 |
 
 **保留（我们的）：** `planner_skill.py` / `amap.py` / `retrieve_skill.py` / `output_guard.py`
 （逐行比过：v7.0 那四份是旧版，没有我们缺的修复）。
@@ -101,7 +168,7 @@ FastAPI 默认的 422 `detail` 是结构化数组（`{"type":"greater_than_equal
 | 文件 | 干什么 |
 |---|---|
 | `desktop/启动桌面版.bat` | 双击直接开桌面版。会**按需补齐**：没装 Electron 依赖就装（走 npmmirror 镜像，避开 GitHub 的证书报错）、没打包后端就打包。还会**自动从 `backend/.env` 读高德 Key** 传进去 |
-| `创建桌面快捷方式.bat` | 双击一次，在**桌面**和**开始菜单**建好「智能文旅辅助系统」的快捷方式 |
+| `创建桌面快捷方式.bat` | 双击一次，在**桌面**和**开始菜单**建好「浙里智慧游」的快捷方式 |
 | `desktop/app.ico` | 图标。多尺寸（16/24/32/48/64/128/256），深蓝→青渐变 + 白色山峰，和界面同一套配色 |
 
 **为什么不直接发一个 `.lnk` 上去**：快捷方式里存的是**绝对路径**。
@@ -116,8 +183,8 @@ FastAPI 默认的 422 `detail` 是结构化数组（`{"type":"greater_than_equal
 实测（双击脚本 → 快捷方式 → 启动）：
 
 ```
-✓ 已创建: C:\Users\11702\Desktop\智能文旅辅助系统.lnk
-✓ 已创建: ...\Start Menu\Programs\智能文旅辅助系统.lnk
+✓ 已创建: C:\Users\11702\Desktop\浙里智慧游.lnk
+✓ 已创建: ...\Start Menu\Programs\浙里智慧游.lnk
   目标      : ...\desktop\启动桌面版.bat
   工作目录  : ...\desktop
   图标      : ...\desktop\app.ico,0
@@ -130,7 +197,7 @@ FastAPI 默认的 422 `detail` 是结构化数组（`{"type":"greater_than_equal
   正在启动窗口...
 
 结果：electron 4 个进程 + hiki-backend 1 个（端口 54315）
-      /api/health → {"amap_configured": true}   窗口标题「智能文旅辅助系统」
+      /api/health → {"amap_configured": true}   窗口标题「浙里智慧游」
 ```
 
 > 踩的坑记一笔：中途用「重定向 stdout 的 `cmd /c`」去测启动器，Electron
@@ -196,7 +263,7 @@ public/models/hanfu/
 再配上前端一起封进 Windows 安装包：
 
 ```
-双击 desktop\打包桌面版.bat   →   desktop\dist\智能文旅辅助系统-<版本>-安装包.exe
+双击 desktop\打包桌面版.bat   →   desktop\dist\浙里智慧游-<版本>-安装包.exe
 ```
 
 **装完就能用，目标机器不需要装 Python、不需要开命令行。**
@@ -1357,7 +1424,7 @@ stopTalking 之后   最大开口 0.000                        ✅ 已闭嘴
   底部对话栏保留，地址栏和标签页该在还在。要真全屏请自己按 **F11**。
   （全项目已无任何 `requestFullscreen` 调用，可用 `grep -r requestFullscreen public/` 复核。）
 - **顶栏整条 `display: none`**，不是淡出。原来是 `opacity:0` + 悬停自动亮回来，
-  鼠标划到屏幕顶部就会把「🏔️ 文旅智能辅助 HikiTravel-AIRI-1.4」冒出来。
+  鼠标划到屏幕顶部就会把「🏔️ 浙里智慧游 HikiTravel-AIRI-2.0」冒出来。
 - **左上角那条「🏔️ 小文 浙江文旅向导，陪你玩得明白…」（`.char-plate`）也藏**。
   它原来**根本没被 kiosk 规则盖到**，所以大屏下一直显示着 ——
   表现就是"说好只剩人物和对话栏，上面却还挂着一行字"。
@@ -1812,19 +1879,19 @@ luotianyi-BV1MYCaYXEWf.mp4             列了 · 在 ✅
 ## 发布到 GitHub（流程 + 一个把克隆 `.git` 删掉的坑）
 
 推的是 `https://github.com/Lin710666/HikiTravel` 仓库的**同名分支**
-（`HikiTravel-AIRI-1.4`）。内容在**仓库根目录**（不是子目录）。
+（`HikiTravel-AIRI-2.0`）。内容在**仓库根目录**（不是子目录）。
 
 ### 流程
 
 ```bat
 git clone https://github.com/Lin710666/HikiTravel.git
 cd HikiTravel
-git checkout HikiTravel-AIRI-1.4
+git checkout HikiTravel-AIRI-2.0
 :: 清空工作区（只留 .git），再把产品目录的内容复制进来 —— 用 /E，不要用 /MIR
 git add -A
 git status --porcelain      :: 逐条核一遍，确认没有敏感文件
 git commit -F 提交信息.txt
-git push origin HikiTravel-AIRI-1.4
+git push origin HikiTravel-AIRI-2.0
 ```
 
 ### ⚠️ 坑：`robocopy /MIR` 把克隆的 `.git` 删了

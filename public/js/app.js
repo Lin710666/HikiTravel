@@ -1,5 +1,5 @@
 /* ============================================================================
- * app.js —— 智能文旅辅助系统 主程序
+ * app.js —— 浙里智慧游 主程序
  *
  * 职责：把「Live2D 舞台 + 交互词云 + 右侧面板」和「本地服务」接起来。
  * 所有数据来自本机：/api/status、/api/capabilities、/api/chat(SSE)、
@@ -130,6 +130,7 @@
     bindTopbar();
     bindComposer();
     bindWorkbenchToggle();   // 工作台的展开/收起（底部面板里默认折叠）
+    bindDrawer();            // 文旅抽屉的开合（对话页点「AI 规划」拉出来）
     bindTools();
     bindPlanner();
     bindMemory();
@@ -3370,29 +3371,12 @@
      * 默认是**收起来**的（用户要的就是"那一排收起来，点一下才全部展示"）。
      * 展开状态下点到别处会自动收回去 —— 不然那一排会一直摊着挡住角色。
      * ====================================================================*/
-    const TOOLS_KEY = 'wenlv.toolsCollapsed';
-    {
-      const apply = (on) => {
-        document.body.classList.toggle('tools-collapsed', on);
-        const b = $('#btn-tools-toggle');
-        if (b) b.setAttribute('aria-expanded', on ? 'false' : 'true');
-        try { localStorage.setItem(TOOLS_KEY, on ? '1' : '0'); } catch { /* 隐私模式忽略 */ }
-      };
-      let stored = null;
-      try { stored = localStorage.getItem(TOOLS_KEY); } catch { /* 忽略 */ }
-      apply(stored === null ? true : stored === '1');      // 没存过 → 默认收起
-
-      const b = $('#btn-tools-toggle');
-      if (b) b.addEventListener('click', () => {
-        apply(!document.body.classList.contains('tools-collapsed'));
-      });
-      // 点空白处收起（只处理展开态，收起态什么都不做）
-      document.addEventListener('click', (e) => {
-        if (document.body.classList.contains('tools-collapsed')) return;
-        const t = e.target;
-        if (t && t.closest && !t.closest('.stage-tools')) apply(true);
-      });
-    }
+    /* 收纳栏已经去掉（见下面「⚙️ 设置」那段）。
+       这里只把遗留的 tools-collapsed 类清掉 —— 老的 localStorage 里可能还存着
+       '1'，不清的话启动时 body 会带上这个类，那条 CSS 规则虽然已经 revert，
+       但留着这个无意义的类名只会给以后排查添乱。 */
+    try { localStorage.removeItem('wenlv.toolsCollapsed'); } catch { /* 忽略 */ }
+    document.body.classList.remove('tools-collapsed');
 
     /* ======================================================================
      * 虚拟形象 显示 / 隐藏（默认**显示**）
@@ -3424,6 +3408,19 @@
         toast(nowHidden ? '已隐藏虚拟形象（再点一次显示）' : '已显示虚拟形象', 'ok', 2500);
       });
     }
+
+    /* ======================================================================
+     * 右上角的「⚙️ 设置」= 进入调试界面
+     *
+     * ★ 7.0 界面收敛：这里原来是"收纳栏"—— 点一下展开十几个工具键。
+     *   需求方要的是「只留一个设置，点它直接进调试界面」，那一排的功能
+     *   并进调试界面（已有的不重复做，缺的补在「外观」页的「主界面工具」里）。
+     *
+     *   所以原来那套 tools-collapsed 折叠逻辑删掉了：现在这一排没有可展开的
+     *   东西，留着它只会让人以为还能展开、点了却什么都不发生。
+     *
+     *   实际绑定在下面 DOCK 那一段里（设置键要调 apply()，得先有它）。
+     * ====================================================================*/
 
     /* ======================================================================
      * 「🐞 调试」= 切回**一开始那一版**的界面
@@ -3458,6 +3455,16 @@
           b.classList.toggle('on', want);
         }
         try { localStorage.setItem(DOCK_KEY, want ? '1' : '0'); } catch { /* 忽略 */ }
+        /* ★ 进调试界面时把侧栏切到一个**确实存在**的页签上。
+           文旅面板已经搬进右侧抽屉，不在 .side 里了；如果这时侧栏的
+           active 还停在一个不存在于 .side 的页签上，右侧那一列就是空的
+           —— 看起来像"点了设置没反应"。 */
+        if (want) {
+          try {
+            const active = document.querySelector('.side .panes .pane.active');
+            if (!active) switchTab('agent');
+          } catch { /* 忽略 */ }
+        }
         // 布局变了要通知舞台重算尺寸，否则角色还按旧画布尺寸摆着
         setTimeout(() => { const st = activeStage(); if (st && st.resize) st.resize(); }, 120);
         if (!(opts && opts.silent)) {
@@ -3477,36 +3484,59 @@
       if (b) b.addEventListener('click', () => {
         apply(!document.body.classList.contains('debug'));
       });
+
+      /* ★ 右上角「⚙️ 设置」= 进调试界面（7.0 界面收敛后它就这一个作用）。
+         用 .click() 转给 #btn-dock，而不是复制一份 apply 逻辑 ——
+         两处各写一遍迟早会不一致（比如以后给 apply 加了副作用只改一处）。 */
+      const setBtn = $('#btn-tools-toggle');
+      if (setBtn) {
+        setBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const dock = $('#btn-dock');
+          if (dock) dock.click();
+        });
+      }
     }
 
     /* ======================================================================
-     * 「💬 对话栏」：显示 / 关闭底部那条对话框
+     * 底部对话栏：**常显**
      *
-     * 大屏时想只留人物与背景，就把它关掉。
-     * 关键：**关掉之后随时能再打开** —— 不管是从调试界面切回来，
-     * 还是从主界面切回来，它都必须重新出现（之前切出去就回不来了）。
-     * 所以状态只存在 no-chatbar 这个类上，切布局不会把它弄丢。
+     * ★ 7.0 修正：这里原来有一个「💬 对话栏」开关，能把它永久藏掉
+     *   （写进 localStorage，刷新也回不来）。需求方要求
+     *   "对话框不能消失，要保持住它的出现"，所以现在：
+     *
+     *     · no-chatbar 这个类**永远不再被加上**，CSS 里那条隐藏规则也删了
+     *     · 启动时强制清掉遗留状态 —— 老用户的 localStorage 里可能还存着 '0'，
+     *       不清的话一进来就是"没有对话框"，而且怎么点都回不来
+     *     · 按钮保留（给个反馈、也留个念想），但只切高亮，不再真的隐藏
+     *
+     *   注：调试界面（.debug）下 .side 是右侧分栏而非底部对话栏，
+     *       由 debug 那套规则管理，这里不碰。
      * ====================================================================*/
     const CHATBAR_KEY = 'wenlv.chatbar';
     {
-      const applyBar = (on) => {
-        const want = Boolean(on);
-        // 只在非调试布局下才谈得上"底部对话栏"；调试用的是右侧分栏，
-        // CSS 里那条规则带了 :not(.debug)，不会连坐藏掉右侧栏
-        document.body.classList.toggle('no-chatbar', !want);
+      const ensureShown = () => {
+        const had = document.body.classList.contains('no-chatbar');
+        document.body.classList.remove('no-chatbar');
+        try { localStorage.removeItem(CHATBAR_KEY); } catch { /* 忽略 */ }
         const b = $('#btn-chatbar');
-        if (b) b.classList.toggle('on', want);
-        try { localStorage.setItem(CHATBAR_KEY, want ? '1' : '0'); } catch { /* 忽略 */ }
-        setTimeout(() => { const st = activeStage(); if (st && st.resize) st.resize(); }, 120);
+        if (b) b.classList.add('on');
+        return had;
       };
-      let barStored = null;
-      try { barStored = localStorage.getItem(CHATBAR_KEY); } catch { /* 忽略 */ }
-      applyBar(barStored !== '0');            // 默认显示
-      S._chatbarApply = applyBar;
+      const hadHidden = ensureShown();
+      if (hadHidden) {
+        // 只提示一次，别每次启动都弹
+        setTimeout(() => {
+          try { toast('底部对话栏已恢复常显（旧设置里它被关掉过）', 'ok', 4000); } catch { /* 忽略 */ }
+        }, 1600);
+      }
+      // 留个接口给别处（比如以后要做"临时收起"）
+      S._chatbarEnsure = ensureShown;
 
       const cb = $('#btn-chatbar');
       if (cb) cb.addEventListener('click', () => {
-        applyBar(document.body.classList.contains('no-chatbar'));
+        ensureShown();
+        try { toast('底部对话栏固定显示，不会被关闭', 'ok', 2600); } catch { /* 忽略 */ }
       });
     }
   }
@@ -5216,14 +5246,40 @@
   function switchTab(name) {
     // ★ 'chat' 别名到 'tools'。
     //
-    // 「对话」页签已经并进「文旅」（两个本来就是一件事的两半，而且聊天流里
-    // 还默认嵌了第二份一模一样的工作台）。但全站还有几十处 `switchTab('chat')`
-    // 和 `#pane-chat` 的引用，一次全改容易漏。留个别名在这里兜底：
-    // 就算有漏网的调用点，也只是切到「文旅」，不会切到一个不存在的页签上
-    // （那会让整个侧栏变成空白）。
+    // 「对话」页签曾经并进「文旅」。全站还有几十处 `switchTab('chat')`
+    // 和 `#pane-chat` 的引用，一次全改容易漏，所以留个别名兜底。
     if (name === 'chat') name = 'tools';
+
+    /* ★ 7.0 界面改版：默认视图下 `tools` 重定向到 `agent`。
+     *
+     * 文旅面板已经搬进右侧抽屉（不在页签里了），而全站还有 13 处
+     * `switchTab('tools')` —— 它们原来的意图都是"让结果区可见"。
+     * 在默认视图下那个面板根本不在 .side 里，切过去只会把对话页
+     * 的 active 摘掉、让底部栏变成一片空白。
+     *
+     * 所以在这里一次性重定向，而不是去改那 13 个调用点：
+     *   · 默认视图（body:not(.debug)）→ 切到「对话」页
+     *   · 分栏调试视图（.debug）→ 旅游面板确实在页签里，照旧切过去
+     */
+    if (name === 'tools' && !document.body.classList.contains('debug')) name = 'agent';
+
+    /* ★ 兜底：切完之后必须**确实有一个可见的面板**。
+     *
+     * 默认视图下文旅面板在右侧抽屉里、不在 .side 里，如果 active 落到一个
+     * 不存在的页签上，底部栏就是一片空白 —— 看起来正是"对话框消失了"。
+     * 这里切完检查一次，没有可见面板就退回「对话」。
+     * （需求方要求"对话框不能消失，要保持住它的出现"，这是那道保险。） */
+    const paneExists = document.querySelector(`.side .panes #pane-${name}`) != null;
+    if (!paneExists) {
+      const fallback = document.querySelector('.side .panes #pane-agent') ? 'agent'
+        : (document.querySelector('.side .panes .pane') ? document.querySelector('.side .panes .pane').id.replace(/^pane-/, '') : null);
+      if (fallback && fallback !== name) name = fallback;
+    }
+
     $$('#tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
-    $$('.pane').forEach(p => p.classList.toggle('active', p.id === `pane-${name}`));
+    // 抽屉里的 #pane-tools 不参与页签切换（它靠 .drawer-open 显示），
+    // 所以这里只对 .panes 里的面板切 active。
+    $$('.side .panes .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${name}`));
     if (name === 'memory') renderMemoryList();
     if (name === 'cards') renderCards();
     if (name === 'look') {
@@ -5519,47 +5575,54 @@
    * 但会冒泡到 window，正好接住。
    */
   function bindPlanner() {
+    /* ★ 改成嵌入「组员那版」的规划页（iframe）。
+     *
+     * 原来是挂 planner-embed.js（融合版自己那套 React 工作台）。需求方看过组员
+     * main 上那版之后定了：**用他那张表单页**，原来的工作台不要了。
+     *
+     * 为什么用 iframe 而不是再打一个 IIFE：
+     *   · 他那套是完整的 Vite 单页应用（有路由、有状态、自带样式），不是 lib 模式
+     *     的嵌入包 —— 想挂进同一个文档得先把它改造成 UMD，那是改人家的工程。
+     *   · iframe 天然隔离：他的 antd 样式不会污染我们的 AIRI 界面，反之亦然。
+     *   · 同源（同一个后端托管 /planner/），所以他的 /api/plan 直接打到我们的后端上，
+     *     跨域、cookie、路径全都不用管。
+     */
     const host = $('#wenlv-planner');
     if (!host) return;
 
-    const fail = (title, detail) => {
-      if (host.dataset.wenlvMounted === '1') return;   // 已经挂上了就别覆盖
-      host.innerHTML = '';
-      const box = document.createElement('div');
-      box.className = 'planner-state err';
-      box.textContent = title + (detail ? '：' + detail : '');
-      host.appendChild(box);
-    };
+    if (host.dataset.wenlvPlanner === 'iframe') return;   // 只挂一次
+    host.dataset.wenlvPlanner = 'iframe';
+    host.innerHTML = '';
 
-    // React 渲染期抛错会冒泡到这里（上面的 try/catch 接不到）
-    window.addEventListener('error', (e) => {
-      const msg = (e && e.message) || '';
-      if (!msg) return;
-      if (/antd|react|planner-embed/i.test(msg) || /planner-embed\.js/.test((e.filename || ''))) {
-        fail('工作台渲染出错', msg);
+    const frame = document.createElement('iframe');
+    frame.src = '/planner/';
+    frame.title = '文旅规划';
+    frame.className = 'planner-frame';
+    frame.setAttribute('allow', 'clipboard-write');
+
+    /* ★ 风格统一：他那套是浅色 antd，嵌进我们的深色界面像"贴了块白纸"。
+       同源 iframe 能拿到 contentDocument，所以**从外面往里注入**一份深色主题
+       （public/css/planner-theme.css）—— 不用改他的工程、也不用重新构建。
+       放在 load 之后注入：他那套是 vite 单页应用，样式是运行时挂上去的，
+       注入太早会被它自己的 CSS-in-JS 覆盖。 */
+    frame.addEventListener('load', () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc || doc.getElementById('airi-planner-theme')) return;
+        const link = doc.createElement('link');
+        link.id = 'airi-planner-theme';
+        link.rel = 'stylesheet';
+        link.href = '/css/planner-theme.css';
+        doc.head.appendChild(link);
+      } catch (e) {
+        /* 跨域或还没加载好 —— 不影响功能，只是不统一而已，不抛 */
+        console.warn('规划页主题注入失败（不影响使用）', e);
       }
     });
 
-    const tryMount = (attempt) => {
-      const api = window.WenlvPlanner;
-      if (api && typeof api.mount === 'function') {
-        try {
-          if (!api.mount(host)) fail('工作台挂载失败', '没找到挂载容器');
-        } catch (err) {
-          fail('工作台挂载时抛错', (err && err.message) || String(err));
-        }
-        return;
-      }
-      if (attempt >= 25) {   // 约 5 秒还没等到就放弃并说明
-        fail('行程规划工作台没有加载成功',
-          window.__plannerScriptError
-          || '拿不到 /planner-embed.js 里的 WenlvPlanner（文件缺失、或加载被拦截）');
-        return;
-      }
-      setTimeout(() => tryMount(attempt + 1), 200);
-    };
-    tryMount(0);
+    host.appendChild(frame);
   }
+
 
   /**
    * 「生成结果」那个区块默认是收起的（它是外壳原版的展示位，平时不占地方）。
@@ -6801,6 +6864,74 @@
    * 脚本调用它们走的是**和用户点选完全相同的代码路径**（不是绕过逻辑的后门），
    * 只是省掉了"找到那个按钮"的脆弱环节。
    */
+  /* ==========================================================================
+   * 文旅抽屉（7.0 界面改版）
+   *
+   * 需求方要的交互：对话页点「AI 规划」→ 文旅功能**从右侧拉出来**，
+   * 而不是把表单塞进对话框里。
+   *
+   * 实现上就是把原来侧栏里的 `#pane-tools` 整个搬进 `#wenlv-drawer`，
+   * 靠 body.drawer-open 这个类做滑入/滑出（动画在 CSS 里）。
+   * 用类而不是直接改 style：动画、遮罩、指针事件都由 CSS 一处管，
+   * JS 只负责"开/关"这一个语义。
+   * ========================================================================*/
+
+  /** 打开文旅抽屉。opts.focusPlan 为真时顺带把方案表单展开并聚焦到目的地 */
+  function openDrawer({ focusPlan = true } = {}) {
+    document.body.classList.add('drawer-open');
+    const d = $('#wenlv-drawer');
+    if (d) d.setAttribute('aria-hidden', 'false');
+    const m = $('#drawer-mask');
+    if (m) m.hidden = false;
+    if (focusPlan) {
+      // 工作台默认是折起来的（底部面板矮，铺开会把字段切掉）。
+      // 用户是明确点了「AI 规划」进来的，那就直接铺开 —— 让他看见要填什么。
+      try { expandWorkbench(); } catch { /* 忽略 */ }
+      const city = $('#plan-city');
+      if (city) setTimeout(() => { try { city.focus({ preventScroll: true }); } catch { } }, 260);
+    }
+  }
+
+  function closeDrawer() {
+    document.body.classList.remove('drawer-open');
+    const d = $('#wenlv-drawer');
+    if (d) d.setAttribute('aria-hidden', 'true');
+    const m = $('#drawer-mask');
+    if (m) m.hidden = true;
+  }
+
+  function toggleDrawer(force) {
+    const open = force != null ? !!force : !document.body.classList.contains('drawer-open');
+    if (open) openDrawer(); else closeDrawer();
+    return open;
+  }
+
+  function bindDrawer() {
+    const close = $('#drawer-close');
+    if (close) close.addEventListener('click', () => closeDrawer());
+    const mask = $('#drawer-mask');
+    if (mask) mask.addEventListener('click', () => closeDrawer());
+    // Esc 收起。只在真的开着的时候拦，免得抢了别的 Esc 用途（开屏也是 Esc）。
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.body.classList.contains('drawer-open')) {
+        e.stopPropagation();
+        closeDrawer();
+      }
+    }, true);
+  }
+
+  /** 把抽屉滚到方案输出区（生成完方案后让用户直接看到结果） */
+  function scrollToResult() {
+    const body = $('#drawer-body');
+    const log = $('#chat-log');
+    if (!body) return false;
+    if (!log) { body.scrollTop = body.scrollHeight; return true; }
+    const top = log.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+    try { body.scrollTo({ top: Math.max(0, top - 12), behavior: 'smooth' }); }
+    catch { body.scrollTop = Math.max(0, top - 12); }
+    return true;
+  }
+
   window.__wenlv = {
     get state() { return S; },
     switchDisplay,
@@ -6814,6 +6945,27 @@
     // 结果卡的排版函数。验收脚本可以直接塞一段假 HTML 进来验证排版规则，
     // 不用每次都真跑一遍模型（跑一次要几十秒，定位排版问题太慢）。
     layoutResultBlock,
+    // ------------------------------------------------------------------
+    // 给 public/js/agent.js（智能体对话页）用的接口。
+    //
+    // 为什么单开一个文件而不是全塞进 app.js：app.js 已经 6800 行了，
+    // 对话页是一块独立的界面逻辑（气泡渲染、流式、抽屉联动），
+    // 分开放好维护；但它要复用 app.js 里的这几位，所以在这里显式导出，
+    // 而不是让 agent.js 去猜内部实现。
+    agent: {
+      say,                       // 让形象说话（走 TTS/口型那条链）
+      sayStreaming,              // 流式文本 → 口型
+      toast,                     // 右下角提示
+      switchTab,
+      openDrawer: (...a) => openDrawer(...a),
+      closeDrawer: () => closeDrawer(),
+      runPlanWith,               // 按偏好出方案（和词云点「个性化方案」同一路径）
+      scrollToResult,            // 把抽屉滚到方案结果
+      card: () => (S.card || null),
+      history: () => S.history,
+      pushHistory: (m) => { S.history.push(m); saveHistory(); },
+      clearHistory: () => { S.history.length = 0; saveHistory(); },
+    },
   };
 })();
 

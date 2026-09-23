@@ -132,7 +132,7 @@ export default function PlannerPage({ standalone = false }: { standalone?: boole
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: 16 }}>
       <Typography.Title level={3} style={{ marginTop: 8 }}>
-        文旅智能辅助 · 个性化旅游规划
+        浙里智慧游 · 个性化旅游规划
       </Typography.Title>
 
       {env && !env.amap_configured && (
