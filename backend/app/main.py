@@ -13,9 +13,12 @@
 """
 import time
 from pathlib import Path
+from typing import List
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -41,6 +44,72 @@ app.include_router(router)
 # 兼容层是 /api/wenlv/*、/api/chat/stream、/api/agent 与一堆目录类接口。
 # 所以注册顺序无所谓；放在后面更保险 —— 万一将来重名，以原生的实现为准。
 app.include_router(ui_router)
+
+
+#: 校验报错里的字段名 → 用户看得懂的说法。
+#: FastAPI 默认吐的是英文 + 结构化数组（`Field required` / `loc: body.preference.destination`），
+#: 前端直接把它显示出来，用户看到的就是一段 JSON。
+_FIELD_LABELS = {
+    "destination": "目的地",
+    "origin": "出发地",
+    "duration_days": "游玩天数",
+    "budget": "预算",
+    "preferences": "兴趣偏好",
+    "travelers": "同行人数",
+    "message": "对话内容",
+    "must_visit": "特别想去的景点",
+}
+
+#: 校验错误类型 → 人话
+_ERR_LABELS = {
+    "missing": "没填",
+    "string_too_long": "太长",
+    "greater_than": "太小了",
+    "greater_than_equal": "太小了",
+    "less_than": "太大了",
+    "less_than_equal": "太大了",
+    "int_parsing": "得是整数",
+    "float_parsing": "得是数字",
+    "literal_error": "填的值不在可选范围里",
+    "list_type": "得是列表",
+    "string_type": "得是文本",
+    "dict_type": "得是对象",
+}
+
+
+@app.exception_handler(RequestValidationError)
+async def _friendly_validation_error(request: Request, exc: RequestValidationError):
+    """把参数校验失败转成一句人话。
+
+    为什么要自己接：默认响应的 `detail` 是一个结构化数组，里面全是
+    `{"type":"greater_than_equal","loc":["body","preference","duration_days"],...}`
+    这种给开发看的东西，而前端是直接显示出来的 —— 用户看到一坨 JSON，
+    完全不知道该怎么办（实测：目的地填了 500 个字符、天数填 60，
+    得到的都是这种响应）。
+
+    这里翻成「游玩天数太小了（最少 1）」这种一句话，同时保留原始 detail 到
+    `errors` 字段，排错时照样拿得到。
+    """
+    parts: List[str] = []
+    for e in exc.errors():
+        loc = [str(x) for x in e.get("loc") or [] if x not in ("body", "query", "path")]
+        field = loc[-1] if loc else ""
+        label = _FIELD_LABELS.get(field, field or "参数")
+        why = _ERR_LABELS.get(str(e.get("type")), str(e.get("msg") or "不合法"))
+        extra = ""
+        ctx = e.get("ctx") or {}
+        if str(e.get("type")) in ("greater_than_equal", "greater_than") and "ge" in ctx:
+            extra = f"（最少 {ctx['ge']}）"
+        elif str(e.get("type")) in ("less_than_equal", "less_than") and "le" in ctx:
+            extra = f"（最多 {ctx['le']}）"
+        elif str(e.get("type")) == "string_too_long" and "max_length" in ctx:
+            extra = f"（最多 {ctx['max_length']} 个字）"
+        parts.append(f"{label}{why}{extra}")
+    detail = "；".join(parts) if parts else "请求参数不合法"
+    return JSONResponse(
+        status_code=422,
+        content={"detail": detail, "errors": exc.errors()},
+    )
 
 
 @app.middleware("http")
@@ -69,11 +138,36 @@ def _pick_static_dir() -> str:
 
     融合版里 5.0 的 public/ 是主界面，优先托管它；只有它不在时才退回
     HikiTravel 原生的 frontend/dist。这样两种前端共存，拷走哪个都能跑。
+
+    ★ 打包成 exe 之后（PyInstaller，见 desktop/build-backend.py）这个推断会失效：
+      __file__ 位于临时解包目录 _MEIxxxx 里，而前端是随 exe 放在旁边的 public/。
+      所以：
+        · 先认 STATIC_DIR 环境变量（桌面版启动 exe 时会设，指向它旁边的 public/）
+        · 再试 __file__ 推断（源码直接跑时走这条）
+        · 最后看 exe 同级目录下的 public/
     """
-    project_root = Path(__file__).resolve().parents[2]
-    airi = project_root / "public"
-    if (airi / "index.html").is_file():
-        return str(airi)
+    import os
+    import sys
+
+    # ① 显式配置优先 —— 桌面版就是这样告诉 exe 前端在哪的
+    if settings.static_dir and (Path(settings.static_dir) / "index.html").is_file():
+        return settings.static_dir
+
+    # ② 源码运行时的推断
+    if not getattr(sys, "frozen", False):
+        project_root = Path(__file__).resolve().parents[2]
+        airi = project_root / "public"
+        if (airi / "index.html").is_file():
+            return str(airi)
+
+    # ③ exe 同级目录下的 public/（安装包里的布局）
+    exe_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) \
+        else Path(__file__).resolve().parents[2]
+    for cand in (exe_dir / "public", exe_dir / "_internal" / "public",
+                 Path(getattr(sys, "_MEIPASS", exe_dir)) / "public"):
+        if (cand / "index.html").is_file():
+            return str(cand)
+
     return settings.static_dir
 
 

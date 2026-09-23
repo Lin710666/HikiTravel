@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from ..models.plan import Location, POI
 from ..rag.retriever import Retriever
-from ..services.amap import AmapClient
+from ..services.amap import _FOREIGN_HINTS, AmapClient
 from ..services.weather import WeatherService
 from .base import Skill
 
@@ -122,6 +122,43 @@ def _parse_location(loc: str) -> Location:
     """高德返回的 "lng,lat" 字符串 -> Location。"""
     lng, lat = loc.split(",")
     return Location(lat=float(lat), lng=float(lng))
+
+
+def _poi_city(item: Dict[str, Any]) -> str:
+    """高德 POI 结果所在的城市（cityname 缺了就用 adname 兜）。"""
+    return _as_text(item.get("cityname")) or _as_text(item.get("adname"))
+
+
+#: 能确信"这是个城市"的地理编码级别 —— 只有这几种才拿来做区域约束。
+#: 区县不算（「西湖」被解析成台湾省苗栗县西湖乡就是区县级，用它约束会误杀）。
+_CITY_LEVELS = ("省", "市", "直辖市")
+
+#: 目的地里出现这些字，说明用户把**一整句话**填进来了（"美国纽约到乌鲁木齐"），
+#: 而不是一个地名。高德的 city 参数匹配不上这种串时会**默默返回北京的 POI**。
+_SENTENCE_HINTS = ("到", "去", "从", "→", "->", "—>", "至", "然后", "再去", "再去")
+
+
+def _looks_like_sentence(text: str) -> bool:
+    """目的地看着像一整句话（而不只是一个地名）？"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if any(ch in t for ch in _SENTENCE_HINTS):
+        return True
+    # 空格分隔的多段（「美国纽约 到 乌鲁木齐」已经命中上面；这里兜底更长的串）
+    return len(t) > 12
+
+
+def _region_hit(name: str, regions: List[str]) -> bool:
+    """地名是不是落在 regions 里的某个区域（互相包含即算命中）。"""
+    n = (name or "").strip()
+    if not n:
+        return False
+    for r in regions:
+        r = (r or "").strip()
+        if r and (r in n or n in r):
+            return True
+    return False
 
 
 def _as_text(value: Any) -> str:
@@ -262,9 +299,104 @@ class RetrieveSkill(Skill):
             self._retrievers[city] = r
         return r
 
+    # ------------------------------------------------------------ 城市校验
+
+    def _expected_regions(self, destination: str) -> List[str]:
+        """目的地"应该落在哪个城市"——**只在能确信目的地是个城市时才给约束**。
+
+        返回**空列表 = 不做约束**（不认识就放行，宁可漏拦也不误杀）。
+
+        ⚠ 为什么这么保守：高德的地理编码对**非城市名**极不可靠，实测：
+            西湖   → level=区县 → 台湾省苗栗县西湖乡     （台湾真有个"西湖乡"）
+            千岛湖  → level=住宅区 → 陕西省西安市灞桥区千岛湖（西安有个同名小区）
+            外滩   → level=村庄 → 广东省惠州市惠城区外滩
+        如果拿这些结果去约束，用户目的地填「西湖」时，杭州的景点会被全部判成
+        "跑偏"扔掉 —— 我自己第一版就是这么写坏了的（实测回归到"一个景点都没有"）。
+        所以只有拿到 **省 / 市** 级别（能确信是个城市）时才启用约束。
+
+        约束长这样：
+            「乌鲁木齐」→ ["乌鲁木齐", "新疆维吾尔自治区", "乌鲁木齐市"]
+            「西湖」    → []            （不约束）
+        """
+        out: List[str] = [destination] if destination else []
+        try:
+            r = self.amap.resolve_place(destination)
+        except Exception:
+            return []
+        if not r.get("ok") or str(r.get("level") or "") not in _CITY_LEVELS:
+            return []                    # 不是城市（景点名 / 解析不出）→ 不约束
+        for k in ("province", "city"):
+            v = str(r.get(k) or "").strip()
+            if v and v not in out:
+                out.append(v)
+        return out
+
+    @staticmethod
+    def _in_regions(item: Dict[str, Any], regions: List[str]) -> bool:
+        """这条 POI 是不是真的在目的地所在区域。
+
+        ★ 为什么非查不可：**高德的 city 参数匹配不上时会默默返回北京的 POI**。
+        实测（city 参数分别传这些，返回的 POI 城市）：
+            '乌鲁木齐' → 乌鲁木齐市 ✅ ｜ '乌鲁木齐（新疆）' → 北京市 ❌
+            'wulumuqi' → 北京市 ❌     ｜ '美国纽约到乌鲁木齐' → 北京市 ❌
+        也就是说调用方从返回值上**完全看不出**这批结果跑偏了 —— 只能靠 POI 自己的
+        城市字段反查。查不出来（结果里没有城市字段）就放行，不误杀。
+        """
+        c = _poi_city(item)
+        if not c:
+            return True                      # 没有城市信息可判 → 不拦
+        if not regions:
+            return True
+        return _region_hit(c, regions)
+
+    # ------------------------------------------------------------ 主流程
+
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:
         pref = ctx["preference"]
         city = pref.destination
+
+        # 0. ★ 先确认「这批检索结果到底该落在哪个城市」。
+        #
+        # 为什么必须有这一步：**高德的 city 参数匹配不上时，会默默返回北京的 POI**
+        # （不是返回空！）。实测：
+        #     city='乌鲁木齐'            → 乌鲁木齐市  ✅
+        #     city='乌鲁木齐（新疆）'      → 北京市     ❌
+        #     city='wulumuqi'          → 北京市     ❌
+        #     city='美国纽约到乌鲁木齐'     → 北京市     ❌
+        # 于是用户在目的地里写了一整句「美国纽约到乌鲁木齐」时，方案里排的是
+        # 北海公园、景山公园、中山公园 —— 全是北京的。调用方从返回值上**完全看不出来**。
+        # 所以检索完要拿 POI 自己的城市跟目的地核一遍，对不上就整批丢掉。
+        #
+        # ★ 但约束要保守：只有在**能确信目的地是个城市**时才启用（见
+        #   _expected_regions 的说明 —— 景点名会被高德解析到同名的乡镇/小区）。
+        #   句子 / 国外地名则直接判无效，连检索都不做。
+        # ★ 目的地写法先过一道：填的是一整句话 / 国外地名 → 直接判为无效，
+        #   连检索都不做。高德遇到匹配不上的 city 会**默默返回北京的 POI**，
+        #   不拦的话行程里就会排上北海公园、景山公园（用户实测报过）。
+        dest_bad = ""
+        if not str(city or "").strip():
+            # 兜底：编排器的 _normalize 已经会把空白目的地补成「杭州」，
+            # 所以正常流程走不到这里。但直接调这个 skill（或将来换调用方）时
+            # 目的地可能是空的 —— 空 city 发给高德会得到
+            # `INVALID_PARAMS`，再被包成 HTTP 503 甩给用户（实测踩到）。
+            dest_bad = "目的地是空的"
+        elif _looks_like_sentence(city):
+            dest_bad = f"目的地「{city}」看着是一整句话，不是一个地名"
+        else:
+            for hint in _FOREIGN_HINTS:
+                if hint in str(city):
+                    dest_bad = f"目的地「{city}」看起来是国外地点（含「{hint}」），本系统只覆盖国内"
+                    break
+        if dest_bad:
+            ctx["retrieve_region_error"] = dest_bad
+            expected = []
+            drop_all = True        # 目的地本身就无效 → 这批结果一个都不要
+        else:
+            expected = self._expected_regions(city)
+            drop_all = False
+        # 交给输出层：**空列表 = 目的地不是城市名（如「西湖」）→ 不要做跨城检查**，
+        # 否则会误报"行程里出现了非目的地的地点（杭州市）"。见 output_guard._cross_city。
+        ctx["expected_regions"] = expected
 
         # 1. 实时天气（多拉 3 天，覆盖 start_date 相对今天最多 3 天的偏移；
         #    高德 extensions=all 最多返回未来 4 天，超出则无法预报）
@@ -280,6 +412,8 @@ class RetrieveSkill(Skill):
         attractions: List[POI] = []
         dining_extra: List[POI] = []      # 关键词搜到、且确实是餐饮的
         seen: set[str] = set()
+        #: 被城市校验刷掉的结果落在哪些城市 —— 用来给用户一句能看懂的报错
+        dropped: set[str] = set()
         for tag in pref.preferences:
             # 记住每个关键词是"找景点用的"还是"找吃的用的" —— 分流要靠它。
             # 只按高德类型分不够：「美食街」搜出来的是「购物服务;特色商业街」，
@@ -292,6 +426,10 @@ class RetrieveSkill(Skill):
                     # 用高德 POI id 去重：同一地点在不同关键词下可能返回不同名称，id 才是唯一键
                     pid = item.get("id") or item.get("name", "")
                     if not pid or pid in seen:
+                        continue
+                    # ★ 城市校验：不是目的地的结果直接丢（高德匹配不上会默认给北京）
+                    if drop_all or not self._in_regions(item, expected):
+                        dropped.add(_poi_city(item) or "（没写城市）")
                         continue
                     seen.add(pid)
                     kind = _classify_by_amap_type(item.get("type"))
@@ -321,6 +459,9 @@ class RetrieveSkill(Skill):
                 pid = item.get("id") or item.get("name", "")
                 if not pid or pid in seen:
                     continue
+                if drop_all or not self._in_regions(item, expected):
+                    dropped.add(_poi_city(item) or "（没写城市）")
+                    continue
                 if _classify_by_amap_type(item.get("type")) != "景点":
                     continue          # 兜底也要过滤，别再混进餐厅
                 if _looks_like_dining(item.get("name")):
@@ -330,6 +471,7 @@ class RetrieveSkill(Skill):
 
         # 3. 餐饮 / 酒店 POI（含按价位分档推荐，给用户更多选择）
         restaurant_items = self.amap.search_poi("餐厅", city)
+        restaurant_items = [] if drop_all else [it for it in restaurant_items if self._in_regions(it, expected)]
         restaurants = [_to_poi(item, poi_type="餐厅") for item in restaurant_items]
         # 兴趣关键词顺带搜到的餐厅也并进餐饮池 —— 它们本来就是餐厅，
         # 只是"怎么被搜出来的"不一样。放在景点池里是错的。
@@ -338,7 +480,17 @@ class RetrieveSkill(Skill):
             restaurants = restaurants + [p for p in dining_extra if p.name not in have]
         ctx["dining_options"] = _tiered(restaurant_items, "餐厅")
         hotel_items = self.amap.search_poi("酒店", city)
+        # 酒店同理：高德给错城市的话，「住宿」会变成北京的酒店
+        hotel_items = [] if drop_all else [it for it in hotel_items if self._in_regions(it, expected)]
         ctx["hotel_options"] = _tiered(hotel_items, "住宿")
+
+        # ★ 一条都没剩下 → 说明这次检索整个跑偏了（多半是目的地没写成城市名）。
+        #   把原因写进 ctx，由输出层用大白话报给用户；**不要把北京的点排进行程**。
+        if not attractions and dropped:
+            ctx["retrieve_region_error"] = (
+                f"目的地「{city}」没检索到当地的景点 —— 高德把结果落到了"
+                f"{'、'.join(sorted(dropped)[:3])}，已经全部丢弃"
+            )
 
         # 4. 特别想去的景点（必去）：优先复用已搜到的 POI，否则按名称单独搜索；
         #    解析失败用占位 POI（无坐标）保证仍出现在规划中

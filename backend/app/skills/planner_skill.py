@@ -44,8 +44,15 @@ TRANSIT_MAX_KM = 12.0    # 地铁/公交够用
 TAXI_MAX_KM = 60.0       # 打车合理（跨区、近郊）；再远就是城际，不该按打车算
 
 #: 城市名 → 经纬度、以及两城距离的进程内缓存。
-#: 键为 ("geo", 城市名) 或 (出发地, 目的地)。
+#: 键为 ("resolve", 地名) / (出发地, 目的地)。
 _CITY_DIST_CACHE: Dict[Any, Any] = {}
+
+#: 往返大交通**算不出来**时的原因，(出发地, 目的地) → {"kind", "detail"}。
+#: 由 _round_trip 写入、OutputGuardSkill 读出来报给用户。
+#: 为什么要走这个"旁路"：只有规划器知道距离为什么拿不到（国外 / 高德瞎匹配 /
+#: 接口出错），而报错是输出层的职责 —— 用这个模块级字典把原因传过去，
+#: 比让输出层自己再查一遍接口干净（也不用重复网络请求）。
+_ROUND_TRIP_ISSUES: Dict[Any, Dict[str, Any]] = {}
 
 #: 城市名归一化时要剥掉的后缀（"杭州市" 与 "杭州" 要认成同一个）
 _CITY_SUFFIXES = ("市辖区", "自治州", "地区", "盟", "市", "县", "区", "镇")
@@ -563,33 +570,52 @@ class PlannerSkill(Skill):
         return total, breakdown
 
     def _round_trip(self, pref: Any) -> float:
-        """往返大交通估算：按**出发地 → 目的地的实际距离**算，不再拍脑袋给固定值。
+        """往返大交通估算：按**出发地 → 目的地的实际距离**算。
 
-        原来写死了三个常数（高铁 150×人数×2 / 飞机 500×人数×2 / 自驾 300），
-        还**完全无视出发地** —— 表单让用户填「出发地」，后端却从来没有用过它。
-        后果：
-          · 杭州→上海（约 170km）和杭州→乌鲁木齐（约 3900km）估出来一样；
-          · **同城游也照收 600 元"往返高铁"**（实测：杭州市内 2 天、2 人，
-            交通分项 830 = 接驳 230 + 凭空多出来的往返 600）。
+        ★ 国外 / 解析不出来的出发地 → **不再输出数字**（返回 0），改为报错。
 
-        现在：同城 → 0；跨城 → 按两地实际距离 × 单价；拿不到距离
-        （没填出发地 / 地理编码失败 / 没配高德 Key）才回退到原来的固定值 —— 宁可
-        保守，也不假装知道。
+        为什么这么改：原来"拿不到距离就回退固定值"，而"拿不到"有两种情况，
+        其中一种特别阴 —— 高德的**模糊匹配**。实测：
+            出发地填「美国华盛顿特区」
+            → 高德拿「特区」两个字去匹配，返回「新疆喀什市喀什特区」
+              （level=住宅区，坐标 39.4674/75.9987）
+            → 于是"美国华盛顿特区 → 新疆"被算成「喀什 → 乌鲁木齐」1078km 的
+              **境内高铁往返 1941 元** —— 数字看着挺合理，其实毫无关系。
+        这种"看起来对的错数"比不报还糟，所以现在：
+          · 出发地是国外或高德匹配不可信 → 往返大交通记 0（**不输出假数字**），
+            并把原因记到 _ROUND_TRIP_ISSUES，由输出层明确报给用户；
+
+        其余情况照旧：同城 → 0；跨城 → 按实际距离 × 单价；没填出发地 →
+        保守估一个固定值（并在方案里说明这是估的）。
         """
         people = pref.travelers.total
         mode = getattr(pref, "transportation", "") or "本地"
-        if mode == "本地":
-            return 0.0                              # 本地游没有大交通
-
         origin = str(getattr(pref, "origin", "") or "").strip()
         dest = str(getattr(pref, "destination", "") or "").strip()
+
+        if mode == "本地":
+            return 0.0                              # 本地游没有大交通
         if origin and dest and _same_city(origin, dest):
             return 0.0                              # 出发地就是目的地，不存在往返
 
         km = self._city_distance_km(origin, dest) if (origin and dest) else None
         if km is None:
-            # 回退：原来那套固定值（不知道距离时只能保守估）
-            return {"高铁": 150.0 * people * 2, "飞机": 500.0 * people * 2, "自驾": 300.0}.get(mode, 0.0)
+            issue = self._round_trip_issue(origin, dest)
+            if issue is not None and issue.get("kind") == "unresolvable":
+                # 国外 / 不可信 → 不编数字，交给输出层报错
+                _ROUND_TRIP_ISSUES[(origin, dest)] = issue
+                return 0.0
+            if not origin:
+                # 没填出发地：保守估一个，并在方案里说明口径（这是"知道自己在猜"）
+                return {"高铁": 150.0 * people * 2, "飞机": 500.0 * people * 2,
+                        "自驾": 300.0}.get(mode, 0.0)
+            # 填了出发地但拿不到距离（没配 Key / 网络问题）→ 也保守估，并记一句
+            _ROUND_TRIP_ISSUES[(origin, dest)] = {
+                "kind": "unknown",
+                "detail": f"没能确认「{origin}」到「{dest}」的距离",
+            }
+            return {"高铁": 150.0 * people * 2, "飞机": 500.0 * people * 2,
+                    "自驾": 300.0}.get(mode, 0.0)
 
         if mode == "自驾":
             # 油费 + 过路费约 1 元/km，**按车算**（不乘人数），往返
@@ -601,27 +627,59 @@ class PlannerSkill(Skill):
             one_way = max(km * 0.45, 25.0)          # 二等座约 0.45 元/km
         return round(one_way * people * 2, 1)
 
+    def _round_trip_issue(self, origin: str, dest: str) -> Optional[Dict[str, Any]]:
+        """出发地/目的地能不能用来算距离？不能的话给出原因（给输出层报错用）。
+
+        只管「出发地不可用」这一种 —— 因为往返大交通是围着出发地算的；
+        目的地异常由别的检查（跨城那条）负责。
+        """
+        if not origin:
+            return None                              # 没填，走"保守估 + 说明口径"
+        r = self._cached_resolve(origin)
+        if r.get("ok"):
+            return None
+        reason = r.get("reason")
+        if reason == "foreign":
+            return {
+                "kind": "unresolvable",
+                "detail": f"「{origin}」是国外地点，本系统的城际交通只覆盖国内",
+            }
+        if reason == "unreliable":
+            return {
+                "kind": "unresolvable",
+                "detail": (f"「{origin}」没能被正确识别 —— 高德把它匹配成了"
+                           f"「{r.get('formatted', '?')}」"
+                           f"（级别「{r.get('level', '?')}」），不是个城市"),
+            }
+        if reason == "error":
+            return {"kind": "unknown", "detail": f"查「{origin}」时高德接口出错：{r.get('detail', '')}"}
+        return {"kind": "unresolvable",
+                "detail": f"高德查不到出发地「{origin}」"}
+
+    def _cached_resolve(self, name: str) -> Dict[str, Any]:
+        """带缓存的 resolve_place —— 同一个地名一次进程只查一次接口。"""
+        key = ("resolve", name)
+        if key not in _CITY_DIST_CACHE:
+            _CITY_DIST_CACHE[key] = self.amap.resolve_place(name)
+        return _CITY_DIST_CACHE[key]
+
     def _city_distance_km(self, origin: str, dest: str) -> Optional[float]:
-        """两个城市之间的直线距离（公里）。查不到返回 None。
+        """两个城市之间的直线距离（公里）。**不可信就返回 None**。
 
         走高德地理编码把城市名变成经纬度，再算球面距离。结果**进程内缓存** ——
         同一个城市名在一次进程里只查一次，不然每次规划都要多打两次接口。
+        地理编码本身的可信度由 AmapClient.resolve_place() 把关（见那里的说明）。
         """
         cache = _CITY_DIST_CACHE
         key = (origin, dest)
         if key in cache:
             return cache[key]
-        p1 = cache.get(("geo", origin))
-        if p1 is None:
-            p1 = self.amap.geocode(origin)
-            cache[("geo", origin)] = p1
-        p2 = cache.get(("geo", dest))
-        if p2 is None:
-            p2 = self.amap.geocode(dest)
-            cache[("geo", dest)] = p2
-        if not p1 or not p2:
+        r1 = self._cached_resolve(origin)
+        r2 = self._cached_resolve(dest)
+        if not r1.get("ok") or not r2.get("ok"):
             cache[key] = None
             return None
+        p1, p2 = r1["location"], r2["location"]
         km = round(
             _haversine(
                 Location(lat=p1[0], lng=p1[1]),

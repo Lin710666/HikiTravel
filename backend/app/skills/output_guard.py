@@ -33,6 +33,11 @@ from typing import Any, List
 from ..models.plan import Conflict, TravelPlan
 from .base import Skill
 
+# 往返大交通"算不出来"的原因由规划器写在这里（见 planner_skill._ROUND_TRIP_ISSUES）。
+# 直接读它的原因，而不是自己再查一遍接口 —— 那会多打两个网络请求，
+# 而且未必能还原规划时的现场。
+from .planner_skill import _ROUND_TRIP_ISSUES
+
 
 class OutputGuardSkill(Skill):
     """对生成好的方案做体检，产出提示（不改方案）。"""
@@ -52,11 +57,12 @@ class OutputGuardSkill(Skill):
         found += self._budget(plan, pref)
         found += self._tickets(plan)
         found += self._days(plan, pref)
-        found += self._cross_city(plan, pref)
+        found += self._cross_city(plan, ctx, pref)
         found += self._time_order(plan)
         found += self._late_meal(plan)
         found += self._same_scenic(plan)
         found += self._round_trip_note(plan, pref)
+        found += self._retrieve_region(ctx)
         # 和输入层的警告合并：ctx["conflicts"] 是输入层已经放好的
         ctx["conflicts"] = list(ctx.get("conflicts") or []) + found
         return ctx
@@ -64,35 +70,80 @@ class OutputGuardSkill(Skill):
     # ------------------------------------------------------------------ 各项
 
     @staticmethod
+    def _retrieve_region(ctx: dict[str, Any]) -> List[Conflict]:
+        """检索整个跑偏了（高德把结果给到了别的城市）→ 明确报出来。
+
+        用户报的现象：目的地填「美国纽约到乌鲁木齐」→ 方案里排了北海公园、
+        景山公园、中山公园，**全是北京的**。根因是高德的 city 参数匹配不上时
+        **默认返回北京的 POI**（不是返回空）。检索层已经把这批点丢掉了，
+        这里负责告诉用户"为什么一个景点都没有"，而不是让他对着空行程发愣。
+        """
+        msg = ctx.get("retrieve_region_error")
+        if not msg:
+            return []
+        return [Conflict(
+            id="retrieve_region_mismatch",
+            message=(f"{msg}。**方案里不会出现这些点**（宁可空着，也不给错的城市）"),
+            suggestion=("目的地请填**单个城市名或景点名**（如「乌鲁木齐」「西湖」）；"
+                        "出发地填到「出发地」那一栏，不要和目的地写在一起"),
+        )]
+
+    @staticmethod
     def _round_trip_note(plan: TravelPlan, pref: Any) -> List[Conflict]:
-        """没填出发地时，**明确告诉用户往返大交通是估的**。
+        """往返大交通的口径说明与**错误上报**（三种情况）。
 
-        为什么要有这一条：预算里的"往返大交通"要靠「出发地 → 目的地」的距离算，
-        而工作台里出发地是**选填**，多数人不会填。没填时只能退回到一个固定值
-        （高铁 150 元/人·单程），跟实际距离可能差很多 —— 杭州→上海约 73 元、
-        杭州→乌鲁木齐要上千。
+        一、出发地是国外 / 高德匹配不可信 → **报错，并且不给数字**。
+            这是最要紧的一条。实测过的坑：出发地填「美国华盛顿特区」，
+            高德拿「特区」两个字模糊匹配成「新疆喀什市喀什特区」（级别=住宅区），
+            于是"美国→新疆"被算成「喀什→乌鲁木齐」1078km 的境内高铁往返 1941 元。
+            数字看着合理、其实毫无关系 —— 所以现在这种情况**直接不输出该费用**，
+            并把原因明说，让用户自己去核实机票。
 
-        与其让用户对着一个不知从哪来的数字发愣，不如把口径摆出来：
-        填上出发地就会按实际距离重算。
+        二、填了出发地但距离没查出来（没配高德 Key / 网络问题）→ 说清是估的。
+
+        三、**没填**出发地 → 说清是按固定值估的，填上会更准。
         """
         if pref is None:
             return []
         mode = str(getattr(pref, "transportation", "") or "")
         origin = str(getattr(pref, "origin", "") or "").strip()
-        if mode in ("", "本地") or origin:
+        dest = str(getattr(pref, "destination", "") or "").strip()
+        if mode in ("", "本地"):
             return []
         bd = getattr(plan, "budget_breakdown", None)
         est = float(getattr(bd, "transport", 0) or 0) if bd else 0.0
-        if est <= 0:
-            return []
-        return [Conflict(
-            id="round_trip_estimated",
-            message=(
-                f"没填出发地，交通里的「往返大交通」是按 {mode} 的固定值估的"
-                f"（共 {est:.0f} 元）—— 跟实际距离可能差很多"
-            ),
-            suggestion="填上「出发地」后会按出发地到目的地的实际距离重算（同城则为 0）",
-        )]
+
+        # 一、规划器已经判定"算不出来"了 —— 把原因原样报出来
+        issue = _ROUND_TRIP_ISSUES.get((origin, dest))
+        if issue and issue.get("kind") == "unresolvable":
+            return [Conflict(
+                id="round_trip_unavailable",
+                message=(
+                    f"往返大交通没能估算：{issue.get('detail', '出发地无法识别')}。"
+                    f"**这笔费用没有计入预算**（交通分项里只有市内接驳）"
+                ),
+                suggestion=("出发地请填国内城市名（如「杭州」「上海」）；"
+                            "从国外出发的话，国际机票请另行核算"),
+            )]
+        if not origin:
+            if est <= 0:
+                return []
+            return [Conflict(
+                id="round_trip_estimated",
+                message=(
+                    f"没填出发地，交通里的「往返大交通」是按 {mode} 的固定值估的"
+                    f"（共 {est:.0f} 元）—— 跟实际距离可能差很多"
+                ),
+                suggestion="填上「出发地」后会按出发地到目的地的实际距离重算（同城则为 0）",
+            )]
+        if issue and issue.get("kind") == "unknown":
+            return [Conflict(
+                id="round_trip_unknown",
+                message=(f"往返大交通是估的：{issue.get('detail', '没能确认距离')}，"
+                         f"当前按 {mode} 的固定值算（共 {est:.0f} 元）"),
+                suggestion="确认出发地写法，或检查高德 Key 是否配置正常",
+            )]
+        return []
 
     @staticmethod
     def _budget(plan: TravelPlan, pref: Any) -> List[Conflict]:
@@ -142,7 +193,26 @@ class OutputGuardSkill(Skill):
         )]
 
     @staticmethod
-    def _cross_city(plan: TravelPlan, pref: Any) -> List[Conflict]:
+    def _cross_city(plan: TravelPlan, ctx: dict[str, Any] | None = None,
+                    pref: Any = None) -> List[Conflict]:
+        """行程里出现了别的城市？
+
+        ★ 只在**能确信目的地是个城市**时才检查。
+
+        为什么：目的地是可以填景点名的（「西湖」），那种情况下行程点全在杭州市是
+        完全正常的，可这条检查会误报「行程里出现了非目的地的地点（杭州市）」——
+        用户看到的是一条莫名其妙的告警（实测踩到）。
+
+        判断依据用检索层算好的 `ctx["expected_regions"]`：
+        非空 = 目的地确认是城市（做检查）；空 = 不是城市名（跳过）。
+        """
+        regions = None
+        if ctx is not None:
+            regions = ctx.get("expected_regions")
+        if not regions:
+            # 拿不到"期望区域"（目的地不是城市名）→ 不做这项检查，别误报
+            if ctx is not None:
+                return []
         dest = str(getattr(pref, "destination", "") or "").strip()
         if not dest:
             return []

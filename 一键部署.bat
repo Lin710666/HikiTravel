@@ -7,11 +7,11 @@ REM    "The syntax of the command is incorrect."。靠仓库根目录的 .gitatt
 REM    里 `*.bat -text` 保证（见那个文件里的实测记录）。
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
-title 智能文旅辅助系统 HikiTravel-AIRI-1.3 - 一键部署
+title 智能文旅辅助系统 HikiTravel-AIRI-1.4 - 一键部署
 
 echo.
 echo  ============================================================
-echo    智能文旅辅助系统 HikiTravel-AIRI-1.3   一键部署
+echo    智能文旅辅助系统 HikiTravel-AIRI-1.4   一键部署
 echo    会安装：Python 依赖 / 本地大模型
 echo.
 echo    只想检查环境不装东西：双击  检查环境.bat

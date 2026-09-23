@@ -31,6 +31,7 @@ import logging
 import math
 import os
 import re
+import sys
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -93,8 +94,41 @@ def _llm_route_status() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PROMPT_DIR = DATA_DIR / "prompts"
-#: 静态资源根目录（5.0 的 public/），用来核对清单里的素材是否真的在磁盘上
-PUBLIC_DIR = Path(__file__).resolve().parents[3] / "public"
+
+
+def _pick_public_dir() -> Path:
+    """静态资源根目录（public/），用来核对清单里的素材是否真的在磁盘上。
+
+    ★ 打包成 exe 后不能只按 __file__ 推：
+      源码布局是 <项目>/backend/app/routers/ui_compat.py，parents[3] = <项目>，
+      于是 <项目>/public 正确；
+      但 PyInstaller 把代码放进 _MEIPASS，parents[3] 会指到临时目录外面，
+      而前端是随 exe 放在旁边的。
+
+      这个坑很隐蔽：**后端能起来、页面也能打开，但 /api/capabilities 的
+      live2d 是空数组**（_live2d() 发现 L2D_DIR 不存在就直接 return []），
+      界面于是显示「还没有可用的 Live2D 模型」—— 同一份代码用源码跑却正常。
+
+      优先用 STATIC_DIR 环境变量（桌面壳启动 exe 时会设，指向它旁边的 public/），
+      再退回按 __file__ 推断，最后看 exe 同级目录。
+    """
+    cands = []
+    if settings.static_dir:
+        cands.append(Path(settings.static_dir))
+    if not getattr(sys, "frozen", False):
+        cands.append(Path(__file__).resolve().parents[3] / "public")
+    else:
+        exe_dir = Path(sys.executable).resolve().parent
+        meipass = Path(getattr(sys, "_MEIPASS", exe_dir))
+        cands += [meipass / "public", exe_dir / "public", exe_dir.parent / "public"]
+
+    for c in cands:
+        if (c / "models").is_dir() or (c / "index.html").is_file():
+            return c
+    return cands[0] if cands else Path("public")
+
+
+PUBLIC_DIR = _pick_public_dir()
 
 
 def _load(name: str, default: Any) -> Any:
@@ -272,6 +306,19 @@ def _pick_vision_model(models: List[str]) -> str:
     return cands[0]
 
 
+@router.get("/ping")
+def ping() -> Dict[str, Any]:
+    """轻量存活探测 —— 只回一句"我在"，**不做任何外部调用**。
+
+    为什么单独开一个：
+      /api/status 要探 Ollama（本机没装/没启动时，每次连接都要等完整超时，
+      实测两次探测 = 4 秒）。而"后端还在不在"这个问题不该被它拖累 ——
+      离线重连的探测每几秒就要打一次，用 status 会既慢又浪费。
+    所以重连探测走这里，恢复后再去拉 status 补全数据。
+    """
+    return {"ok": True, "pong": True}
+
+
 @router.get("/status")
 def status() -> Dict[str, Any]:
     """总状态。前端启动、状态灯、设置页都读它。"""
@@ -279,8 +326,14 @@ def status() -> Dict[str, Any]:
     try:
         import httpx
 
-        r = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=3.0)
-        models = [m.get("name", "") for m in (r.json().get("models") or [])]
+        # ★ 先做端口预检再发 HTTP 请求：Ollama 没启动时，httpx.get 到 11434
+        #   会等满超时（先试 IPv4 再试 IPv6，实测 2 秒），而这个接口每次刷新
+        #   都要调 —— 状态灯不至于为此卡 2 秒。端口没监听就直接当"没模型"。
+        from ..llm.client import _tcp_open
+
+        if _tcp_open(settings.ollama_base_url, timeout=0.15):
+            r = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=3.0)
+            models = [m.get("name", "") for m in (r.json().get("models") or [])]
     except Exception:  # noqa: BLE001 - 探测失败就当没有，不阻断页面
         models = []
     chat_model = _match_model(models, settings.ollama_model.split(":")[0]) or settings.ollama_model

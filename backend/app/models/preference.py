@@ -31,8 +31,19 @@ class UserPreference(BaseModel):
     # ---- 基础信息 ----
     travelers: Travelers = Field(default_factory=Travelers, description="出游人数构成")
     duration_days: int = Field(default=1, ge=1, le=30, description="游玩天数")
-    origin: str = Field(default="", description="出发地（如：上海）")
-    destination: str = Field(default="杭州", description="目的地城市（规划的目标城市）")
+    # 地名要限长：这两个字段会被原样拼进高德的 `city=` 查询参数，
+    # 而界面上没有 maxlength —— 粘一段长文本进来，高德直接回
+    # `413 Request Entity Too Large`，用户看到的是
+    # `HTTP 503 高德接口网络异常：Client error '413 ...'`（实测踩到）。
+    # 32 字对「城市名 / 景点名」绰绰有余（最长也就「新疆维吾尔自治区」这种）。
+    # 注意：这里和它上面的 duration_days / 下面的 budget 一样用 Field 约束，
+    # 超长会被 pydantic 直接挡成 422，而不是打到高德才失败。
+    origin: str = Field(
+        default="", max_length=32, description="出发地（如：上海）"
+    )
+    destination: str = Field(
+        default="杭州", max_length=32, description="目的地城市（规划的目标城市）"
+    )
     transportation: Literal["自驾", "高铁", "飞机", "本地"] = Field(
         default="本地", description="往返交通方式"
     )

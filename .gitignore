@@ -80,3 +80,20 @@ Thumbs.db
 # 洛天依（3D）：作者配布规则同样禁止二次配布，**不进仓库**。
 # （本机当前也没有这个目录，这条是为将来装进来时兜底。）
 public/models3d/luotianyi/
+
+# ---- 桌面版（Electron）构建产物 ----
+# 源码（main.js / preload.js / renderer/ / package.json / build-*.py）要进仓库，
+# 但下面这些是**本机构建出来的**，体积大且可由源码重建：
+#   node_modules   542 MB（Electron 依赖）
+#   dist           480 MB（安装包 + 解包版；安装包单个 130 MB，已超 GitHub 100 MB 单文件上限）
+#   dist-backend    27 MB（PyInstaller 打的后端 exe，可用 desktop\打包.bat 重建）
+#   .pyi-build      16 MB（PyInstaller 中间产物）
+desktop/node_modules/
+desktop/dist/
+desktop/dist-backend/
+desktop/.pyi-build/
+desktop/backend-build.json
+
+# 打包时 electron-builder 的调试输出
+desktop/builder-debug.yml
+desktop/builder-effective-config.yaml

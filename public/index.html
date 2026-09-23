@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#121212">
-<title>文旅智能辅助 HikiTravel-AIRI-1.3 · AIRI 网页版</title>
+<title>智能文旅辅助系统</title>
 <meta name="description" content="基于 Project AIRI 交互风格重构的文旅智能辅助系统：Live2D 虚拟人物 + 可点击交互词云 + 全本地 AI 服务（Ollama / Qwen TTS）">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🏔️</text></svg>">
 <link rel="stylesheet" href="/css/airi.css?v=__ASSET_V__">
@@ -37,7 +37,7 @@
     <div class="brand">
       <div class="brand-logo">🏔️</div>
       <div class="brand-text">
-        <span class="brand-title">文旅智能辅助 <span class="ver">HikiTravel-AIRI-1.3</span></span>
+        <span class="brand-title">智能文旅辅助系统 <span class="ver">HikiTravel-AIRI-1.4</span></span>
         <span class="brand-sub">Live2D 虚拟向导，全程本机运行</span>
       </div>
     </div>
@@ -314,7 +314,7 @@
           <div class="field">
             <label>目的地 <span class="hint-inline">样本库已覆盖：<span id="city-list-inline">—</span></span></label>
             <div class="row" id="city-chips"></div>
-            <input type="text" id="plan-city" value="杭州" placeholder="也可填写其它城市，会走降级路径" style="margin-top:7px">
+            <input type="text" id="plan-city" value="杭州" maxlength="32" placeholder="也可填写其它城市，会走降级路径" style="margin-top:7px">
           </div>
           <div class="field">
             <label>游玩天数：<b id="days-label">2</b> 天</label>
@@ -1042,6 +1042,10 @@
 <audio id="tts-audio" hidden></audio>
 
 <script src="/js/util.js?v=__ASSET_V__" defer></script>
+<!-- 离线重连：后端没起来 / 中途重启 / 断网时，前端持续探测并显示
+     「连接已断开，正在重连…（第 N 次）」，恢复后广播 wenlv:online。
+     必须排在 util.js 之后 —— util 的 api()/sse() 会向它上报失败。 -->
+<script src="/js/wenlv-net.js?v=__ASSET_V__" defer></script>
 <!-- 全局静音中枢。必须排在最前：开屏(boot.js)、配乐(bg-audio.js)、朗读(app.js)
      都要用它，晚于它们加载就会读到 undefined。 -->
 <script src="/js/audio-mute.js?v=__ASSET_V__" defer></script>

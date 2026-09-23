@@ -76,7 +76,18 @@ class Orchestrator:
         """容忍不完整画像：关键字段缺失/为空时，用合理默认值补齐。
 
         对应「零门槛」要求——用户什么都不填也能生成规划，填了细节则更精准。
+
+        ★ 地名一律先 strip 再判空。
+          原来写的是 `if not pref.destination:`，而**纯空格 `"   "` 是真值** ——
+          它会绕过默认值「杭州」，被当成城市名一路发给高德，最后用户看到的是
+          `HTTP 503 高德接口返回错误：INVALID_PARAMS`（实测踩到）。
+          全项目此前没有任何一处对目的地做 strip，所以这里补上、一次到位。
         """
+        for field in ("destination", "origin"):
+            raw = getattr(pref, field, None)
+            if isinstance(raw, str):
+                setattr(pref, field, raw.strip())
+
         if not pref.destination:
             pref.destination = "杭州"
         if not pref.preferences:

@@ -1,5 +1,5 @@
 /* ============================================================================
- * app.js —— 文旅智能辅助 · AIRI 网页版 主程序
+ * app.js —— 智能文旅辅助系统 主程序
  *
  * 职责：把「Live2D 舞台 + 交互词云 + 右侧面板」和「本地服务」接起来。
  * 所有数据来自本机：/api/status、/api/capabilities、/api/chat(SSE)、
@@ -196,14 +196,20 @@
       // 拿晚了会先闪一下兜底画面再切到视频。
       ['视频背景', loadVideos],
     ];
-    for (const [label, fn] of optionalLoads) {
+    /* ★ 并行加载（原来是 for + await 串行）。
+       这些加载之间**没有依赖**，串行等于把各自的往返时间相加 ——
+       本机后端每个请求几十到几百毫秒，11 个串起来就是明显的启动延迟。
+       改成 allSettled 并行后总耗时约等于最慢的那一个。
+       失败仍然只记一条日志、继续往下（少一个面板能用，好过形象不出现）。 */
+    await Promise.allSettled(optionalLoads.map(async ([label, fn]) => {
       try {
         await fn();
       } catch (e) {
-        // 只记一条，继续往下 —— 少一个面板能用，好过整个形象不出现
         console.error(`[boot] ${label} 加载失败（不影响其它功能）：`, e && e.message ? e.message : e);
       }
-    }
+    }));
+    // 供性能测量/自动化测试读取：数据加载阶段结束的时刻
+    window.__BOOT_DATA_MS__ = Math.round(performance.now());
     // 启动时**只做轻活**：填好开屏下拉选项即可。
     // 卡片（含 <video preload="metadata"> 缩略图）留到用户真打开「外观」页再建 ——
     // 那一页默认是隐藏的，启动时就建等于让看不见的缩略图去抢宣传片的带宽。
@@ -248,6 +254,26 @@
       }
     }
     applyBackground(S.settings.backgroundId, { silent: true });
+
+    /* ---- 断网恢复后自动补数据 ----
+     * 启动时如果后端还没起来，上面那串 optionalLoads 会全部失败（各自记一条日志就跳过），
+     * 界面看起来正常但功能是残的：没有能力清单、没有视频清单、状态灯不对。
+     * 所以网络恢复后把这些重新拉一遍，用户不用手动刷新页面。
+     * （重连本身由 public/js/wenlv-net.js 负责，这里只订阅它的恢复事件。） */
+    if (window.WenlvNet) {
+      window.WenlvNet.onOnline(async () => {
+        try { await refreshStatus(); } catch { /* 忽略 */ }
+        // 同样并行（理由见上面 optionalLoads 那段）
+        await Promise.allSettled(optionalLoads.map(async ([label, fn]) => {
+          try { await fn(); } catch (e) {
+            console.warn(`[net] 恢复后重载「${label}」失败：`, e && e.message ? e.message : e);
+          }
+        }));
+        try { renderVideos({ grid: false }); } catch { /* 忽略 */ }
+        if (bootScreen) { try { bootScreen.notifyVideosReady(); } catch { /* 忽略 */ } }
+        if (window.toast) window.toast('后端已恢复连接，数据已自动刷新', 'ok', 3000);
+      });
+    }
 
     initStage();
     renderHistory();
@@ -3774,6 +3800,19 @@
    * @param {'live2d'|'3d'} kind
    * @param {string} id
    */
+  /**
+   * 关掉「视角跟随」的模型。
+   *
+   * 视角跟随 = 鼠标/手指移到哪，人物的头与眼睛就看向哪。多数模型这么用没问题，
+   * 但对用**九轴经纬网面部变形器**（perspective-parallelogram-nine-pose-v2）的
+   * 模型会崩坏：库的 `updateFocus()` 是**叠加**写 ParamAngleX/Y/Z 的，角度一大
+   * 就把面部网格撕开 —— 表现是"鼠标一从人物身上扫过，脸就散了"。
+   *
+   * 自建的 hanfu 就是这个毛病，所以列在这里。
+   * 以后新加的模型若也崩，把它的 id 加进来即可。
+   */
+  const NO_FOCUS_FOLLOW = new Set(['hanfu']);
+
   async function switchDisplay(kind, id, { silent } = {}) {
     const item = findDisplayModel(kind, id)
       || (kind === '3d' ? allDisplayModels().find(m => m.kind === '3d') : S.l2dModels[0]);
@@ -3806,7 +3845,7 @@
     } else {      stageProblem(`正在加载 ${item.label}…`);
       try {
         const st = await ensureLive2D();
-        await st.load(item.entry, { label: item.label });
+        await st.load(item.entry, { label: item.label, focusFollow: !NO_FOCUS_FOLLOW.has(item.id) });
         st.setScale(S.settings.l2dScale);
         st.setPosition(S.settings.l2dX, S.settings.l2dY);
         if (S.settings.expression && (st.expressions || []).includes(S.settings.expression)) {
