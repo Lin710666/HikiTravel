@@ -13,6 +13,17 @@ const TYPE_COLOR: Record<string, string> = {
 
 const TIER_COLOR: Record<string, string> = { 经济: 'default', 中档: 'blue', 高档: 'gold' }
 
+// 体检问题类型 -> 展示用前缀
+const CHECK_CATEGORY_LABEL: Record<string, string> = {
+  路径: '路线',
+  地点: '地点',
+  重复: '重复',
+  覆盖: '必去',
+  时间: '时间',
+  预算: '预算',
+  其他: '提示',
+}
+
 // 室内景点关键词（雨天 Plan B「一键换成室内」判断，与后端 _is_indoor 保持一致）
 const INDOOR_KEYWORDS = ['博物馆', '美术馆', '科技馆', '展览馆', '陈列馆', '图书馆', '商场', '购物中心', '剧院', '室内']
 const isIndoorPoi = (p: POI) => INDOOR_KEYWORDS.some((k) => p.name.includes(k))
@@ -157,6 +168,10 @@ function TimelineNode({
         <span style={{ color: '#faad14', marginLeft: 8, fontSize: 12 }}>⭐ {poi.rating.toFixed(1)}</span>
       )}
       {poi.price != null && <span style={{ color: '#fa541c', marginLeft: 8 }}>约 ¥{poi.price}</span>}
+      {/* 地址来自高德 POI，便于到地后核对/导航 */}
+      {poi.description && (
+        <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>📍{poi.description}</span>
+      )}
       <JumpButtons poi={poi} />
       {isAttraction && (onRemove || onSwapAttraction) && (
         <span style={{ marginLeft: 4 }}>
@@ -476,6 +491,12 @@ export default function PlanView({ plan, onApplySuggestions, applying, onUpdate 
           <Descriptions.Item label="餐饮">¥{plan.budget_breakdown.dining}</Descriptions.Item>
           <Descriptions.Item label="住宿">¥{plan.budget_breakdown.hotel}</Descriptions.Item>
         </Descriptions>
+        {/* 往返大交通的估算口径：机票/高铁票的真实价格系统拿不到，必须在这里讲清楚 */}
+        {plan.transport_note && (
+          <div style={{ marginTop: 6, fontSize: 12, color: '#fa8c16' }}>
+            ⚠️ {plan.transport_note}
+          </div>
+        )}
         {nights > 0 && (
           <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
             住宿：{nights} 晚 · {rooms} 间
@@ -524,6 +545,41 @@ export default function PlanView({ plan, onApplySuggestions, applying, onUpdate 
               </Button>
             ) : undefined
           }
+        />
+      )}
+
+      {/* 规划体检：把第一版规划再交给大模型审查后的问题清单（只提示，不擅自返工） */}
+      {plan.checks && plan.checks.issues.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`规划体检：${plan.checks.summary || `发现 ${plan.checks.issues.length} 个需要留意的问题`}`}
+          description={
+            <div>
+              {plan.checks.issues.map((issue, idx) => (
+                <div key={`${issue.category}-${idx}`}>
+                  {issue.severity === 'high' && <Tag color="red">重要</Tag>}
+                  {issue.severity === 'medium' && <Tag color="orange">一般</Tag>}
+                  · [{CHECK_CATEGORY_LABEL[issue.category] ?? issue.category}] {issue.message}
+                  {issue.suggestion && (
+                    <>
+                      {' —— '}
+                      <b>{issue.suggestion}</b>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          }
+        />
+      )}
+      {plan.checks?.passed && (
+        <Alert
+          type="success"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`规划体检通过：${plan.checks.summary || '没有发现明显问题'}`}
         />
       )}
 

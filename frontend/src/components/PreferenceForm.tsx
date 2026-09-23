@@ -1,4 +1,16 @@
-import { Alert, Button, Card, Col, DatePicker, Form, Input, InputNumber, Row, Select } from 'antd'
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  DatePicker,
+  Form,
+  Input,
+  InputNumber,
+  Row,
+  Select,
+  TimePicker,
+} from 'antd'
 import type { UserPreference } from '../types/preference'
 
 // 可选值配置
@@ -18,7 +30,6 @@ interface Props {
 function buildPartial(values: Record<string, unknown>): Partial<UserPreference> {
   const partial: Partial<UserPreference> = {}
   if (values.destination) partial.destination = values.destination as string
-  if (values.origin) partial.origin = values.origin as string
   if (values.duration_days != null) partial.duration_days = values.duration_days as number
   if (values.budget != null) partial.budget = values.budget as number
   if ((values.preferences as string[])?.length) partial.preferences = values.preferences as string[]
@@ -29,6 +40,10 @@ function buildPartial(values: Record<string, unknown>): Partial<UserPreference> 
     partial.dietary_restrictions = values.dietary_restrictions as string[]
   if ((values.avoidances as string[])?.length) partial.avoidances = values.avoidances as string[]
   if (values.start_date) partial.start_date = (values.start_date as { format: (f: string) => string }).format('YYYY-MM-DD')
+  // TimePicker 返回 Dayjs，统一格式化成后端约定的 HH:MM
+  const hhmm = (v: unknown) => (v as { format: (f: string) => string }).format('HH:mm')
+  if (values.departure_time) partial.departure_time = hhmm(values.departure_time)
+  if (values.return_hotel_time) partial.return_hotel_time = hhmm(values.return_hotel_time)
 
   const { adults, children, elderly } = values as Record<string, number | undefined>
   if (adults != null || children != null || elderly != null) {
@@ -38,9 +53,10 @@ function buildPartial(values: Record<string, unknown>): Partial<UserPreference> 
 }
 
 /**
- * 极简表单（零门槛）：
- * 所有字段均可选填，留空则后端用默认值补齐；
- * 填写更多细节，生成的规划会更贴合。
+ * 极简表单：
+ * 目的地 / 游玩天数 / 同行人数 / 兴趣导向 / 总预算为必填——这几项直接决定规划结果，
+ * 后端不再用"默认杭州""默认 3 天"这类静默参数替用户决定；
+ * 其余字段选填，填得越细，规划越贴合。
  */
 export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
   const [form] = Form.useForm()
@@ -54,7 +70,7 @@ export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
       <Alert
         type="info"
         showIcon
-        message="输入详细信息可以生成更适合您的旅行规划哦！所有字段均可选填。"
+        message="目的地、天数、人数、兴趣导向、总预算为必填，其余选填；填得越细，规划越贴合。"
         style={{ marginBottom: 16 }}
       />
       <Form
@@ -64,14 +80,13 @@ export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
         onValuesChange={(_, all) => onChange?.(buildPartial(all))}
       >
         <Row gutter={12}>
-          <Col span={12}>
-            <Form.Item name="destination" label="目的地">
-              <Input placeholder="例如：杭州（留空默认杭州）" allowClear />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item name="origin" label="出发地">
-              <Input placeholder="例如：上海（选填）" allowClear />
+          <Col span={24}>
+            <Form.Item
+              name="destination"
+              label="目的地"
+              rules={[{ required: true, message: '请填写目的地城市' }]}
+            >
+              <Input placeholder="例如：杭州（必填）" allowClear />
             </Form.Item>
           </Col>
           <Col span={24}>
@@ -86,7 +101,24 @@ export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
             </Form.Item>
           </Col>
           <Col span={8}>
-            <Form.Item name="adults" label="成人">
+            <Form.Item
+              name="adults"
+              label="成人"
+              dependencies={['children', 'elderly']}
+              rules={[
+                (form) => ({
+                  validator: () => {
+                    const total =
+                      (form.getFieldValue('adults') || 0) +
+                      (form.getFieldValue('children') || 0) +
+                      (form.getFieldValue('elderly') || 0)
+                    return total > 0
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('同行人数至少 1 人'))
+                  },
+                }),
+              ]}
+            >
               <InputNumber min={0} placeholder="0" style={{ width: '100%' }} />
             </Form.Item>
           </Col>
@@ -101,17 +133,29 @@ export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item name="duration_days" label="游玩天数">
+            <Form.Item
+              name="duration_days"
+              label="游玩天数"
+              rules={[{ required: true, message: '请填写游玩天数' }]}
+            >
               <InputNumber min={1} max={30} placeholder="例如：3" style={{ width: '100%' }} />
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item name="budget" label="总预算（元）">
+            <Form.Item
+              name="budget"
+              label="总预算（元）"
+              rules={[{ required: true, message: '请填写总预算' }]}
+            >
               <InputNumber min={0} placeholder="例如：3000" prefix="¥" style={{ width: '100%' }} />
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item name="preferences" label="兴趣导向">
+            <Form.Item
+              name="preferences"
+              label="兴趣导向"
+              rules={[{ required: true, message: '请至少选择一项兴趣导向' }]}
+            >
               <Select
                 mode="multiple"
                 placeholder="选填，可多选"
@@ -158,9 +202,27 @@ export default function PreferenceForm({ onSubmit, onChange, loading }: Props) {
               />
             </Form.Item>
           </Col>
-          <Col span={12}>
+          <Col span={8}>
             <Form.Item name="start_date" label="出行日期">
               <DatePicker style={{ width: '100%' }} placeholder="选填" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              name="departure_time"
+              label="每天出发时间"
+              tooltip="留空按 09:00 安排。非特种兵节奏不早于 08:00（特种兵 07:00）"
+            >
+              <TimePicker format="HH:mm" minuteStep={15} placeholder="默认 09:00" style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              name="return_hotel_time"
+              label="期望回酒店时间"
+              tooltip="留空按 21:00。超过这个时间会优先砍掉靠后的景点（你点名必去的景点不会砍）"
+            >
+              <TimePicker format="HH:mm" minuteStep={15} placeholder="默认 21:00" style={{ width: '100%' }} />
             </Form.Item>
           </Col>
         </Row>

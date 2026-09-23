@@ -2,7 +2,6 @@
 
 export type Pace = '悠闲' | '适中' | '特种兵'
 export type Transportation = '自驾' | '高铁' | '飞机' | '本地'
-export type Priority = '吃' | '住' | '行' | '玩'
 
 export interface Travelers {
   adults: number
@@ -13,15 +12,12 @@ export interface Travelers {
 export interface UserPreference {
   travelers: Travelers
   duration_days: number
-  origin: string
   destination: string
   transportation: Transportation
   preferences: string[]
   must_visit: string[]
   pace: Pace
-  has_pet: boolean
   budget: number
-  priority: Priority
   dietary_restrictions: string[]
   avoidances: string[]
   start_date: string

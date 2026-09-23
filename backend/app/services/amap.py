@@ -39,17 +39,46 @@ class AmapError(Exception):
     """高德接口调用异常（未配 key / 网络异常 / 业务错误）。"""
 
 
+class AmapDestinationError(AmapError):
+    """目的地无法被高德识别（属于用户输入问题，不是服务故障）。"""
+
+
+#: 高德常见错误码 -> 给用户看的处理建议（原样抛 code 用户看不懂）
+_AMAP_ERROR_HINTS = {
+    "CUQPS_HAS_EXCEEDED_THE_LIMIT": "请求过于频繁，稍等一会儿再试（免费额度 QPS 较低）",
+    "DAILY_QUERY_OVER_LIMIT": "今日调用量已达上限，请明天再试，或更换高德 Key",
+    "INVALID_USER_KEY": "Key 无效，请检查 backend/.env 里的 AMAP_API_KEY",
+    "USER_KEY_RECYCLED": "Key 已被回收，请到高德控制台重新申请",
+    "SERVICE_NOT_AVAILABLE": "高德该服务暂时不可用，请稍后重试",
+    "INVALID_PARAMS": "请求参数有误，请确认目的地等填写正确",
+}
+
+
 class AmapClient:
     """高德开放平台 REST API 客户端。"""
 
     def __init__(self, key: Optional[str] = None, timeout: float = 10.0):
         self.key = key or settings.amap_api_key
         self.timeout = timeout
+        # 同一个进程内缓存接口结果：一次规划会反复算同一段路线（例如超时压缩后重算），
+        # 命中缓存可以省掉限流等待与网络往返。POI / 路线在同一次演示里变化极小，
+        # 上限 500 条、超出按最早写入淘汰。
+        self._cache: Dict[tuple, Dict[str, Any]] = {}
+        self._cache_lock = threading.Lock()
 
     def _get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """发起 GET 请求并统一处理错误，返回业务数据。"""
         if not self.key:
             raise AmapError("未配置 AMAP_API_KEY，请在 .env 中填写高德开放平台密钥")
+        cache_key = (
+            path,
+            tuple(sorted((k, str(v)) for k, v in params.items() if k != "key")),
+        )
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         params = {**params, "key": self.key}
         _throttle()
         try:
@@ -60,7 +89,15 @@ class AmapClient:
 
         data = resp.json()
         if data.get("status") != "1":
-            raise AmapError(f"高德接口返回错误：{data.get('info', '未知错误')}")
+            info = data.get("info", "未知错误")
+            hint = _AMAP_ERROR_HINTS.get(info)
+            raise AmapError(
+                f"高德接口返回错误：{info}" + (f"（{hint}）" if hint else "")
+            )
+        with self._cache_lock:
+            if len(self._cache) >= 500:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[cache_key] = data
         return data
 
     def search_poi(
@@ -91,41 +128,52 @@ class AmapClient:
     def resolve_region(self, destination: str) -> tuple[str, str]:
         """把目的地解析为 (区县名 adname, 城市名 cityname)。
 
-        高德 place/text 的 city 参数只认「城市名/区县名/adcode」；像「东山岛」
-        这类景区名会静默失效，导致返回全国结果（例如关键词「公园」搜出北京公园）。
-        策略：
-        1. 先用风景名胜类型探测 destination 能否直接当 city 用（城市名命中则直接用，
-           保留城市粒度，避免「杭州」被缩小到某个区）；
-        2. 不行则按关键词搜一次，取首个结果的所在区县（adname）与城市（cityname），
-           例如 东山岛 -> (东山县, 漳州市)：区县级用于 POI 搜索更聚焦，城市级用于
-           天气 / 知识库匹配。
-        都失败时返回 (destination, destination)，由后续搜索兜底。
+        **不做静默兜底**：解析不出就抛 AmapError，让用户确认目的地，
+        而不是拿一个猜出来的名字继续搜（那样会搜出全国结果，
+        例如把「不存在的地名」当 city 传进去，高德会静默忽略该参数）。
+
+        策略：用高德的行政区查询接口（/config/district）做规范化解析——
+        1. 命中「省 / 市」级：保留城市粒度，避免「杭州」被缩到某个区；
+        2. 命中「区县 / 街道」级：区县名用于 POI 搜索（更聚焦），
+           再取该区县所属的城市名，用于天气与本地知识库匹配。
         """
-        try:
-            probe = self._get(
-                "/place/text",
-                {"types": "110000", "city": destination, "offset": "1"},
+        target = (destination or "").strip()
+        if not target:
+            raise AmapDestinationError("目的地为空，无法检索。")
+
+        data = self._get(
+            "/config/district", {"keywords": target, "subdistrict": "0"}
+        )
+        districts = data.get("districts") or []
+        if not districts:
+            raise AmapDestinationError(
+                f"无法识别目的地「{target}」。请确认目的地名称，"
+                "建议填写城市名（例如「杭州」「厦门」）。"
             )
-            if probe.get("count") and int(probe["count"]) > 0:
-                return destination, destination
-        except AmapError:
-            pass
+
+        matched = districts[0]
+        name = (matched.get("name") or "").strip()
+        if not name:
+            raise AmapDestinationError(
+                f"无法识别目的地「{target}」。请确认目的地名称，"
+                "建议填写城市名（例如「杭州」「厦门」）。"
+            )
+
+        # 省级 / 市级：直接保留，城市名即检索范围
+        if matched.get("level") in ("province", "city"):
+            return name, name
+
+        # 区县 / 街道级：区县名用于 POI 搜索，城市名用于天气与知识库
+        city_name = ""
         try:
             hits = self._get(
-                "/place/text", {"keywords": destination, "offset": "5"}
+                "/place/text", {"keywords": name, "city": name, "offset": "1"}
             ).get("pois", [])
-            for p in hits:
-                adname = p.get("adname")
-                if adname:
-                    return adname, p.get("cityname") or adname
+            if hits:
+                city_name = hits[0].get("cityname") or ""
         except AmapError:
-            pass
-        return destination, destination
-
-    def resolve_city(self, destination: str) -> str:
-        """兼容旧接口：返回区县级城市名（POI 搜索用）。"""
-        adname, _ = self.resolve_region(destination)
-        return adname
+            city_name = ""
+        return name, city_name or name
 
     def get_weather(self, city: str, extensions: str = "all") -> Dict[str, Any]:
         """逐日天气查询。extensions="all" 返回多日预报。"""
@@ -150,6 +198,51 @@ class AmapClient:
             path_map[mode], {"origin": origin, "destination": destination}
         )
 
+    def static_map(
+        self,
+        markers: str = "",
+        paths: str = "",
+        center: str = "",
+        zoom: int = 12,
+        size: str = "800*520",
+        scale: int = 1,
+    ) -> bytes:
+        """高德静态地图：服务端渲染好的**真实地图图片**（带底图、路网、标记与轨迹）。
 
-#: 模块级默认客户端（便于各 Skill 复用）
-default_client = AmapClient()
+        用的是 Web 服务 Key —— 不需要另申请「Web端(JS API)」Key，也不会把 Key 暴露到浏览器
+        （浏览器只请求我们后端，由后端带 Key 去取图）。
+
+        参数格式（高德规范）：
+        - markers: "mid,0xFF0000,A:lng,lat;lng,lat|mid,0x1677FF,B:lng,lat"
+        - paths:   "5,0x1677FF,0.9,0x000000,0:lng,lat;lng,lat|..."
+        """
+        if not self.key:
+            raise AmapError("未配置 AMAP_API_KEY，无法获取地图。")
+        params: Dict[str, Any] = {"size": size, "scale": str(scale), "key": self.key}
+        if center:
+            params["location"] = center
+        if zoom:
+            params["zoom"] = str(zoom)
+        if markers:
+            params["markers"] = markers
+        if paths:
+            params["paths"] = paths
+        _throttle()
+        try:
+            resp = httpx.get(f"{BASE_URL}/staticmap", params=params, timeout=self.timeout)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise AmapError(f"获取静态地图失败：{exc}") from exc
+        content_type = resp.headers.get("content-type", "")
+        if not content_type.startswith("image"):
+            # 出错时高德返回 JSON（status=0 + info），翻译成中文提示
+            info = "未知错误"
+            try:
+                info = resp.json().get("info", info)
+            except ValueError:
+                info = resp.text[:100]
+            hint = _AMAP_ERROR_HINTS.get(info)
+            raise AmapError(
+                f"获取静态地图失败：{info}" + (f"（{hint}）" if hint else "")
+            )
+        return resp.content

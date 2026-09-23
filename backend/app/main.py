@@ -6,12 +6,24 @@
 """
 from pathlib import Path
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 
 from .config import settings
 from .routers.api import router
+
+# 让 Skill 耗时日志能在控制台看到（定位"生成慢在哪一步"）
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+# httpx 的 INFO 日志会把完整请求 URL（含高德 Key）打出来，这里压掉，避免刷屏与泄露
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI(
     title="文旅智能辅助 - 个性化可交互旅游规划系统",
@@ -30,9 +42,31 @@ app.add_middleware(
 app.include_router(router)
 
 
+class CacheControlledStaticFiles(StaticFiles):
+    """静态托管：index.html 不缓存、带 hash 的资源长缓存。
+
+    否则会出现"前端明明重新构建了，用户刷新还是旧页面"的经典坑：
+    浏览器把旧 index.html 缓存住，里面指向的还是旧 JS。
+    """
+
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        normalized = path.replace("\\", "/")
+        if normalized.endswith(".html") or normalized in (".", ""):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        elif normalized.startswith("assets/"):
+            # Vite 产物文件名带内容 hash，内容变了文件名就变，可以放心长缓存
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 # 生产环境：托管前端构建产物；开发环境：返回引导信息
 if settings.static_dir and Path(settings.static_dir).is_dir():
-    app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="static")
+    app.mount(
+        "/",
+        CacheControlledStaticFiles(directory=settings.static_dir, html=True),
+        name="static",
+    )
 else:
 
     @app.get("/")

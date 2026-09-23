@@ -1,4 +1,5 @@
 // 旅游规划输出模型（与后端 app/models/plan.py 对齐）
+import type { UserPreference } from './preference'
 
 export interface Location {
   lat: number
@@ -60,7 +61,23 @@ export interface Conflict {
   message: string
   suggestion: string
   field: string | null
-  suggested_value: unknown
+}
+
+export type CheckCategory = '路径' | '地点' | '重复' | '覆盖' | '时间' | '预算' | '其他'
+export type CheckSeverity = 'high' | 'medium' | 'low'
+
+// 规划体检（CheckSkill）发现的一条问题
+export interface CheckIssue {
+  category: CheckCategory
+  severity: CheckSeverity
+  message: string
+  suggestion: string
+}
+
+export interface PlanCheck {
+  passed: boolean
+  summary: string
+  issues: CheckIssue[]
 }
 
 export interface TravelPlan {
@@ -74,6 +91,10 @@ export interface TravelPlan {
   attraction_options: POI[]
   travelers: number
   user_budget: number | null
-  warnings: string[]
   conflicts: Conflict[]
+  checks: PlanCheck | null
+  // 生成这份规划时用的画像：用于「对话式修改」，改完的画像会跟着新规划一起返回
+  user_preference: UserPreference | null
+  // 往返大交通的估算口径说明（显示在预算栏）
+  transport_note: string
 }

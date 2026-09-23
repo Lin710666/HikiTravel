@@ -2,38 +2,47 @@
 
 调用真实外部 API 与本地 RAG，收集规划所需数据：
 - 天气：高德天气 API（实时）
-- 景点 / 餐饮 POI：高德 POI 搜索（实时，含参考票价 biz_ext.cost）
+- 景点 / 餐饮 / 酒店 POI：高德 POI 搜索（实时，含参考票价 biz_ext.cost）
 - 本地知识：RAG 检索器（慢变编辑类知识）
 
-说明：门票价 / 酒店房价等时效性数据全部来自 API，不在本地硬编码。
+推荐排序（**不是只看评分**，公式与权重集中在 skills/scoring.py）：
+- 景点综合分     = 热门程度分 × 权重 + 评分 × 权重
+- 餐厅/酒店综合分 = 距上一景点 × 权重 + 距下一景点 × 权重 + 评分 × 权重
+
+原则（与用户对齐）：
+- 不设静默参数：目的地没填、或高德认不出来，直接结束流程并提示用户，
+  绝不猜一个城市继续算（那样会搜出全国结果，等于给用户假数据）。
+- 门票价 / 酒店房价等时效性数据全部来自 API，本地不硬编码。
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..models.plan import Location, POI
 from ..rag.retriever import Retriever
 from ..services.amap import AmapClient
 from ..services.weather import WeatherService
 from .base import Skill
+from .errors import MissingRequiredInfoError
+from .scoring import distance_km, option_score, order_attractions, popularity_raw
 
-# 兴趣导向 -> 高德 POI 分类码（types）。用分类码而非关键词，避免「公园灌满」「餐厅混入景点」。
-# 分类码说明（高德三级分类，传中类/小类码即可，多个用 | 分割）：
-#   110101 公园 | 110103 植物园 | 110200 风景名胜(含 110201 世界遗产/110202 国家级景点/
-#   110205 寺庙道观/110208 海滩/110209 观景点) | 110204 纪念馆
+# 兴趣导向 -> 高德 POI 分类码（types）。用分类码而非关键词，避免「公园」搜出餐厅、
+# 「博物馆」搜出商场。
+#   110101 公园 | 110103 植物园 | 110200 风景名胜(含 110201 世界遗产/110202 国家级)
+#   110205 寺庙道观/110208 海滩/110209 观景点 | 110204 纪念馆
 #   140100 博物馆 | 140200 展览馆 | 140400 美术馆 | 140600 科技馆 | 140700 天文馆 | 140800 文化宫
-#   080501 游乐园/主题乐园 | 080600 影剧院(080601 电影院/080603 剧院) | 080401 度假村
+#   080501 游乐园/主题乐园 | 080600 影剧院 | 080401 度假村
 PREFERENCE_TYPES: Dict[str, str] = {
     "人文历史": "140100|140200|140400|140600|140700|140800|110201|110204|110205",
     "自然风光": "110101|110103|110200|110208|110209",
     "娱乐": "080501|080600|080401",
-    # 「美食」不产出景点，走独立的餐厅推荐（见下方 dining 检索），避免餐厅混入景点池
+    # 「美食」不产生景点，走独立餐厅检索，避免餐馆混进景点池
 }
 
-# 饮食禁忌 -> 餐厅搜索关键词（用于餐厅推荐时叠加检索，命中项会进入候选池）
+# 饮食禁忌 -> 餐厅搜索关键词（用于餐厅推荐时叠加检索，命中的会进入候选池）
 DIET_KEYWORDS: Dict[str, str] = {
     "清真": "清真餐厅",
     "素食": "素食",
     "海鲜": "海鲜",
-    # 「无辣」无直接可搜关键词，忽略（不影响候选池）
+    # 「无辣」没有可直接搜的关键词，忽略（不影响候选池）
 }
 
 
@@ -113,7 +122,7 @@ def _to_recommendation(item: Dict[str, Any], kind: str) -> POI:
         tips = f"人均约 ¥{price:.0f}" if price else "人均待查"
     else:  # 住宿
         tier = _tier_hotel(rating)
-        # 高德无实时房价，按档次给每晚估算价，供预算估算与用户选定后重算
+        # 高德不提供实时房价，按档次给每晚估算价，便于预算估算与用户选定后重算
         price = {"经济": 150, "中档": 350, "高档": 600}.get(tier, 350)
         tips = (f"评分 {rating}" if rating else "评分待查") + f" · 约 ¥{price}/晚"
         # 入住/退房时间：高德无逐店实时数据，用行业通行惯例，实际以酒店为准
@@ -149,8 +158,36 @@ def _search_multi(
     return items
 
 
-def _tiered(items: List[Dict[str, Any]], kind: str) -> List[POI]:
-    """按价位分档，档内按评分降序，每档最多取 10 个，返回「经济→中档→高档」推荐列表。"""
+def _neighbors_by_distance(
+    poi: POI, anchors: Sequence[POI], count: int = 2
+) -> List[Optional[POI]]:
+    """取离该点最近的若干个景点（按直线距离）；坐标缺失的点不参与。"""
+    pairs = [(distance_km(poi, a), a) for a in anchors]
+    pairs = [(d, a) for d, a in pairs if d is not None]
+    pairs.sort(key=lambda pair: pair[0])
+    result: List[Optional[POI]] = [a for _, a in pairs[:count]]
+    while len(result) < count:  # 景点不足时补 None，交给 option_score 自动降权重
+        result.append(None)
+    return result
+
+
+def _option_prescore(poi: POI, anchors: Sequence[POI]) -> float:
+    """检索阶段的餐厅 / 酒店综合分（近似版）。
+
+    此阶段还没排出每日行程，因此用「行程景点集合里最近的两个景点」近似
+    时间轴上的前后邻居：最近的当上一站，次近的当下一站。
+    真正落到每天时间轴上的精确评分（当天真实前后邻居）由 Planner 组装时重算。
+    """
+    prev_poi, next_poi = _neighbors_by_distance(poi, anchors, 2)
+    return option_score(poi, prev_poi, next_poi)
+
+
+def _tiered(items: List[Dict[str, Any]], kind: str, anchors: Sequence[POI]) -> List[POI]:
+    """按价位分档（经济→中档→高档），档内按综合分排序，每档最多取 10 个。
+
+    分档是为了让用户在「换一家」时既能降级也能升级；
+    档内排序用综合分（距离前后景点 + 评分），而不是只看评分。
+    """
     buckets: Dict[str, List[POI]] = {"经济": [], "中档": [], "高档": []}
     for item in items:
         poi = _to_recommendation(item, kind)
@@ -158,9 +195,7 @@ def _tiered(items: List[Dict[str, Any]], kind: str) -> List[POI]:
     result: List[POI] = []
     for tier in ("经济", "中档", "高档"):
         ranked = sorted(
-            buckets[tier],
-            key=lambda p: p.rating if p.rating is not None else -1,
-            reverse=True,
+            buckets[tier], key=lambda p: _option_prescore(p, anchors), reverse=True
         )
         result.extend(ranked[:10])
     return result
@@ -185,39 +220,64 @@ class RetrieveSkill(Skill):
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:
         pref = ctx["preference"]
 
-        # 先把目的地解析成高德可识别的区县/城市；否则「东山岛」这类景区名会让 city
-        # 参数静默失效，导致关键词搜索返回全国结果（如「公园」搜出北京公园）。
-        # city 为区县级（POI 搜索更聚焦），city_name 为城市级（知识库匹配用）。
-        city, city_name = self.amap.resolve_region(pref.destination)
+        # 0. 目的地必填：没填就结束流程并提示用户，不静默默认某个城市
+        destination = (pref.destination or "").strip()
+        if not destination:
+            raise MissingRequiredInfoError(
+                "请先告诉我目的地城市（例如「杭州」），我再为你规划行程。"
+            )
 
-        # 1. 实时天气（多拉 3 天，覆盖 start_date 相对今天最多 3 天的偏移；
-        #    高德 extensions=all 最多返回未来 4 天，超出则无法预报）
+        # 把目的地解析成高德认的「区县名 + 城市名」；解析不出来直接抛
+        # AmapDestinationError，由 API 层提示用户确认目的地，绝不拿全国结果凑数。
+        city, city_name = self.amap.resolve_region(destination)
+        ctx["resolved_region"] = {
+            "input": destination,
+            "city": city,
+            "city_name": city_name,
+        }
+
+        # 1. 实时天气（多拿 3 天：高德 extensions=all 最多返回未来 4 天）
         ctx["weather"] = self.weather_svc.forecast(city, pref.duration_days + 3)
 
-        # 2. 景点 POI（按兴趣分类码搜索，去重后按评分/热度排序）
-        attractions: List[POI] = []
-        seen: set[str] = set()
+        # 2. 景点 POI：按兴趣分类码搜索，计算综合分（热门程度 + 评分）后排序
+        items_by_id: Dict[str, Dict[str, Any]] = {}
+        hit_counts: Dict[str, int] = {}
         for tag in pref.preferences:
             types = PREFERENCE_TYPES.get(tag, "")
             if not types:
                 continue
             for item in self.amap.search_poi(types=types, city=city, offset=25):
-                # 用高德 POI id 去重：同一地点在不同分类下可能返回不同名称，id 才是唯一键
                 pid = item.get("id") or item.get("name", "")
-                if pid and pid not in seen:
-                    seen.add(pid)
-                    attractions.append(_to_poi(item))
+                if not pid:
+                    continue
+                if pid not in items_by_id:
+                    items_by_id[pid] = item
+                # 跨分类命中次数本身就是热度信号：同一点在多个兴趣主题里都排得上号
+                hit_counts[pid] = hit_counts.get(pid, 0) + 1
 
-        # 按高德评分降序（无评分排最后）：让高分景点（海滩、热门景区）浮到前面，
-        # 避免高德默认的「距市中心距离」顺序把冷门低分点顶上来。
-        attractions.sort(key=lambda p: p.rating if p.rating is not None else -1, reverse=True)
+        max_raw = max(
+            (
+                popularity_raw(item, hit_counts[pid])
+                for pid, item in items_by_id.items()
+            ),
+            default=0.0,
+        )
+        if not items_by_id and not pref.must_visit:
+            # 例：兴趣只选了「美食」——没有可对应的景点分类，不静默换成别的兴趣去搜
+            raise MissingRequiredInfoError(
+                "你的兴趣导向里没有能对应景点的分类（人文历史 / 自然风光 / 娱乐），"
+                "也没有填写想去的景点，所以无法推荐景点。请补充兴趣或直接填写想去的地方。"
+            )
+        # 综合分 = 距上一景点 × 权重 + 热门程度 × 权重 + 评分 × 权重，
+        # 贪心排出一条顺路的候选链（而不是只按评分/热度把相隔很远的点堆在前面）
+        attractions: List[POI] = [
+            _to_poi(item)
+            for item in order_attractions(list(items_by_id.values()), hit_counts, max_raw)
+        ]
 
-        # 3. 餐饮 / 酒店 POI：多关键词 + 翻页扩大候选池，按评分排序 + 饮食禁忌叠加检索，
-        #    供跨天轮换与「换一家」面板提供更丰富选择
+        # 3. 餐饮 / 酒店 POI：多关键词 + 翻页扩大候选池，按综合分排序分档
         restaurant_items = _search_multi(self.amap, "餐厅", city, pages=2)
         seen_rids = {it.get("id") for it in restaurant_items}
-        # 通用风味（小吃/本地菜）+「美食」兴趣 + 饮食禁忌：叠加针对性检索，
-        # 既丰富种类，又贴合用户画像
         extra_keywords: List[str] = ["小吃", "本地菜"]
         if "美食" in pref.preferences:
             extra_keywords.append("特色美食")
@@ -229,12 +289,8 @@ class RetrieveSkill(Skill):
                 if item.get("id") and item.get("id") not in seen_rids:
                     seen_rids.add(item.get("id"))
                     restaurant_items.append(item)
-        restaurants = [_to_poi(item, poi_type="餐厅") for item in restaurant_items]
-        # 按高德评分降序：高分餐厅优先进规划，保证「综合评分」推荐
-        restaurants.sort(key=lambda p: p.rating if p.rating is not None else -1, reverse=True)
-        ctx["dining_options"] = _tiered(restaurant_items, "餐厅")
+        dining_options = _tiered(restaurant_items, "餐厅", attractions)
 
-        # 酒店：除「酒店」外叠加「民宿/客栈」，翻页扩大候选池并去重
         hotel_items = _search_multi(self.amap, "酒店", city, pages=2)
         seen_hids = {it.get("id") for it in hotel_items}
         for kw, pages in (("民宿", 2), ("客栈", 1)):
@@ -242,10 +298,10 @@ class RetrieveSkill(Skill):
                 if item.get("id") and item.get("id") not in seen_hids:
                     seen_hids.add(item.get("id"))
                     hotel_items.append(item)
-        ctx["hotel_options"] = _tiered(hotel_items, "住宿")
+        hotel_options = _tiered(hotel_items, "住宿", attractions)
 
         # 4. 特别想去的景点（必去）：优先复用已搜到的 POI，否则按名称单独搜索；
-        #    解析失败用占位 POI（无坐标）保证仍出现在规划中
+        #    仍定位不到就保留占位数据（无坐标）并在体检中提示，不让它凭空消失。
         must_pois: List[POI] = []
         for name in pref.must_visit:
             matched = next(
@@ -261,22 +317,26 @@ class RetrieveSkill(Skill):
             else:
                 must_pois.append(
                     POI(
-                        name=name, type="景点", location=Location(lat=0, lng=0), city=city,
-                        tips="未能定位坐标，建议到地后地图搜索",
+                        name=name,
+                        type="景点",
+                        location=Location(lat=0, lng=0),
+                        city=city,
+                        tips="未能在高德定位到坐标，建议到地后在地图中搜索确认",
                     )
                 )
-        ctx["must_visit_pois"] = must_pois
-        # 必去景点置顶，规划按顺序优先选取
-        attractions = must_pois + [
-            p for p in attractions if p.name not in {m.name for m in must_pois}
-        ]
+
+        # 必去景点置于候选池最前，规划阶段优先安排
+        must_names = {m.name for m in must_pois}
+        attraction_pool = must_pois + [p for p in attractions if p.name not in must_names]
 
         # 5. 本地 RAG 知识（防坑 / 拍照 / 动线），按城市过滤避免串到别的目的地
         rag_query = " ".join(pref.preferences) + " " + city_name
         ctx["rag_tips"] = self.retriever.search(rag_query, top_k=5, city=city_name)
 
-        ctx["attractions"] = attractions
-        # 景点备选池：完整去重后的景点列表（含必去），供前端编辑时「换景点」
-        ctx["attraction_options"] = attractions
-        ctx["restaurants"] = restaurants
+        ctx["attractions"] = attraction_pool
+        ctx["attraction_options"] = attraction_pool
+        ctx["must_visit_pois"] = must_pois
+        ctx["dining_options"] = dining_options
+        ctx["hotel_options"] = hotel_options
+        ctx["restaurants"] = dining_options
         return ctx
