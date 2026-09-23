@@ -275,56 +275,6 @@ def main():
         print("  -", issue.category, issue.severity, issue.message)
     print("== 冲突 ==", [c.id for c in plan.conflicts])
 
-    # 落一份 UTF-8 结果，避免控制台编码干扰核对
-    out_path = Path(__file__).resolve().parent / "offline_check_output.json"
-    with open(out_path, "w", encoding="utf-8") as fp:
-        json.dump(
-            {
-                "summary": plan.summary,
-                "budget": plan.total_budget_estimate,
-                "breakdown": plan.budget_breakdown.model_dump(),
-                "days": [
-                    {
-                        "date": d.date,
-                        "weather": d.weather.model_dump(),
-                        "hotel": d.hotel.name if d.hotel else None,
-                        "plan_b": d.plan_b,
-                        "timeline": [
-                            {
-                                "time": it.time,
-                                "type": it.poi.type,
-                                "name": it.poi.name,
-                                "price": it.poi.price,
-                                "next": (
-                                    f"{it.transport_to_next.mode}/{it.transport_to_next.duration}/"
-                                    f"{it.transport_to_next.cost}"
-                                    if it.transport_to_next
-                                    else None
-                                ),
-                            }
-                            for it in d.timeline
-                        ],
-                    }
-                    for d in plan.daily_plans
-                ],
-                "checks": {
-                    "passed": plan.checks.passed,
-                    "issues": [
-                        {
-                            "category": i.category,
-                            "severity": i.severity,
-                            "message": i.message,
-                        }
-                        for i in plan.checks.issues
-                    ],
-                },
-                "conflicts": [c.id for c in plan.conflicts],
-            },
-            fp,
-            ensure_ascii=False,
-            indent=2,
-        )
-
     # 2) 对话式修改：应在既有画像上只改提到的字段，并重新生成
     orch_r, llm_r = build()
     plan_v1 = orch_r.run(raw_text="带80岁老人特种兵游杭州，3天，预算2000，想去雷峰塔")

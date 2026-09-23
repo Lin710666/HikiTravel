@@ -15,8 +15,6 @@ frontend/dist/
 .env
 backend/.env
 
-# 自检脚本产出的报告
-backend/scripts/offline_check_output.json
 
 # 系统
 .DS_Store

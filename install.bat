@@ -120,11 +120,18 @@ if not exist "backend\.env" (
         echo # AMap Web Service API key
         echo AMAP_API_KEY=e15977855225aaaedebd91c466a3c39e
         echo.
-        echo # Ollama local inference - empty means fall back to rule engine
+        echo # Ollama local inference, required, no rule-engine fallback
         echo OLLAMA_BASE_URL=http://localhost:11434
         echo OLLAMA_MODEL=qwen2.5:7b
         echo OLLAMA_EMBED_MODEL=nomic-embed-text
-        echo OLLAMA_TIMEOUT=30
+        echo # Local 7B on CPU needs 1-3 minutes per plan, keep the timeout large
+        echo OLLAMA_TIMEOUT=180
+        echo # Keep the model resident to avoid reload between calls
+        echo OLLAMA_KEEP_ALIVE=30m
+        echo # Optional smaller model for plan review, leave empty to use OLLAMA_MODEL
+        echo OLLAMA_CHECK_MODEL=
+        echo # Max feedback-driven regenerations after plan review, 0 disables it
+        echo PLAN_MAX_REGENERATE=1
     ) > "backend\.env"
     echo Created backend\.env
 ) else (

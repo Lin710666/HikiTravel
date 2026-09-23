@@ -30,29 +30,53 @@
 ## 目录结构
 
 ```
-travelplanner/
-├── backend/                # FastAPI 后端
+HikiTravel/
+├── backend/                        # FastAPI 后端
 │   ├── app/
-│   │   ├── models/         # UserPreference / TravelPlan 数据模型
-│   │   ├── skills/         # 五个协同 Skill + 综合分模块 + 统一异常
-│   │   ├── services/       # 高德 API / 天气
-│   │   ├── rag/            # 本地 RAG 知识库（SQLite + 检索）
-│   │   ├── llm/            # Ollama 客户端
-│   │   ├── orchestrator.py # Skill 协同调度器
-│   │   └── main.py         # 应用入口
-│   ├── .env.example        # 配置模板
-│   └── pyproject.toml      # uv / pip 依赖
-├── frontend/               # React 前端
-│   └── src/
-│       ├── components/     # 表单 / 规划展示 / 地图
-│       ├── hooks/useAppJump.ts
-│       ├── types/          # 与后端对齐的 TS 类型
-│       └── api/client.ts
+│   │   ├── models/                 # UserPreference（输入画像）/ TravelPlan（输出规划）
+│   │   ├── skills/                 # 五个 Skill + 综合分 + 路线优化 + 统一异常
+│   │   │   ├── intent_skill.py     # Skill1 意图识别（纯大模型，无正则）
+│   │   │   ├── guard_skill.py      # 异常拦截（只建议、不擅改）
+│   │   │   ├── retrieve_skill.py   # Skill2 多源检索（综合分排序）
+│   │   │   ├── planner_skill.py    # Skill3 规划生成（分区 → 定酒店 → 排线）
+│   │   │   ├── check_skill.py      # Skill4 规划体检与定向修复
+│   │   │   ├── scoring.py          # 景点/餐厅/酒店 综合分权重
+│   │   │   ├── route.py            # 地理分区、距离与折返体检、最近邻重排
+│   │   │   └── errors.py           # Skill 层统一异常
+│   │   ├── services/               # 高德客户端 / 天气 / 静态地图参数
+│   │   ├── rag/                    # 本地知识库（SQLite + 检索）
+│   │   ├── llm/                    # Ollama 客户端
+│   │   ├── routers/api.py          # 所有 HTTP 接口
+│   │   ├── orchestrator.py         # Skill 协同调度 + 逐环节耗时日志
+│   │   ├── store.py / db.py        # 规划持久化（SQLite）
+│   │   ├── config.py               # 环境变量配置
+│   │   └── main.py                 # 应用入口（静态托管 + 缓存策略）
+│   ├── scripts/                    # 自检与回归脚本（见下表）
+│   ├── data/                       # 运行时 SQLite（不提交）
+│   ├── .env.example                # 配置模板
+│   └── pyproject.toml              # uv / pip 依赖
+├── frontend/                       # React 前端
+│   ├── src/
+│   │   ├── components/             # 偏好表单 / 规划展示 / 地图 / 跳转按钮
+│   │   ├── pages/PlannerPage.tsx   # 主页面（生成、修改、历史、等待与重试）
+│   │   ├── hooks/useAppJump.ts     # App 跳转降级链
+│   │   ├── api/client.ts           # 接口封装（超时、取消、错误分类）
+│   │   └── types/                  # 与后端对齐的 TS 类型
+│   ├── index.html
+│   └── vite.config.ts              # 构建时注入 __BUILD_TIME__
 ├── docs/量化指标.md
-├── backend/scripts/                   # 自检脚本：offline_check.py（离线全链路）/ live_smoke.py（真实接口冒烟）
-├── install.bat            # Windows 一键安装部署
-└── start.bat              # Windows 一键启动（部署后日常使用）
+├── install.bat                     # Windows 一键安装部署
+└── start.bat                       # Windows 一键启动（部署后日常使用）
 ```
+
+### 自检脚本（`backend/scripts`）
+
+| 脚本 | 用途 | 是否需要外部服务 |
+|------|------|------------------|
+| `offline_check.py` | 桩掉大模型与高德，秒级跑完整流水线（含时间轴/去重/体检回归用例） | 不需要 |
+| `live_smoke.py` | 真实链路冒烟：生成 / 对话式修改 / 地图 / 异常分支 | 需要 Ollama + 高德 |
+| `check_map_all.py` | 批量验证历史规划都能出地图 | 需要高德 |
+| `audit_dead_code.py` | 扫未使用导入、死代码、前后端都没人用的字段 | 不需要 |
 
 ## 快速开始
 
