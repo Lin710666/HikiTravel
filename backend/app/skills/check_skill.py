@@ -23,7 +23,7 @@ from ..llm.client import LLMClient
 from ..models.plan import CheckIssue, PlanCheck, TravelPlan
 from .base import Skill
 from .errors import LLMOutputError, LLMUnavailableError
-from .route import day_route_stats, order_nearest
+from .route import day_route_stats_from_day, order_nearest
 from .scoring import distance_km, has_location
 
 _SYSTEM_PROMPT = """你是一个严格的旅游行程审稿人。下面给你一份已经排好的行程规划，
@@ -184,10 +184,11 @@ class CheckSkill(Skill):
         return [it.poi for it in day.timeline]
 
     def _route_issues(self, plan: TravelPlan) -> List[CheckIssue]:
-        """报告优化后仍然存在的路线问题（长距离挪动、折返）。"""
+        """报告优化后仍然存在的路线问题（长距离挪动、折返、绕行）。"""
         issues: List[CheckIssue] = []
         for day in plan.daily_plans:
-            stats = day_route_stats(self._day_points(day))
+            # 用时间轴版统计：里程取真实驾车里程，不再是直线距离
+            stats = day_route_stats_from_day(day)
             for a, b, km in stats["long_legs"][:2]:
                 issues.append(
                     CheckIssue(
@@ -195,6 +196,19 @@ class CheckSkill(Skill):
                         severity="medium",
                         message=f"{day.date} 有一大段移动：{a} → {b} 约 {km:.0f} 公里。",
                         suggestion="这一处离当天其它点很远，建议换到更近的那天，或从景点备选池换成顺路的点。",
+                    )
+                )
+            # 绕行：直线看着近、实际要绕一大圈（跨海、绕湾、单行线都会这样）
+            for a, b, straight_km, road_km in stats.get("detours", [])[:2]:
+                issues.append(
+                    CheckIssue(
+                        category="路径",
+                        severity="medium",
+                        message=(
+                            f"{day.date} 的 {a} → {b} 直线只有 {straight_km:.1f} 公里，"
+                            f"实际驾车要 {road_km:.1f} 公里（绕 {road_km / straight_km:.1f} 倍）。"
+                        ),
+                        suggestion="这一段实际比看上去远得多，建议换掉其中一个点，或改用更顺路的接驳方式。",
                     )
                 )
             for a, b, c, extra in stats["backtracks"][:2]:
@@ -246,7 +260,7 @@ class CheckSkill(Skill):
         """比较两版规划好坏的粗略尺子：先看严重问题数，再看总移动距离。"""
         high = sum(1 for i in issues if i.severity == "high")
         total_km = sum(
-            day_route_stats(self._day_points(d))["total_km"] for d in plan.daily_plans
+                day_route_stats_from_day(d)["total_km"] for d in plan.daily_plans
         )
         return (high, round(total_km, 1))
 
@@ -280,7 +294,7 @@ class CheckSkill(Skill):
                         "日期": day.date,
                         "天气": day.weather.model_dump(),
                         "当晚酒店": (day.hotel.name if day.hotel else None),
-                        "当日移动距离(公里)": day_route_stats(self._day_points(day))["total_km"],
+                    "当日移动距离(公里)": day_route_stats_from_day(day)["total_km"],
                         "安排": [
                             {
                                 "时间": item.time,

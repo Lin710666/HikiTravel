@@ -35,6 +35,11 @@ class Settings:
 
     # ---- 高德开放平台（POI / 天气 / 路线 / 周边酒店餐饮 实时数据）----
     amap_api_key: str = os.getenv("AMAP_API_KEY", "")
+    # 浏览器端交互地图（高德 JS API）单独一套凭据：
+    # 类型是「Web端(JS API)」，与上面的 Web服务 Key 不通用。
+    # 缺失时前端自动退回静态地图，不会开天窗。
+    amap_js_key: str = os.getenv("AMAP_JS_KEY", "")
+    amap_security_code: str = os.getenv("AMAP_SECURITY_CODE", "")
 
     # ---- 前端静态目录（生产环境托管 dist/）----
     static_dir: str = os.getenv("STATIC_DIR", "")

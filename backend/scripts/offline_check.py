@@ -68,8 +68,11 @@ HOTELS = [
 class FakeAmap:
     key = "fake"
 
-    def resolve_region(self, destination):
+    def resolve_region(self, destination, adcode=""):
         return "杭州市", "杭州市"
+
+    def input_tips(self, keywords, city=""):
+        return []
 
     def search_poi(self, keywords=None, city=None, types=None, offset=20, page=1):
         if page > 1:
@@ -83,7 +86,25 @@ class FakeAmap:
         return []
 
     def get_route(self, origin, destination, mode="walking"):
-        return {"route": {"taxi_cost": "22.5", "paths": [{"duration": "1500"}]}}
+        """模拟驾车路线。
+
+        必须带 distance 字段：体检的「当天里程」和「绕行判定」现在都读它，
+        缺了就退回直线距离，离线环境下就测不到新逻辑。
+        这里按直线距离的 1.3 倍模拟（低于 1.5 的绕行阈值，不产生误报）。
+        """
+        import math
+
+        lng1, lat1 = (float(v) for v in origin.split(","))
+        lng2, lat2 = (float(v) for v in destination.split(","))
+        dx = (lng2 - lng1) * 111.32 * math.cos(math.radians((lat1 + lat2) / 2))
+        dy = (lat2 - lat1) * 110.57
+        road_m = int(math.hypot(dx, dy) * 1.3 * 1000)
+        return {
+            "route": {
+                "taxi_cost": "22.5",
+                "paths": [{"duration": "1500", "distance": str(road_m)}],
+            }
+        }
 
 
 class FakeWeather:
@@ -220,6 +241,9 @@ def build(available=True):
     orch.planner.llm = llm
     orch.check.llm = llm
     orch.retrieve.amap = FakeAmap()
+    # planner 也要换成假客户端：它内部会自己 new 一个真 AmapClient，
+    # 不换的话所谓「离线检查」里的路线查询会真的打到高德去。
+    orch.planner.amap = orch.retrieve.amap
     orch.retrieve.weather_svc = FakeWeather()
     orch.retrieve.retriever = FakeRetriever()
     return orch, llm

@@ -7,7 +7,7 @@
 - 大模型输出不可解析 → 502，提示用户重试
 - 未配置高德密钥 / 网络异常 → 503
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import base64
 
@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import store
+from ..config import settings
 from ..models.plan import TravelPlan
 from ..models.preference import UserPreference
 from ..orchestrator import Orchestrator
@@ -58,6 +59,25 @@ class MapRequest(BaseModel):
     """地图请求：把当前规划发过来，后端代理取高德静态地图。"""
 
     plan: TravelPlan
+
+
+class PlaceTip(BaseModel):
+    """目的地输入提示的一个候选。"""
+
+    name: str
+    district: str  # 省市区全路径，如「福建省福州市平潭县」
+    adcode: str
+    kind: Literal["行政区", "地点"]  # 行政区（省/市/区县）还是区内某个地点
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+
+class MapConfig(BaseModel):
+    """前端交互地图（高德 JS API）的运行时配置。"""
+
+    enabled: bool
+    key: str = ""
+    security_code: str = ""
 
 
 def _execute(call) -> TravelPlan:
@@ -148,6 +168,83 @@ def static_map(req: MapRequest) -> Dict[str, Any]:
         "zoom": params["zoom"],
         "center": params["center"],
     }
+
+
+@router.get("/map/config", response_model=MapConfig)
+def map_config() -> MapConfig:
+    """交互地图的前端配置。
+
+    为什么由接口下发、而不是打进前端产物：
+    1. 换 Key 或安全密钥不用重新构建前端；
+    2. 没配置时前端立刻知道，直接退回静态地图，不会开天窗。
+
+    安全说明（重要）：JS API 的 Key 按设计**必然出现在浏览器里**，
+    安全密钥同理，藏不住也没必要藏。真正的防滥用手段是在高德控制台
+    给该 Key 配「安全域名白名单」——只允许我们自己的域名调用。
+    不配白名单的话，任何人抄走 Key 都能刷额度，这是藏密钥挡不住的。
+    """
+    enabled = bool(settings.amap_js_key and settings.amap_security_code)
+    return MapConfig(
+        enabled=enabled,
+        key=settings.amap_js_key if enabled else "",
+        security_code=settings.amap_security_code if enabled else "",
+    )
+
+
+@router.get("/places/autocomplete", response_model=List[PlaceTip])
+def autocomplete_places(q: str, city: str = "", limit: int = 8) -> List[PlaceTip]:
+    """目的地输入提示（下拉候选）。
+
+    为什么走后端代理：高德 Key 一旦落到浏览器就等于公开，谁都能拿去刷额度。
+
+    为什么用实时候选而不是「固定下拉列表」：行政区划本身会调整，
+    硬编码的列表迟早过期；而且用户的目的地粒度常常不是行政区
+    （平潭岛 / 洱海 / 中山陵景区），固定城市列表覆盖不到。
+
+    每条候选都带 adcode——用户点选后前端会把 adcode 一起提交，
+    后端直接按主键解析，连「平潭县 / 平潭镇」这种同名歧义都不存在了。
+    """
+    try:
+        tips = orchestrator.retrieve.amap.input_tips(q, city)
+    except AmapError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    capped = max(1, min(limit, 20))
+    result: List[PlaceTip] = []
+    for tip in tips[:capped]:
+        name = tip.get("name") if isinstance(tip.get("name"), str) else ""
+        if not name:
+            continue
+
+        district = tip.get("district") if isinstance(tip.get("district"), str) else ""
+        adcode = tip.get("adcode") if isinstance(tip.get("adcode"), str) else ""
+
+        lat: Optional[float] = None
+        lng: Optional[float] = None
+        location = tip.get("location") if isinstance(tip.get("location"), str) else ""
+        if "," in location:
+            lng_text, _, lat_text = location.partition(",")
+            try:
+                lng, lat = float(lng_text), float(lat_text)
+            except ValueError:
+                lat = lng = None
+
+        result.append(
+            PlaceTip(
+                name=name,
+                district=district or name,
+                adcode=adcode,
+                # 判定「这条候选本身是行政区，还是辖区内的某个地点」：
+                # 行政区一定有 adcode，且区划路径以它自己的名字结尾
+                # （平潭县 → 福建省福州市平潭县）；地点则不是（平潭站）。
+                # 只判结尾不够：景区类候选有时 district 就等于名字但没有 adcode，
+                # 例如「鼓浪屿」，那样会被误标成行政区。
+                kind="行政区" if adcode and district.endswith(name) else "地点",
+                lat=lat,
+                lng=lng,
+            )
+        )
+    return result
 
 
 @router.get("/health")

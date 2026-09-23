@@ -32,6 +32,9 @@ class POI(BaseModel):
     rating: Optional[float] = Field(default=None, description="高德评分（0-5，用于口碑/热度排序）")
     check_in: str = Field(default="", description="入住时间（住宿类，如 14:00，行业通行惯例，以酒店实际为准）")
     check_out: str = Field(default="", description="退房时间（住宿类，如 12:00，行业通行惯例，以酒店实际为准）")
+    # 高德 POI 检索会带图片（store.is.autonavi.com/showpic/...），
+    # 供地图悬停卡片展示。旧数据没有这个字段，默认空列表。
+    photos: List[str] = Field(default_factory=list, description="POI 图片 URL（已统一为 https）")
 
 
 class TransportToNext(BaseModel):
@@ -40,6 +43,13 @@ class TransportToNext(BaseModel):
     mode: str = Field(description="交通方式：步行 / 地铁 / 公交 / 打车")
     duration: str = Field(description="预计耗时，如 15分钟")
     cost: float = Field(default=0, description="预计费用（元）")
+    # 高德驾车路线返回的真实里程（公里）。步行段用直线距离。
+    #
+    # 为什么单独存它：体检原先只用直线距离（haversine）算当天总里程，
+    # 在平潭这种海湾半岛地形会严重低估——实测直线上报 30.3 公里、
+    # 实际驾车 48.8 公里，有 18.5 公里被藏起来了。
+    # 而这个字段的路线请求本来就发了，只是之前只取耗时和费用、把里程丢掉。
+    distance_km: float = Field(default=0, description="该段真实里程（公里）")
 
 
 class Weather(BaseModel):

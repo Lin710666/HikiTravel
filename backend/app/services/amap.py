@@ -23,6 +23,19 @@ _MIN_INTERVAL = 0.4  # 秒；约 2.5 QPS，低于免费额度常见 3 QPS
 _throttle_lock = threading.Lock()
 _last_call_at = 0.0
 
+#: 输入提示缓存：用户边打边查会反复请求同一前缀，短 TTL 缓存既省额度又更快。
+#: key = "city|关键词"，value = (写入时刻, 候选列表)
+_TIPS_TTL = 120.0
+_TIPS_CACHE_MAX = 500
+_tips_cache: Dict[str, Any] = {}
+
+#: 路线缓存：同一条路线在一次生成里会被查好几遍
+#: （选餐厅时评估一次、建时间轴时再查一次、体检时又可能用上），
+#: 缓存下来既省钱又省时间，也直接降低了"真实路程精排"那一步的成本。
+_ROUTE_TTL = 600.0
+_ROUTE_CACHE_MAX = 800
+_route_cache: Dict[str, Any] = {}
+
 
 def _throttle() -> None:
     """确保相邻两次高德请求至少间隔 _MIN_INTERVAL 秒。"""
@@ -125,55 +138,115 @@ class AmapClient:
         data = self._get("/place/text", params)
         return data.get("pois", [])
 
-    def resolve_region(self, destination: str) -> tuple[str, str]:
+    def resolve_region(self, destination: str, adcode: str = "") -> tuple[str, str]:
         """把目的地解析为 (区县名 adname, 城市名 cityname)。
 
         **不做静默兜底**：解析不出就抛 AmapError，让用户确认目的地，
         而不是拿一个猜出来的名字继续搜（那样会搜出全国结果，
         例如把「不存在的地名」当 city 传进去，高德会静默忽略该参数）。
 
-        策略：用高德的行政区查询接口（/config/district）做规范化解析——
-        1. 命中「省 / 市」级：保留城市粒度，避免「杭州」被缩到某个区；
-        2. 命中「区县 / 街道」级：区县名用于 POI 搜索（更聚焦），
-           再取该区县所属的城市名，用于天气与本地知识库匹配。
+        策略：
+        0. 前端从下拉里选过地点时会带 adcode——那是高德的主键，
+           直接按它解析，不做任何字符串猜测（连「平潭县 / 平潭镇」这类
+           同名歧义都不存在了，用户选的是哪一个就是哪一个）；
+        1. 先用行政区查询接口（/config/district）做规范化解析——
+           命中「省 / 市」级保留城市粒度，避免「杭州」被缩到某个区；
+           命中「区县 / 街道」级用区县名做 POI 搜索范围（更聚焦）；
+        2. 都拿不到就**明确拒绝**，让用户改用下拉候选，绝不猜。
+
+        这里曾经加过一层「POI 检索兜底」：行政区查不到时用 /place/text
+        的结果反推 adname/cityname，想救回「福建平潭」这类写法。
+        用固定用例实测后撤掉了——它把正确率从 68% 抬到 86%，
+        代价是引入了**静默给出错误城市**：`福建福州` 被解析成南京市鼓楼区，
+        用户会拿到一份完全无关城市的行程，而且全程没有任何异常提示。
+        对一个「整份行程都建立在目的地之上」的产品，
+        给错城比拒绝严重得多：拒绝用户能立刻改，给错城要等行程生成完才发现。
+        而且它连「省 + 市」这类本该帮忙的情况都没救回来（福州/杭州/深圳全错）。
+
+        「写法不标准」的正解放在输入端：前端下拉直接给出高德侧的实时候选
+        （含 adcode），用户点一下即确认，比后端猜字符串可靠。
+        回归用例见 scripts/check_destination.py。
         """
         target = (destination or "").strip()
+        code = (adcode or "").strip()
+        if not target and not code:
+            raise AmapDestinationError("目的地为空，无法检索。")
+
+        # 0. 用户在下拉里选定了具体地点：adcode 优先，绕开一切字符串歧义
+        if code:
+            matched_by_code = self._lookup_district(code)
+            if matched_by_code:
+                name = (matched_by_code.get("name") or "").strip()
+                if name:
+                    if matched_by_code.get("level") in ("province", "city"):
+                        return name, name
+                    return name, self._city_of(name) or name
+            # adcode 失效（例如行政区划调整过）就继续按名字走，不让用户卡住
+
         if not target:
             raise AmapDestinationError("目的地为空，无法检索。")
 
+        matched = self._lookup_district(target)
+        if matched:
+            name = (matched.get("name") or "").strip()
+            if name:
+                # 省级 / 市级：直接保留，城市名即检索范围
+                if matched.get("level") in ("province", "city"):
+                    return name, name
+                # 区县 / 街道级：区县名用于 POI 搜索，城市名用于天气与知识库
+                return name, self._city_of(name) or name
+
+        raise AmapDestinationError(
+            f"无法识别目的地「{target}」。请确认名称，"
+            "建议填写城市名（例如「杭州」「厦门」）；"
+            "也可以只输入「平潭」这样的关键词，再从输入框的下拉候选里选中具体的地方。"
+        )
+
+    def input_tips(self, keywords: str, city: str = "") -> List[Dict[str, Any]]:
+        """输入提示（自动补全）：候选含 name / district / adcode / location。
+
+        供前端的「目的地」下拉使用。由后端代理而不是前端直连高德，
+        是因为 Key 一旦落到浏览器就等于公开，任何人都能拿去刷我们的额度。
+        """
+        q = (keywords or "").strip()
+        if not q:
+            return []
+
+        cache_key = f"{city}|{q}"
+        cached = _tips_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < _TIPS_TTL:
+            return cached[1]
+
+        params: Dict[str, Any] = {"keywords": q, "datatype": "all"}
+        if city:
+            params["city"] = city
+        tips = self._get("/assistant/inputtips", params).get("tips") or []
+
+        if len(_tips_cache) >= _TIPS_CACHE_MAX:
+            _tips_cache.clear()
+        _tips_cache[cache_key] = (time.monotonic(), tips)
+        return tips
+
+    def _lookup_district(self, keywords: str) -> Optional[Dict[str, Any]]:
+        """行政区查询：返回命中的第一条，没有则 None。
+
+        keywords 既可以是名称，也可以是 citycode / adcode（高德支持）。
+        """
         data = self._get(
-            "/config/district", {"keywords": target, "subdistrict": "0"}
+            "/config/district", {"keywords": keywords, "subdistrict": "0"}
         )
         districts = data.get("districts") or []
-        if not districts:
-            raise AmapDestinationError(
-                f"无法识别目的地「{target}」。请确认目的地名称，"
-                "建议填写城市名（例如「杭州」「厦门」）。"
-            )
+        return districts[0] if districts else None
 
-        matched = districts[0]
-        name = (matched.get("name") or "").strip()
-        if not name:
-            raise AmapDestinationError(
-                f"无法识别目的地「{target}」。请确认目的地名称，"
-                "建议填写城市名（例如「杭州」「厦门」）。"
-            )
-
-        # 省级 / 市级：直接保留，城市名即检索范围
-        if matched.get("level") in ("province", "city"):
-            return name, name
-
-        # 区县 / 街道级：区县名用于 POI 搜索，城市名用于天气与知识库
-        city_name = ""
+    def _city_of(self, adname: str) -> str:
+        """用行政区名反查所属城市（天气与本地知识库需要城市名）。"""
         try:
             hits = self._get(
-                "/place/text", {"keywords": name, "city": name, "offset": "1"}
+                "/place/text", {"keywords": adname, "city": adname, "offset": "1"}
             ).get("pois", [])
-            if hits:
-                city_name = hits[0].get("cityname") or ""
+            return (hits[0].get("cityname") or "") if hits else ""
         except AmapError:
-            city_name = ""
-        return name, city_name or name
+            return ""
 
     def get_weather(self, city: str, extensions: str = "all") -> Dict[str, Any]:
         """逐日天气查询。extensions="all" 返回多日预报。"""
@@ -194,9 +267,19 @@ class AmapClient:
         }
         if mode not in path_map:
             raise AmapError(f"不支持的出行方式：{mode}")
-        return self._get(
+        # 同一段路线在一次生成里会被查好几遍（选餐厅评估一次、建时间轴再查一次），
+        # 缓存下来省时省钱，也顺带压低了「真实路程精排」那一步的成本。
+        cache_key = f"{mode}|{origin}|{destination}"
+        hit = _route_cache.get(cache_key)
+        if hit and (time.monotonic() - hit[0]) < _ROUTE_TTL:
+            return hit[1]
+        data = self._get(
             path_map[mode], {"origin": origin, "destination": destination}
         )
+        if len(_route_cache) >= _ROUTE_CACHE_MAX:
+            _route_cache.clear()
+        _route_cache[cache_key] = (time.monotonic(), data)
+        return data
 
     def static_map(
         self,

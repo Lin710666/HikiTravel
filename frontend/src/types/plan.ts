@@ -20,6 +20,8 @@ export interface POI {
   rating: number | null
   check_in: string
   check_out: string
+  // 高德 POI 的图片（已统一为 https），供地图悬停卡片使用
+  photos?: string[]
 }
 
 export interface TransportToNext {

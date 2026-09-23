@@ -22,6 +22,9 @@ from .scoring import distance_km
 LONG_LEG_KM = 25.0
 #: 折返判定：多绕出来的距离超过这个数（公里）才算浪费
 DETOUR_KM = 3.0
+#: 绕行判定：实际里程 / 直线距离 超过这个倍数（且实际里程本身够长）才算
+DETOUR_RATIO = 1.5
+DETOUR_MIN_ROAD_KM = 4.0
 
 
 def leg_distances(pois: List[POI]) -> List[Optional[float]]:
@@ -94,6 +97,50 @@ def day_route_stats(pois: List[POI]) -> Dict[str, Any]:
         "total_km": total_distance_km(pois),
         "long_legs": long_legs(pois),
         "backtracks": backtracks(pois),
+    }
+
+
+def day_route_stats_from_day(day: Any) -> Dict[str, Any]:
+    """单日路线体检（**优先用真实驾车里程**）。
+
+    与 day_route_stats 的区别：这里从时间轴上取 transport_to_next.distance_km——
+    那是 planner 查真实路线时顺手存下的，不额外发请求。
+
+    为什么必须用真实里程：直线距离在海湾／半岛地形会严重低估。
+    实测平潭一条三天线路：直线上报 30.3 公里，实际驾车 48.8 公里，
+    有 18.5 公里被藏了起来——"这段到底要跑多久"完全失真。
+
+    「折返」仍用直线：它比较的是 A→B→C 与 A→C 三段，三段必须同一种度量，
+    混用真实里程和直线会把"路本来就绕"误判成折返。
+    真正的"绕行"单独由 detours 报出来，语义更清楚。
+    """
+    items = list(getattr(day, "timeline", []) or [])
+    pois = [it.poi for it in items]
+
+    total = 0.0
+    long_found: List[Tuple[str, str, float]] = []
+    detour_found: List[Tuple[str, str, float, float]] = []
+
+    for i in range(len(items) - 1):
+        a, b = items[i].poi, items[i + 1].poi
+        straight = distance_km(a, b)
+        trans = getattr(items[i], "transport_to_next", None)
+        road = float(getattr(trans, "distance_km", 0) or 0)
+        km = road if road > 0 else straight
+        if km:
+            total += km
+        if km and km >= LONG_LEG_KM:
+            long_found.append((a.name, b.name, round(km, 1)))
+        if road > 0 and straight and straight > 0:
+            ratio = road / straight
+            if ratio >= DETOUR_RATIO and road >= DETOUR_MIN_ROAD_KM:
+                detour_found.append((a.name, b.name, round(straight, 1), round(road, 1)))
+
+    return {
+        "total_km": round(total, 1),
+        "long_legs": long_found,
+        "backtracks": backtracks(pois),
+        "detours": detour_found,
     }
 
 

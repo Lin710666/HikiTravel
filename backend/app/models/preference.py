@@ -36,6 +36,12 @@ class UserPreference(BaseModel):
     # 不使用「默认 1 天 / 默认 1000 元」这类静默参数（会悄悄改变规划结果）。
     duration_days: int = Field(default=0, ge=0, le=30, description="游玩天数（0 表示未填写）")
     destination: str = Field(default="", description="目的地城市（规划的目标城市，必填）")
+    # 前端从下拉里选定具体地点时会带上高德 adcode。adcode 是高德的主键，
+    # 比名字可靠：既不受「省 + 地名」写法影响，也不存在「平潭县 / 平潭镇」
+    # 这类同名歧义——用户选的是哪一个就解析成哪一个。
+    destination_adcode: str = Field(
+        default="", description="目的地 adcode（来自下拉选择，可空）"
+    )
     # None 表示「用户没有填写」：不静默替他选一种交通方式（会直接影响预算里的往返大交通）
     transportation: Optional[Literal["自驾", "高铁", "飞机", "本地"]] = Field(
         default=None, description="往返交通方式（None 表示未填写）"

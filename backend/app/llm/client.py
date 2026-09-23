@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from ..config import settings
+from ..http_local import trust_env_for
 
 
 class LLMClient:
@@ -20,13 +21,17 @@ class LLMClient:
         self.base_url = settings.ollama_base_url
         self.model = settings.ollama_model
         self.timeout = settings.ollama_timeout
+        # Ollama 默认在本机：本机请求必须绕过系统代理（见 http_local 的说明）
+        self._trust_env = trust_env_for(self.base_url)
         #: 最近一次调用的失败原因，供上层拼进用户提示
         self.last_error: str = ""
 
     def available(self) -> bool:
         """探测 Ollama 服务是否可用。"""
         try:
-            resp = httpx.get(f"{self.base_url}/api/tags", timeout=2.0)
+            resp = httpx.get(
+                f"{self.base_url}/api/tags", timeout=2.0, trust_env=self._trust_env
+            )
             return resp.status_code == 200
         except httpx.HTTPError:
             return False
@@ -68,7 +73,12 @@ class LLMClient:
         if options:
             payload["options"] = options
         try:
-            resp = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=wait)
+            resp = httpx.post(
+                f"{self.base_url}/api/chat",
+                json=payload,
+                timeout=wait,
+                trust_env=self._trust_env,
+            )
             resp.raise_for_status()
             content = resp.json()["message"]["content"]
             return json.loads(content)

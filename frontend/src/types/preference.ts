@@ -13,6 +13,9 @@ export interface UserPreference {
   travelers: Travelers
   duration_days: number
   destination: string
+  // 从下拉里选定具体地点时带上高德 adcode：它是高德的主键，
+  // 后端按它解析，不受「省+地名」写法影响，也没有同名歧义
+  destination_adcode: string
   transportation: Transportation
   preferences: string[]
   must_visit: string[]

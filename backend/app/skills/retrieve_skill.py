@@ -60,6 +60,23 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _photos(item: Dict[str, Any]) -> List[str]:
+    """取高德 POI 的图片地址。
+
+    统一升级成 https：应用可能部署在 https 下，http 图片会被浏览器
+    当成混合内容拦掉（实测该图床两种协议都支持，所以直接换掉更稳）。
+    """
+    out: List[str] = []
+    for photo in item.get("photos") or []:
+        url = photo.get("url") if isinstance(photo, dict) else None
+        if not isinstance(url, str) or not url.startswith("http"):
+            continue
+        out.append(url.replace("http://", "https://", 1))
+        if len(out) >= 4:
+            break
+    return out
+
+
 def _parse_location(loc: str) -> Location:
     """高德返回的 "lng,lat" 字符串 -> Location。"""
     lng, lat = loc.split(",")
@@ -82,6 +99,7 @@ def _to_poi(item: Dict[str, Any], poi_type: str = "景点") -> POI:
         tips=tips,
         price=price,
         rating=rating,
+        photos=_photos(item),
     )
 
 
@@ -140,6 +158,7 @@ def _to_recommendation(item: Dict[str, Any], kind: str) -> POI:
         tier=tier,
         check_in=check_in,
         check_out=check_out,
+        photos=_photos(item),
     )
 
 
@@ -229,7 +248,7 @@ class RetrieveSkill(Skill):
 
         # 把目的地解析成高德认的「区县名 + 城市名」；解析不出来直接抛
         # AmapDestinationError，由 API 层提示用户确认目的地，绝不拿全国结果凑数。
-        city, city_name = self.amap.resolve_region(destination)
+        city, city_name = self.amap.resolve_region(destination, pref.destination_adcode)
         ctx["resolved_region"] = {
             "input": destination,
             "city": city,
@@ -242,7 +261,10 @@ class RetrieveSkill(Skill):
         # 2. 景点 POI：按兴趣分类码搜索，计算综合分（热门程度 + 评分）后排序
         items_by_id: Dict[str, Dict[str, Any]] = {}
         hit_counts: Dict[str, int] = {}
-        for tag in pref.preferences:
+        # 没填兴趣导向就搜全部类别，保证"没选也能出规划"。
+        # 少了这一句，preferences 为空时这个循环一次都不执行，
+        # 结果是规划里一个景点都没有——这也是后端一度把兴趣设成必填的原因。
+        for tag in (pref.preferences or list(PREFERENCE_TYPES.keys())):
             types = PREFERENCE_TYPES.get(tag, "")
             if not types:
                 continue
@@ -290,6 +312,14 @@ class RetrieveSkill(Skill):
                     seen_rids.add(item.get("id"))
                     restaurant_items.append(item)
         dining_options = _tiered(restaurant_items, "餐厅", attractions)
+        # 同样留一份未截断的全量餐厅候选给 planner。
+        # _tiered 每档只留 10 个（界面上的「备选池」够用，但选餐不够用）：
+        # 三天行程要吃 6 顿，再从 20 家里去掉已用过的，后半程几乎没有近的可用。
+        # 实测平潭那份规划：分档池里最后一餐只能选到 16 公里外的店，
+        # 放开全量后能选到 1.7 公里的——差了一个数量级。
+        ctx["dining_pool"] = [
+            _to_recommendation(item, "餐厅") for item in restaurant_items if item.get("location")
+        ]
 
         hotel_items = _search_multi(self.amap, "酒店", city, pages=2)
         seen_hids = {it.get("id") for it in hotel_items}
@@ -299,6 +329,16 @@ class RetrieveSkill(Skill):
                     seen_hids.add(item.get("id"))
                     hotel_items.append(item)
         hotel_options = _tiered(hotel_items, "住宿", attractions)
+        # 另外留一份**未截断**的全量酒店候选，专供 planner 选酒店用。
+        #
+        # 为什么需要它：_tiered 为了让「换一家」能升级/降级，每个价位档只留 10 个，
+        # 而档内排序用的锚点是「全部候选景点」。于是会出现这种情况：
+        # 一家恰好贴近最终活动区的酒店，因为离其他候选景点远而被挤出前 10，
+        # planner 根本看不到它。实测平潭那份规划，全量里有一家离当日活动区
+        # 4.14 公里的民宿，分档后池子里最近的只剩 5.22 公里——近 1.1 公里的选择被丢掉了。
+        ctx["hotel_pool"] = [
+            _to_recommendation(item, "住宿") for item in hotel_items if item.get("location")
+        ]
 
         # 4. 特别想去的景点（必去）：优先复用已搜到的 POI，否则按名称单独搜索；
         #    仍定位不到就保留占位数据（无坐标）并在体检中提示，不让它凭空消失。

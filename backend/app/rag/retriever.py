@@ -15,6 +15,7 @@ from typing import Dict, List, Union
 import httpx
 
 from ..config import settings
+from ..http_local import trust_env_for
 from .repository import get_all_chunks
 
 # 向量可能是稠密 list（Ollama）或稀疏 dict（bigram 兜底）
@@ -65,6 +66,7 @@ class Retriever:
                 f"{settings.ollama_base_url}/api/embeddings",
                 json={"model": settings.ollama_embed_model, "prompt": text},
                 timeout=10.0,
+                trust_env=trust_env_for(settings.ollama_base_url),
             )
             resp.raise_for_status()
             return resp.json().get("embedding")

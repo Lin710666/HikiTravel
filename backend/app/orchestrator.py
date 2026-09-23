@@ -141,8 +141,11 @@ class Orchestrator:
             missing.append("游玩天数")
         if pref.travelers.total < 1:
             missing.append("出行人数（至少 1 人）")
-        if not pref.preferences:
-            missing.append("兴趣导向（人文历史 / 自然风光 / 美食 / 娱乐 至少选一项）")
+        # 兴趣导向**不设为必填**：它只影响"搜哪几类景点"，不是规划能否成立的前提。
+        # 没填时由 RetrieveSkill 搜全部类别（见那边 PREFERENCE_TYPES 的兜底），
+        # 用户拿到的是一份综合推荐，比「因为少选一项就不给生成」有用得多。
+        # 注意这不算"静默替用户做决定"——目的地/天数/人数/预算才是会改变
+        # 规划正确性的关键信息，缺了必须问；兴趣只是筛选范围。
         if pref.budget <= 0:
             missing.append("总预算")
         if missing:

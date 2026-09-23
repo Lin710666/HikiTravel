@@ -190,7 +190,9 @@ class PlannerSkill(Skill):
         groups = day_orders or [
             [it.poi for it in d.timeline if it.poi.type == "景点"] for d in plan.daily_plans
         ]
-        hotels = self._pick_hotels_for_groups(ctx.get("hotel_options", []), groups, issues)
+        hotels = self._pick_hotels_for_groups(
+            ctx.get("hotel_pool") or ctx.get("hotel_options", []), groups, issues
+        )
         days = self._assemble_days(ctx, groups, dates, ctx.get("weather", {}), issues, hotels)
         plan.daily_plans = days
         total, breakdown = self._budget(
@@ -252,7 +254,9 @@ class PlannerSkill(Skill):
             groups.append([])
 
         # 3) 先定酒店：每个区按综合分（评分 + 离当天/次日活动区距离）选一家
-        hotels = self._pick_hotels_for_groups(ctx.get("hotel_options", []), groups, issues)
+        hotels = self._pick_hotels_for_groups(
+            ctx.get("hotel_pool") or ctx.get("hotel_options", []), groups, issues
+        )
 
         # 4) 组装每天：以酒店为起点排路线 + 插餐 + 真实接驳
         dates = [start_date + timedelta(days=i) for i in range(days_n)]
@@ -404,16 +408,21 @@ class PlannerSkill(Skill):
         """每个区先定一家酒店：评分 + 离当天活动区 + 离次日活动区。
 
         最后一晚不需要酒店（当天返程）。候选池为空时如实记录问题，不编造酒店。
+
+        **允许连住同一家**。这里曾经把「前一晚用过的酒店」硬排除掉，
+        结果是每晚强制换店：为了"换一家"，第二晚只能退而求其次选更远的。
+        实测 99 个住宿夜里，有 8 次是本可以在更近的酒店（近 2~4 公里）里选，
+        却只因为它前一夜用过而被迫选远的。
+        现实里同一城市连住同一家才是常态，也不用来回搬行李，
+        所以直接放开，让评分自己决定要不要换——同一家仍然最优就继续住。
         """
         nights = max(len(groups) - 1, 0)
-        used: set = set()
         hotels: List[Optional[POI]] = []
         for i in range(len(groups)):
             if i >= nights:
                 hotels.append(None)
                 continue
-            candidates = [h for h in hotel_pool if h.name not in used] or hotel_pool
-            if not candidates:
+            if not hotel_pool:
                 issues.append(
                     CheckIssue(
                         category="其他",
@@ -425,9 +434,9 @@ class PlannerSkill(Skill):
                 hotels.append(None)
                 continue
             next_group = groups[i + 1] if i + 1 < len(groups) else None
-            best = max(candidates, key=lambda h: hotel_score(h, groups[i], next_group))
-            used.add(best.name)
-            hotels.append(best)
+            hotels.append(
+                max(hotel_pool, key=lambda h: hotel_score(h, groups[i], next_group))
+            )
         return hotels
 
     # ---------------- 与大模型交互 ----------------
@@ -502,7 +511,7 @@ class PlannerSkill(Skill):
         hotels: List[Optional[POI]],
     ) -> List[DailyPlan]:
         pref = ctx["preference"]
-        dining_pool: List[POI] = ctx.get("dining_options", [])
+        dining_pool: List[POI] = ctx.get("dining_pool") or ctx.get("dining_options", [])
         attraction_options: List[POI] = ctx.get("attraction_options", [])
         rag_tips: List[str] = ctx.get("rag_tips", [])
         must_names = {p.name for p in ctx.get("must_visit_pois", [])}
@@ -716,9 +725,12 @@ class PlannerSkill(Skill):
                         )
                     )
                 if leg is not None:
-                    mode, leg_minutes, cost = leg
+                    mode, leg_minutes, cost, leg_km = leg
                     item.transport_to_next = TransportToNext(
-                        mode=mode, duration=f"{leg_minutes}分钟", cost=cost
+                        mode=mode,
+                        duration=f"{leg_minutes}分钟",
+                        cost=cost,
+                        distance_km=leg_km,
                     )
                     cursor += leg_minutes
         return items, cursor, used_meals
@@ -773,14 +785,14 @@ class PlannerSkill(Skill):
             return max(int(d / 4.5 * 60) + 5, 5)
         return max(int(d / 20 * 60) + 5, 8)
 
-    def _transport(self, a: POI, b: POI) -> Optional[tuple[str, int, float]]:
-        """两点间交通：返回 (方式, 分钟, 费用)；坐标缺失返回 None。"""
+    def _transport(self, a: POI, b: POI) -> Optional[tuple[str, int, float, float]]:
+        """两点间交通：返回 (方式, 分钟, 费用, 公里)；坐标缺失返回 None。"""
         if not (has_location(a) and has_location(b)):
             return None
         dist = distance_km(a, b)
         if dist is not None and dist < WALK_THRESHOLD_KM:
             minutes = max(int(dist / 4.5 * 60) + 5, 5)
-            return "步行", minutes, 0.0
+            return "步行", minutes, 0.0, round(dist, 2)
         # 长距离走高德真实驾车路线（真实耗时 + 打车费）
         data = self.amap.get_route(
             f"{a.location.lng},{a.location.lat}",
@@ -791,7 +803,9 @@ class PlannerSkill(Skill):
         path = route["paths"][0]
         duration_sec = int(path.get("duration", 0))
         cost = float(route.get("taxi_cost") or 0)  # 打车费在 route.taxi_cost
-        return "打车", max(duration_sec // 60, 1), round(cost, 1)
+        # 里程就在同一个响应里，顺手带出去给体检用，不额外发请求
+        road_km = round(float(path.get("distance") or 0) / 1000.0, 2)
+        return "打车", max(duration_sec // 60, 1), round(cost, 1), road_km
 
     @staticmethod
     def _plan_b(weather: Weather, attractions: List[POI], used_names: set) -> str:

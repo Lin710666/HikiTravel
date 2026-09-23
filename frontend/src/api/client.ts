@@ -179,6 +179,46 @@ export interface PlanSummary {
   created_at: string
 }
 
+/** 目的地输入提示的一个候选 */
+export interface PlaceTip {
+  name: string
+  district: string
+  adcode: string
+  kind: '行政区' | '地点'
+  lat: number | null
+  lng: number | null
+}
+
+/** 目的地输入提示：由后端代理高德，Key 不出现在浏览器 */
+export async function autocompletePlaces(
+  q: string,
+  signal?: AbortSignal,
+): Promise<PlaceTip[]> {
+  const res = await fetch(`${BASE}/places/autocomplete?q=${encodeURIComponent(q)}`, { signal })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new ApiError(
+      (data as { detail?: string }).detail || `候选获取失败 (${res.status})`,
+      'http',
+      res.status,
+    )
+  }
+  return res.json()
+}
+
+/** 交互地图（高德 JS API）的运行时配置。未配置时 enabled=false，前端退回静态地图 */
+export interface MapConfig {
+  enabled: boolean
+  key: string
+  security_code: string
+}
+
+export async function fetchMapConfig(signal?: AbortSignal): Promise<MapConfig> {
+  const res = await fetch(`${BASE}/map/config`, { signal })
+  if (!res.ok) throw new ApiError('获取地图配置失败', 'http', res.status)
+  return res.json()
+}
+
 // 历史计划列表
 export async function listPlans(): Promise<PlanSummary[]> {
   const res = await fetch(`${BASE}/plans`)
