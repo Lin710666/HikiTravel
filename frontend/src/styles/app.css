@@ -459,6 +459,58 @@ textarea {
   color: var(--text-3);
 }
 
+/* ---------------- 必去景点选择器 ---------------- */
+.mv {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+}
+.mv__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mv__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 980px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+/* 下拉选定 = 坐标已锁定，后端不会再按名字猜（手输的条目不点亮） */
+.mv__chip.is-pinned {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.mv__pin {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.mv__x {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.mv__x:hover:not(:disabled) {
+  color: var(--danger);
+}
+.mv__x:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -752,10 +804,25 @@ textarea {
 }
 .tl {
   display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
+  /* 第三列放实拍图：auto 宽，没有图（或图挂了返回 null）时自动收成 0 宽，
+     不会在卡片右侧留下一块空白 */
+  grid-template-columns: 86px minmax(0, 1fr) auto;
   gap: 16px;
   padding: 16px 0;
   border-top: 1px solid var(--hairline);
+}
+.tl__thumb {
+  flex: none;
+  width: 104px;
+  align-self: start;
+}
+.tl__thumb img {
+  display: block;
+  width: 104px;
+  height: 78px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--surface-2);
 }
 .tl:first-child {
   border-top: 0;
@@ -792,6 +859,13 @@ textarea {
   padding: 8px 11px;
   border-radius: 9px;
   background: var(--surface-2);
+  max-width: 66ch;
+}
+.tl__meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+  margin: 6px 0 0;
   max-width: 66ch;
 }
 .tl__foot {
@@ -1338,6 +1412,11 @@ textarea {
   display: flex;
   gap: 14px;
   margin-top: 8px;
+}
+.issue__hint {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-3);
 }
 
 /* ---------------- 进度 / 空状态 / 提示 ---------------- */

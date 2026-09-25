@@ -2,7 +2,7 @@
 
 包含时间轴、交通接驳、实时天气、备选方案（Plan B）、预算明细等字段。
 """
-from typing import Any, List, Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,16 @@ class POI(BaseModel):
     # 高德 POI 检索会带图片（store.is.autonavi.com/showpic/...），
     # 供地图悬停卡片展示。旧数据没有这个字段，默认空列表。
     photos: List[str] = Field(default_factory=list, description="POI 图片 URL（已统一为 https）")
+    # 下面两个字段以前没存，白白浪费了高德已经给我们的信息：
+    #   open_time：营业时间（如 10:00-22:00）。实测 25/25 家餐厅都有，
+    #              而我们曾把晚餐排在 17:30，那家店的营业时间是 10:30-17:30——
+    #              正好在关门那一刻开始吃。存下来才能校验。
+    #   tags：招牌菜与标签（高德 keytag + atag）。实测 19/20 家餐厅都有，
+    #         例如"辣炒螃蟹、海肠捞饭、老平潭洋烧排、大排档"。
+    #         它既能给用户看，也能用来**统计出这座城市的本地特色**（零人工）。
+    open_time: str = Field(default="", description="营业时间，如 10:00-22:00（可空）")
+    tags: List[str] = Field(default_factory=list, description="招牌菜/标签（来自高德 keytag + atag）")
+    cuisine: str = Field(default="", description="菜系（高德 type 的第三级，如 海鲜酒楼）")
 
 
 class TransportToNext(BaseModel):
@@ -90,20 +100,6 @@ class BudgetBreakdown(BaseModel):
     hotel: float = Field(default=0, description="住宿")
 
 
-class Conflict(BaseModel):
-    """需求矛盾检测结果（供前端给用户选择是否采纳建议）。
-
-    设计原则：系统只「检测 + 建议」，不擅自替用户修改画像。
-    例如「老人 + 特种兵」会给出建议，但用户仍可坚持特种兵。
-    """
-
-    id: str = Field(description="冲突类型标识")
-    message: str = Field(description="冲突提示语")
-    suggestion: str = Field(description="调整建议")
-    field: Optional[str] = Field(default=None, description="可自动调整的字段名（None 表示仅提示）")
-    suggested_value: Optional[Any] = Field(default=None, description="建议值")
-
-
 class CheckIssue(BaseModel):
     """规划体检（CheckSkill）发现的一条问题。
 
@@ -111,7 +107,9 @@ class CheckIssue(BaseModel):
     而不是在后台悄悄重排——用户有权知道系统改了什么、为什么改。
     """
 
-    category: str = Field(description="问题类型：路径 / 地点 / 重复 / 覆盖 / 时间 / 预算 / 其他")
+    category: str = Field(
+        description="问题类型：地点真实性 / 地点 / 路径 / 重复 / 覆盖 / 时间 / 预算 / 其他"
+    )
     severity: Literal["high", "medium", "low"] = Field(default="medium", description="严重程度")
     message: str = Field(description="问题描述")
     suggestion: str = Field(default="", description="给用户的修改建议")
@@ -138,7 +136,6 @@ class TravelPlan(BaseModel):
     attraction_options: List[POI] = Field(default_factory=list, description="景点备选池（供用户编辑时换景点）")
     travelers: int = Field(default=1, description="出行人数（供前端预算实时重算）")
     user_budget: Optional[float] = Field(default=None, description="用户输入的总预算（用于结余/超出对比）")
-    conflicts: List[Conflict] = Field(default_factory=list, description="需求矛盾检测结果（用户可选择是否采纳建议）")
     checks: Optional[PlanCheck] = Field(default=None, description="规划体检结果（CheckSkill）")
     # 生成这份规划时用的画像：随规划一起返回并入库，用户不满意时可以直接在此基础上
     # 用对话提新要求（"把第二天换成室内""预算压到 2500"），不用重新填表

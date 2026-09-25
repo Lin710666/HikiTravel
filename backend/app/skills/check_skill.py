@@ -1,22 +1,28 @@
 """Skill4：规划体检与定向修复。
 
-流程（检查 → 优化 → 再判断 → 必要时重新生成）：
-1. **确定性路线体检**：用真实坐标算每天的总移动距离、折返、超长单段——
-   这类问题不用问大模型，算就是了；
+流程（检查 → 优化 → 对账 → 再判断 → 必要时重新生成）：
+1. **确定性路线体检**：用真实坐标与真实里程算每天的总移动距离、折返、超长单段、
+   异常绕行——这类问题不用问大模型，算就是了；
 2. **定向优化**：按最近邻重排每天的景点顺序（从当天起点出发），
    然后用和首次生成同一套逻辑重建时间轴、餐厅、酒店与预算。
    **不调用大模型**，所以是秒级、可复现的；只换顺序，不换景点；
-3. **大模型审查**：把最终这版规划喂回大模型，让它判断通盘合理性
-   （路径是否合理、点位是否都在目的地、时间与预算是否匹配等）；
-4. **带反馈重新生成**：只有在"硬伤"（系统判定的严重问题、优化后仍然存在的
-   长距离挪动）还没解决时，才带着这些问题重新生成一版（最多一次）。
+3. **预算对账**：估算总花费 vs 用户填的预算，超了就明说（一行减法，同样不问大模型）；
+4. **大模型审查**：只审**代码算不出来**的三类语义问题——点位到底是不是个景点、
+   有没有跟用户原话冲突、有没有偏离用户填的兴趣。
+   路线顺序 / 距离 / 折返 / 预算分项 / 景点重复 / 时间重叠这些系统已经算过，明确不让它重复报告：
+   实测让 7B 模型把全部七项都审一遍，它主要在复述代码的结论，还会编出"必去景点没排进去"
+   这种与事实相反的结论，需要上百行过滤器去兜；
+5. **带反馈重新生成**：只有在"硬伤"（系统判定的严重问题）还没解决时，
+   才带着这些问题重新生成一版（最多一次）。
    ——如果直接整份作废重排，既慢又不稳定，所以这里只修该修的，且只修一次。
 
 体检结论只报告、不悄悄改；凡是系统自动改过的（路线顺序、重新生成），
 都会在结论里明确写出来给用户看。
 """
 import json
+import logging
 import re
+import time
 from typing import Any, List, Optional
 
 from ..llm.client import LLMClient
@@ -26,8 +32,11 @@ from .errors import LLMOutputError, LLMUnavailableError
 from .route import day_route_stats_from_day, order_nearest
 from .scoring import distance_km, has_location
 
-_SYSTEM_PROMPT = """你是一个严格的旅游行程审稿人。下面给你一份已经排好的行程规划，
-请逐项审查它是否合理，并只输出一个合法 JSON 对象（不要输出解释文字、不要用代码块）。
+logger = logging.getLogger("travelplanner.check")
+
+_SYSTEM_PROMPT = """你是一个旅游行程审稿人。下面给你一份已经排好的行程规划，
+请只挑出**系统算不出来、必须靠理解语义**的问题，并只输出一个合法 JSON 对象
+（不要输出解释文字、不要用代码块）。
 
 输出结构：
 {
@@ -35,7 +44,7 @@ _SYSTEM_PROMPT = """你是一个严格的旅游行程审稿人。下面给你一
   "summary": "一句话体检结论",
   "issues": [
     {
-      "category": "路径 | 地点 | 重复 | 覆盖 | 时间 | 预算 | 其他",
+      "category": "地点真实性 | 地点 | 路径 | 重复 | 覆盖 | 时间 | 预算 | 其他",
       "severity": "high | medium | low",
       "message": "问题是什么（说人话，直接指出哪天哪个点）",
       "suggestion": "建议用户怎么处理"
@@ -43,23 +52,27 @@ _SYSTEM_PROMPT = """你是一个严格的旅游行程审稿人。下面给你一
   ]
 }
 
-重点审查以下方面，发现问题就要写进 issues：
-1. 路径合理性：同一天内的点位是否来回折返、走了冤枉路？是否把相距很远的景点硬塞在同一天？
-2. 地点正确性：行程里的景点、餐厅、酒店是否都在用户填写的目的地范围内？有没有明显属于其他城市的地名？
-3. 重复：有没有景点被安排在两天里重复出现？餐厅/酒店是否全程重复使用？
-4. 覆盖：用户点名"必去"的景点是否全部出现在行程里？
-5. 时间：每天时间轴是否连贯、有没有时间重叠、有没有过满（连续 12 小时以上）或过空？
-6. 预算：预算分项与行程是否匹配，有没有明显漏项？
+只审以下三类：
+1. 地点真实性：行程里的景点/餐厅/酒店**是不是真的景点**？有没有把停车场、
+   海湾／海滩这类自然地名、电影院、写字楼、商铺当成景点排进去？
+   有没有明显属于别的城市的点位？（category 用「地点真实性」）
+2. 与用户原话的冲突（**只在给了「用户原话」时判**）：原话里说过的要求有没有被违反？
+   例如「不想爬山」却排了要爬的景区、「带老人」却一天排了四个点、
+   「想吃海鲜」却全是快餐。有冲突才写，没冲突就什么都别写。（category 用「其他」）
+   **这条只判景点，不判餐厅和酒店**；而且必须是"确实需要爬山/上山的景区"
+   （名字里有山、峰、索道、栈道、缆车这类），**不能因为店名里带个「山」字就报**
+   （例如餐厅「南山人家」不是爬山的地方）。没把握就不要写。
+3. 与画像的匹配度：整份行程有没有偏离用户填的兴趣与节奏（例如选了自然风光，
+   行程里却全是商场景点）。（category 用「其他」）
+
+以下这些**不用你判**，系统已经按真实坐标与真实里程算过了，重复报告只会干扰用户：
+路线顺序、单段距离、当天总里程、折返、绕行、预算分项、必去景点是否漏排、
+景点是否重复、时间轴是否重叠、餐厅是否触犯饮食禁忌。这些即使你觉得有问题也不要写。
 
 补充要求（很重要，避免误报）：
 - 只根据上面给出的数据下结论，不要臆测不存在的日期、景点或行程
   （例如行程只有 3 天，就不要提"第 5 天"）。
-- 预算分项已经给出：某项金额大于 0 时，不要写"未包含该项费用"。
-- 景点顺序已经由系统按真实坐标做过最近邻优化，所以不要凭感觉说"顺序不合理"；
-  确实发现点位之间距离过远再指出，并说明具体是哪两个点。
-- 距离问题以数据为准：每天已经给出「当日移动距离(公里)」，每段也给了交通方式与耗时。
-  只有出现「单段耗时超过 60 分钟」「当天移动距离超过 40 公里」「同一段路线往返两次」
-  这三种情况之一时，才提示路线问题；15 分钟以内的步行不要提示。
+- 没有把握就不要写：宁可少写一条，也不要写一条用户一看就是错的。
 - 描述问题时引用行程里的具体日期与名称，便于用户核对。
 - 同一个问题只写一条，不要换着说法重复列。
 - 输出尽量精简：issues 最多 3 条，每条 message 一句话讲清"哪天、哪个点、什么问题"。
@@ -97,7 +110,19 @@ class CheckSkill(Skill):
         # 1) 确定性路线优化 + 只报告优化后仍存在的问题
         issues: List[CheckIssue] = list(ctx.get("plan_issues", []))
         issues += self._optimize_routes(ctx, plan)
-        issues += self._route_issues(plan)
+        issues += self._route_issues(plan, ctx)
+
+        # 路线优化是纯计算（秒级），优化完先把这一版发出去：
+        # 用户能看到"顺序已经理顺了"，而不用等大模型审查跑完。
+        self._emit(
+            ctx,
+            {
+                "type": "plan",
+                "stage": "路线已优化",
+                "note": "已按真实坐标理顺当天顺序，正在做整体合理性审查",
+                "plan": plan.model_dump(),
+            },
+        )
 
         # 2) 硬伤（系统判定 / 路线）未解决 → 带着问题重新生成一次，再体检一遍
         if self.max_regenerate > 0 and self.planner is not None and self._has_high(issues):
@@ -105,7 +130,7 @@ class CheckSkill(Skill):
             if outcome is not None:
                 plan, regen_notes = outcome
                 issues = list(ctx.get("plan_issues", [])) + regen_notes
-                issues += self._route_issues(plan)
+                issues += self._route_issues(plan, ctx)
                 issues.append(
                     CheckIssue(
                         category="其他",
@@ -115,8 +140,24 @@ class CheckSkill(Skill):
                     )
                 )
 
+        # 2.5) 预算对账：用户填了预算就把估算和它比一比。
+        #      这是确定性判断（一行减法），不该指望大模型想起来提一句。
+        issues += self._budget_issues(plan)
+
         # 3) 大模型审查（审的是最终这一版规划）
-        issues += self._llm_review(plan, ctx)
+        #    体检是**附加的质量报告**：它失败不该作废已经排好的行程。
+        #    所以这里把失败如实写进问题清单，而不是抛出去让整单变成错误。
+        try:
+            issues += self._llm_review(plan, ctx)
+        except LLMOutputError as exc:
+            issues.append(
+                CheckIssue(
+                    category="其他",
+                    severity="low",
+                    message=f"规划体检未能完成：{exc}",
+                    suggestion="这份行程本身是完整可用的；可以再点一次「生成」重试体检。",
+                )
+            )
 
         # 摘要自己生成：大模型的原话可能提到已被事实校验过滤掉的误报，会自相矛盾
         if issues:
@@ -138,13 +179,21 @@ class CheckSkill(Skill):
 
         day_orders: List[List] = []
         changed: List[tuple[int, float, float]] = []  # (第几天, 原距离, 优化后距离)
+        metrics = ctx.get("metrics")  # 规划阶段预热好的真实驾车距离
         for i, day in enumerate(plan.daily_plans):
             attractions = [it.poi for it in day.timeline if it.poi.type == "景点"]
             # 当天起点：前一晚住的酒店（第一天没有则用现有顺序的第一个点）
             start = plan.daily_plans[i - 1].hotel if i > 0 else None
-            reordered = order_nearest(attractions, start) if len(attractions) > 1 else attractions
-            before_km = self._distance_km_of(attractions, start)
-            after_km = self._distance_km_of(reordered, start)
+            # 当天终点：当晚酒店。判断"有没有更省路"时，前后必须用同一条完整链
+            # （起点 → 景点 → 当晚酒店），否则会把"省了景点间、却多跑了回酒店那段"当成优化
+            end = day.hotel
+            reordered = (
+                order_nearest(attractions, start, end, metrics)
+                if len(attractions) > 1
+                else attractions
+            )
+            before_km = self._distance_km_of(attractions, start, end, metrics)
+            after_km = self._distance_km_of(reordered, start, end, metrics)
             # 只在真的更省路时才换顺序，并用同一个口径记录前后距离
             if [p.name for p in reordered] != [p.name for p in attractions] and after_km < before_km:
                 changed.append((i, before_km, after_km))
@@ -172,23 +221,58 @@ class CheckSkill(Skill):
         ]
 
     @staticmethod
-    def _distance_km_of(pois: List, start) -> float:
-        """从起点出发走完这些点的总距离（用于判断重排到底有没有更省路）。"""
+    def _distance_km_of(pois: List, start, end=None, metrics=None) -> float:
+        """走完「起点 → 这些点 → 终点」的总距离（用于判断重排有没有更省路）。"""
         from .route import total_distance_km
 
-        return total_distance_km(([start] if start is not None else []) + list(pois))
+        chain = ([start] if start is not None else []) + list(pois)
+        if end is not None:
+            chain = chain + [end]
+        return total_distance_km(chain, metrics)
 
     @staticmethod
     def _day_points(day) -> List:
         """当天时间轴上的点（景点 + 餐厅），用于算移动距离。"""
         return [it.poi for it in day.timeline]
 
-    def _route_issues(self, plan: TravelPlan) -> List[CheckIssue]:
-        """报告优化后仍然存在的路线问题（长距离挪动、折返、绕行）。"""
+    @staticmethod
+    def _budget_issues(plan: TravelPlan) -> List[CheckIssue]:
+        """预算对账：估算总花费 vs 用户填的预算（确定性，不问大模型）。
+
+        为什么值得单独判：预算是用户亲口给的硬约束。实测杭州 3 天那份规划
+        估算 3892 元、用户填的是 2000 元，之前的体检一个字都没提——
+        只有本地模型偶尔想起来才会说一句，说不说全看运气。
+        """
+        budget = plan.user_budget or 0
+        total = plan.total_budget_estimate or 0
+        if budget <= 0 or total <= budget:
+            return []
+        over = total - budget
+        return [
+            CheckIssue(
+                category="预算",
+                severity="medium",
+                message=(
+                    f"估算总花费 {total:.0f} 元，超出你填的预算 {budget:.0f} 元"
+                    f" 共 {over:.0f} 元（{over / budget:.0%}）。"
+                ),
+                suggestion="可以把住宿换成更低的价位档、减少一个景点，或改坐高铁 / 缩短一天；"
+                "预算明细在右下角，改完会实时重算。",
+            )
+        ]
+
+    def _route_issues(self, plan: TravelPlan, ctx: dict[str, Any] = None) -> List[CheckIssue]:
+        """报告优化后仍然存在的路线问题（长距离挪动、折返、绕行）。
+
+        绕行判定用**本趟规划自己估出来的绕行系数**当基线（见 route.py 的说明），
+        所以这种地形复杂的城市不会天天报"这段绕了 1.6 倍"。
+        """
         issues: List[CheckIssue] = []
+        metrics = (ctx or {}).get("metrics")
+        baseline = float(getattr(metrics, "factor", 1.0) or 1.0)
         for day in plan.daily_plans:
             # 用时间轴版统计：里程取真实驾车里程，不再是直线距离
-            stats = day_route_stats_from_day(day)
+            stats = day_route_stats_from_day(day, road_baseline=baseline)
             for a, b, km in stats["long_legs"][:2]:
                 issues.append(
                     CheckIssue(
@@ -226,6 +310,21 @@ class CheckSkill(Skill):
     def _has_high(issues: List[CheckIssue]) -> bool:
         return any(i.severity == "high" for i in issues)
 
+    @staticmethod
+    def _emit(ctx: dict[str, Any], event: dict) -> None:
+        """把体检内部的进展播报给 SSE 流。
+
+        约定与 Orchestrator._emit 一致：回调是"观察者"，它出错不该影响生成，
+        所以这里吞掉异常只记日志。
+        """
+        callback = ctx.get("on_event")
+        if callback is None:
+            return
+        try:
+            callback(event)
+        except Exception:  # pragma: no cover - 理论上不该发生
+            logger.warning("体检进度回调失败", exc_info=True)
+
     # ---------------- 带反馈重新生成（最多一次） ----------------
     def _regenerate(
         self, ctx: dict[str, Any], plan: TravelPlan, issues: List[CheckIssue]
@@ -238,6 +337,17 @@ class CheckSkill(Skill):
         if not feedback:
             return None
         old_issues = list(ctx.get("plan_issues", []))
+        # 这一步要重新调用大模型排一版，耗时和大模型规划相当，必须让用户看到
+        self._emit(
+            ctx,
+            {
+                "type": "step",
+                "skill": "regenerate",
+                "label": "按体检结论重排行程",
+                "state": "start",
+            },
+        )
+        started = time.perf_counter()
         try:
             new_plan, new_issues = self.planner.regenerate(ctx, feedback)
         except (LLMOutputError, LLMUnavailableError):
@@ -245,6 +355,17 @@ class CheckSkill(Skill):
             ctx["plan"] = plan
             ctx["plan_issues"] = old_issues
             return None
+        finally:
+            self._emit(
+                ctx,
+                {
+                    "type": "step",
+                    "skill": "regenerate",
+                    "label": "按体检结论重排行程",
+                    "state": "done",
+                    "seconds": round(time.perf_counter() - started, 1),
+                },
+            )
 
         # 新版也做一次确定性路线优化，两版在同一条件下比较
         notes = self._optimize_routes(ctx, new_plan)
@@ -274,9 +395,17 @@ class CheckSkill(Skill):
             {
                 # 只给审查真正需要的字段：提示词越短，本地模型出结论越快
                 "目的地": pref.destination,
-                "必去景点": pref.must_visit,
+                # 用户原话（对话模式才有）。画像字段装不下的诉求——"不想爬山""带老人"
+                # 这类——只有原话里才有；排斥项删掉之后，这条是它们唯一的入口。
+                **(
+                    {"用户原话": (ctx.get("raw_text") or "").strip()}
+                    if (ctx.get("raw_text") or "").strip()
+                    else {}
+                ),
+                "必去景点": [m.name for m in pref.must_visit],
                 "出行人数": pref.travelers.model_dump(),
                 "节奏": pref.pace,
+                "饮食禁忌": pref.dietary_restrictions,
                 "行程天数（不要提到这个范围以外的第 N 天）": len(plan.daily_plans),
                 "日期范围": (
                     f"{plan.daily_plans[0].date} ~ {plan.daily_plans[-1].date}"
@@ -386,6 +515,14 @@ class CheckSkill(Skill):
         planned_names = {
             item.poi.name for day in plan.daily_plans for item in day.timeline
         } | {day.hotel.name for day in plan.daily_plans if day.hotel}
+        #: 用户点名的"必去景点"。同一条高德记录在行程里会用**景点库里的正式名**
+        #: （用户写"长江澳"，行程里是"平潭国际旅游岛·长江澳"），所以证伪
+        #: "必去景点没排进去"这类误报时，要按"名字互相包含"来比，不能只比全等。
+        must_names = [
+            entry.name
+            for entry in (plan.user_preference.must_visit if plan.user_preference else [])
+            if entry.name
+        ]
         missing_claims = ("未安排", "没有安排", "未被安排", "未出现", "没排", "遗漏")
         # 事实四：行程里各点的真实坐标（用于核对"相距 XX 公里"这类说法）
         located = {
@@ -425,10 +562,18 @@ class CheckSkill(Skill):
                 if mentioned and max(mentioned) < 2.0:
                     continue
             # 说某个点"没被安排"，但那个点明明就在行程里 → 矛盾
-            if any(k in text for k in missing_claims) and any(
-                len(name) >= 2 and name in text for name in planned_names
-            ):
-                continue
+            if any(k in text for k in missing_claims):
+                if any(len(name) >= 2 and name in text for name in planned_names):
+                    continue
+                # 换了个名字的同一处景点：问题里点名"长江澳"，行程里是
+                # "平潭国际旅游岛·长江澳" → 也属于"明明排了却说没排"
+                if any(
+                    must in text
+                    and any(must in name or name in must for name in planned_names)
+                    for must in must_names
+                    if len(must) >= 2
+                ):
+                    continue
             mentioned = [name for name in located if name in text]
             # 说"距离 XX 公里"，但按真实坐标算差得太远 → 矛盾（例如把 3 公里的两点说成 40 公里）
             if "公里" in text and len(mentioned) >= 2:

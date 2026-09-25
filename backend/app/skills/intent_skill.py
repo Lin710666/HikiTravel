@@ -11,6 +11,7 @@
 import json
 from typing import Any, Optional
 
+from ..config import settings
 from ..llm.client import LLMClient
 from ..models.preference import UserPreference
 from .base import Skill
@@ -27,7 +28,6 @@ _SCHEMA_HINT = """{
   "pace": "悠闲|适中|特种兵",
   "transportation": "自驾|高铁|飞机|本地",
   "dietary_restrictions": [],
-  "avoidances": [],
   "start_date": "YYYY-MM-DD 或空字符串",
   "departure_time": "HH:MM"
 }"""
@@ -45,10 +45,12 @@ _SYSTEM_PROMPT = f"""你是一个旅游需求结构化助手。请从用户的�
    「想去 / 必去 / 一定要去 / 点名要去 / 特别想去 / 顺便打卡」的**具体景点名**，
    都要逐个完整列进数组，一个都不能漏，也不要合并同类项。
    例如「想去雷峰塔和西湖，顺便看看灵隐寺」→ ["雷峰塔", "西湖", "灵隐寺"]。
+   每项只需要写**名字**（字符串），不要编造坐标、adcode 等你没有的信息。
    用户没有点名具体景点时留空数组，不要编造景点名。
 3. preferences（兴趣导向）：取值只能是 ["人文历史", "自然风光", "美食", "娱乐"] 的子集。
-   用户明确表达兴趣时按原意填；用户没有表达时，请结合目的地与同行人特征
-   推断 1~3 个最合适的方向填进去（这一项不要留空）。
+   用户明确表达兴趣时按原意填；**用户没有表达时留空数组 []**，
+   不要推断、不要默认填哪几项——系统会把「空 = 未填写」当作「全部类别都检索」，
+   这样才能既拿到完整推荐，又不会让系统替你认领一个你从没提过的兴趣。
 4. travelers / duration_days / budget：用户没说就填 0（或 0 人），**不要替用户编造**。
    「情侣 / 夫妻 / 两个人」= adults 2；「带老人」= elderly 至少 1；「带孩子」= children 至少 1。
    注意：除非用户明确说是"帮别人规划 / 替我爸妈安排"，否则**用户本人也是同行人**，
@@ -56,8 +58,7 @@ _SYSTEM_PROMPT = f"""你是一个旅游需求结构化助手。请从用户的�
 5. pace（节奏）：用户说了按原意填；用户没说时，结合同行人推断
    （有老人或幼儿倾向「悠闲」，年轻人结伴且强调多玩可判为「特种兵」），否则用「适中」。
 6. dietary_restrictions（饮食禁忌）：如「海鲜过敏」「清真」「素食」「不吃辣」等。
-7. avoidances（极其讨厌的项目）：如「爬山」「排队」「网红打卡」等。
-8. 其余未提及的字段用空字符串 / 空数组，不要编造。
+7. 其余未提及的字段用空字符串 / 空数组，不要编造。
 
 只输出 JSON。"""
 
@@ -72,13 +73,14 @@ _REVISION_PROMPT = """你是一个旅游需求修订助手。用户已经有一�
 3. 用户新要求里没提到的字段**保持原值**，不要顺手改。
 4. 常见的修改意图请这样落到字段上：
    - "预算压到 2500 / 控制在 3000 以内" → 改 budget；
-   - "不要爬山 / 别安排排队的地方" → 加到 avoidances；
    - "有老人，别太赶 / 想悠闲一点" → 改 pace（必要时也补 travelers.elderly）；
    - "带小孩 / 加一个人" → 改 travelers；
-   - "换成室内 / 少走户外" → 加到 avoidances 或调整 preferences；
    - "想去 XX / 一定要去 XX" → 加到 must_visit；
    - "改成 4 天 / 多玩一天" → 改 duration_days；
    - "坐高铁去 / 改成自驾" → 改 transportation。
+   - must_visit 里的每一项都有 name / adcode / lat / lng：
+     已有的项**连同 adcode、lat、lng 一起原样保留**（不要只留名字）；
+     新增的项只写 name 即可，其余字段留空。
    - "想早点出发 / 8 点半出门" → 改 departure_time（HH:MM）；
    - "晚上想早点回酒店 / 9 点前回酒店" → 改 return_hotel_time（HH:MM）。
 5. 用户是在已有规划基础上提要求，不要凭空重写整个需求。
@@ -94,6 +96,9 @@ class IntentSkill(Skill):
 
     def __init__(self, llm: Optional[LLMClient] = None):
         self.llm = llm or LLMClient()
+        # 抽取是"照着说明填空"，对模型能力的要求低于规划与体检，
+        # 因此允许单独指定一个更小的模型来提速（留空 = 与规划同款）。
+        self.model = settings.ollama_intent_model or ""
 
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:
         # 表单模式：上游已经给出结构化画像，不需要再做语言解析
@@ -119,7 +124,10 @@ class IntentSkill(Skill):
         """调用大模型抽取画像；失败即报错，不再用规则兜底。"""
         # 温度 0：抽取任务要的是稳定复现，不需要发挥
         data = self.llm.chat_json(
-            _SYSTEM_PROMPT, raw, options={"temperature": 0, "num_ctx": 4096}
+            _SYSTEM_PROMPT,
+            raw,
+            options={"temperature": 0, "num_ctx": 4096},
+            model=self.model or None,
         )
         if data is None:
             raise LLMOutputError(
@@ -157,7 +165,10 @@ class IntentSkill(Skill):
             ensure_ascii=False,
         )
         data = self.llm.chat_json(
-            _REVISION_PROMPT, payload, options={"temperature": 0, "num_ctx": 4096}
+            _REVISION_PROMPT,
+            payload,
+            options={"temperature": 0, "num_ctx": 4096},
+            model=self.model or None,
         )
         if data is None:
             raise LLMOutputError(
@@ -166,6 +177,29 @@ class IntentSkill(Skill):
                 + "。请重试。"
             )
         try:
-            return UserPreference.model_validate(data)
+            return self._keep_must_visit_locations(current, UserPreference.model_validate(data))
         except Exception as exc:
             raise LLMOutputError(f"大模型返回的画像字段不符合约定（{exc}）。请重试。") from exc
+
+    @staticmethod
+    def _keep_must_visit_locations(
+        current: UserPreference, revised: UserPreference
+    ) -> UserPreference:
+        """把原画像里必去景点的坐标补回修订结果。
+
+        修订提示词要求模型"原样保留未提到的字段"，但坐标是嵌套字段，
+        小模型很容易在重写 JSON 时只留下名字。用户明明在下拉里选过具体地点，
+        丢坐标就等于退回到按名字猜，所以这里做一次确定性的回填。
+        """
+        by_name = {m.name: m for m in current.must_visit if m.has_location}
+        if not by_name:
+            return revised
+        for item in revised.must_visit:
+            if item.has_location:
+                continue
+            origin = by_name.get(item.name)
+            if origin is not None:
+                item.adcode = origin.adcode
+                item.lat = origin.lat
+                item.lng = origin.lng
+        return revised

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { PlanStep } from '../api/client'
 
 /**
  * 本地 7B 生成一整份规划的典型耗时（秒）。
@@ -11,12 +12,23 @@ const ESTIMATED_TOTAL_SECONDS = 180
 
 interface Props {
   elapsed: number
+  /** 实时进度：后端每完成一个环节推一条，按执行顺序排列 */
+  steps: PlanStep[]
+  /** 行程已可先看、但体检还在跑时的说明（null = 行程还没出来） */
+  stageNote: string | null
   checking: boolean
   onCancel: () => void
   onCheckConnection: () => void
 }
 
-export default function ProgressCard({ elapsed, checking, onCancel, onCheckConnection }: Props) {
+export default function ProgressCard({
+  elapsed,
+  steps,
+  stageNote,
+  checking,
+  onCancel,
+  onCheckConnection,
+}: Props) {
   const [pct, setPct] = useState(0)
 
   /* 超过预估时间后进度条停在 95%，不假装还在推进 */
@@ -26,12 +38,14 @@ export default function ProgressCard({ elapsed, checking, onCancel, onCheckConne
   }, [elapsed])
 
   const remain = Math.max(0, ESTIMATED_TOTAL_SECONDS - elapsed)
+  const planVisible = Boolean(stageNote)
 
   return (
     <div className="card">
       <div className="card__head" style={{ marginBottom: 0 }}>
         <div>
-          <h2 className="card__title">正在生成规划</h2>
+          {/* 行程一旦到手就改标题：用户最想知道的是"我能不能开始看了" */}
+          <h2 className="card__title">{planVisible ? '行程已生成，正在体检' : '正在生成规划'}</h2>
           <div className="meta" style={{ marginTop: 4 }}>
             已等待 {elapsed} 秒
             {elapsed < ESTIMATED_TOTAL_SECONDS
@@ -49,13 +63,30 @@ export default function ProgressCard({ elapsed, checking, onCancel, onCheckConne
         </div>
       </div>
 
+      {/* 实时进度：正在跑的环节有个呼吸点，跑完的显示实际耗时 */}
+      {steps.length > 0 && (
+        <div className="progress__steps">
+          {steps.map((step) => (
+            <span
+              className={`pstep ${step.state === 'done' ? 'is-done' : 'is-run'}`}
+              key={step.skill}
+            >
+              <i className="pstep__dot" />
+              {step.label}
+              {step.state === 'done' && step.seconds != null ? ` · ${step.seconds}s` : ' …'}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="bar" style={{ marginTop: 14 }}>
         <div className="bar__seg" style={{ width: `${pct}%`, background: 'var(--accent)' }} />
       </div>
 
       <p className="meta" style={{ margin: '12px 0 0' }}>
-        本地大模型生成一整份规划通常 1~2 分钟；首次运行需要加载模型、或触发重新生成时会久一些。
-        超过 5 分钟会自动超时，你也可以先取消。
+        {planVisible
+          ? `${stageNote}。下面这版行程已经可以查看，体检结论出来后会自动补上。`
+          : '本地大模型生成一整份规划通常 1~2 分钟；首次运行需要加载模型、或触发重新生成时会久一些。超过 5 分钟会自动超时，你也可以先取消。'}
       </p>
     </div>
   )

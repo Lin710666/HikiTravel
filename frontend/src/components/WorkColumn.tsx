@@ -34,6 +34,28 @@ function poolOf(plan: TravelPlan, type: string): { label: string; list: POI[] } 
   return null
 }
 
+/**
+ * 行程项的实拍图（来自高德 POI 接口，地址已统一成 https）。
+ *
+ * 加载失败就整块返回 null：`.tl` 的第三列是 auto 宽，没有内容时自动收成 0 宽，
+ * 所以图挂了不会在卡片右侧留一块空白（高德图床偶尔会 404）。
+ */
+function PoiThumb({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return null
+  return (
+    <div className="tl__thumb">
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  )
+}
+
 export default function WorkColumn({ planner, notify, day, setDay, focus, setFocus }: Props) {
   const { plan, loading, elapsed, error, retry } = planner
   const { jump, copyKeyword } = useAppJump()
@@ -263,6 +285,16 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
                       {item.poi.tier ? <span className="meta">{item.poi.tier}</span> : null}
                     </h4>
                     {item.poi.description && <p className="tl__desc">{item.poi.description}</p>}
+                    {/* 招牌菜与营业时间：高德本来就给，以前没存也没显示。
+                        有了营业时间，用户一眼能看出"这家晚上还开不开门"。 */}
+                    {((item.poi.tags?.length ?? 0) > 0 || item.poi.open_time || item.poi.cuisine) && (
+                      <p className="tl__meta">
+                        {item.poi.cuisine ? `${item.poi.cuisine}　` : ''}
+                        {item.poi.tags?.slice(0, 4).join('、')}
+                        {item.poi.tags?.length ? '　' : ''}
+                        {item.poi.open_time ? `营业 ${item.poi.open_time}` : ''}
+                      </p>
+                    )}
                     {(item.tips || item.poi.tips) && (
                       <p className="tl__tips">{item.tips || item.poi.tips}</p>
                     )}
@@ -309,6 +341,9 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
                       </span>
                     </div>
                   </div>
+                  {item.poi.photos?.[0] && (
+                    <PoiThumb src={item.poi.photos[0]} alt={item.poi.name} />
+                  )}
                 </li>
                 )
               })}
@@ -424,7 +459,6 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
         <ChecksCard
           plan={plan}
           disabled={loading}
-          onApply={planner.applySuggestions}
           notify={notify}
         />
 
@@ -450,6 +484,8 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
         {loading && (
           <ProgressCard
             elapsed={elapsed}
+            steps={planner.steps}
+            stageNote={planner.stageNote}
             checking={checking}
             onCancel={planner.cancel}
             onCheckConnection={handleCheckConnection}

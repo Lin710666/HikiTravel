@@ -1,9 +1,8 @@
 """Skill2：多源数据获取与检索（数据层）。
 
-调用真实外部 API 与本地 RAG，收集规划所需数据：
+调用真实外部 API，收集规划所需数据：
 - 天气：高德天气 API（实时）
 - 景点 / 餐饮 / 酒店 POI：高德 POI 搜索（实时，含参考票价 biz_ext.cost）
-- 本地知识：RAG 检索器（慢变编辑类知识）
 
 推荐排序（**不是只看评分**，公式与权重集中在 skills/scoring.py）：
 - 景点综合分     = 热门程度分 × 权重 + 评分 × 权重
@@ -14,15 +13,27 @@
   绝不猜一个城市继续算（那样会搜出全国结果，等于给用户假数据）。
 - 门票价 / 酒店房价等时效性数据全部来自 API，本地不硬编码。
 """
+import re
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..models.plan import Location, POI
-from ..rag.retriever import Retriever
 from ..services.amap import AmapClient
 from ..services.weather import WeatherService
+from ..services.web_search import WebSearchClient
 from .base import Skill
+from .authority import match_authority
+from .constraints import DIET_SEARCH_KEYWORDS, restaurant_excluded
+from .geo_gate import GEO_GATE_MIN_CANDIDATES, apply_gate
+from .dedupe import dedupe_attractions, same_spot
 from .errors import MissingRequiredInfoError
-from .scoring import distance_km, option_score, order_attractions, popularity_raw
+from .scoring import (
+    attraction_rank,
+    distance_km,
+    haversine,
+    local_specialty_keywords,
+    option_score,
+    popularity_raw,
+)
 
 # 兴趣导向 -> 高德 POI 分类码（types）。用分类码而非关键词，避免「公园」搜出餐厅、
 # 「博物馆」搜出商场。
@@ -37,13 +48,35 @@ PREFERENCE_TYPES: Dict[str, str] = {
     # 「美食」不产生景点，走独立餐厅检索，避免餐馆混进景点池
 }
 
-# 饮食禁忌 -> 餐厅搜索关键词（用于餐厅推荐时叠加检索，命中的会进入候选池）
-DIET_KEYWORDS: Dict[str, str] = {
-    "清真": "清真餐厅",
-    "素食": "素食",
-    "海鲜": "海鲜",
-    # 「无辣」没有可直接搜的关键词，忽略（不影响候选池）
-}
+#: 「真正是景点」的高德分类码合集，供「必去景点」下拉与解析使用。
+#:
+#: 为什么必须按类型筛：不筛的话，同一个关键词「长江澳」会返回
+#: 「长江澳」（自然地名·海湾海峡，坐标是海湾中心 → 地图上落进海里）、
+#: 以及 3 个停车场（东停车场 / 风车田沙滩停车场 / 地面停车场）。
+#: 实测加上这组分类码之后，同样的词返回的全是风景名胜，评分与实拍图都齐全。
+ATTRACTION_TYPES: str = (
+    "110000|110100|110101|110103|110200|110201|110202|110203|110204|110205"
+    "|110206|110207|110208|110209|140100|140200|140400|140600|140700|140800"
+)
+
+def _filter_diet(pool: List[POI], restrictions: List[str]) -> tuple[List[POI], List[str]]:
+    """按饮食禁忌排除餐厅，返回 (保留的, 被排除的说明)。
+
+    高德不提供"是否清真 / 是否含海鲜"这类属性，只有店名可用，所以做得保守：
+    **命中店名关键词才排除**（宁可少给几家，也不能给过敏的人排海鲜馆）；
+    判不出来的保留，由体检如实说明这个口径。
+    """
+    if not restrictions:
+        return list(pool), []
+    kept: List[POI] = []
+    dropped: List[str] = []
+    for poi in pool:
+        reason = restaurant_excluded(poi.name, restrictions)
+        if reason:
+            dropped.append(f"{poi.name}（{reason}）")
+            continue
+        kept.append(poi)
+    return kept, dropped
 
 
 def _to_rating(value: Any) -> Optional[float]:
@@ -77,6 +110,41 @@ def _photos(item: Dict[str, Any]) -> List[str]:
     return out
 
 
+def _open_time(item: Dict[str, Any]) -> str:
+    """高德营业时间：优先 biz_ext.open_time（如 10:00-22:00），退回 opentime2。"""
+    biz_ext = item.get("biz_ext") or {}
+    for key in ("open_time", "opentime2"):
+        value = biz_ext.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _tags(item: Dict[str, Any]) -> List[str]:
+    """招牌菜与标签：高德 keytag（主标签）+ atag（招牌菜列表），去重去空。"""
+    out: List[str] = []
+    seen: set = set()
+    for field in ("keytag", "atag"):
+        raw = item.get(field)
+        if not isinstance(raw, str):
+            continue
+        for word in re.split(r"[,，、;；|]", raw):
+            word = word.strip()
+            if len(word) < 2 or word in seen:
+                continue
+            seen.add(word)
+            out.append(word)
+    return out[:12]
+
+
+def _cuisine(item: Dict[str, Any]) -> str:
+    """菜系：高德 type 的第三级（如「餐饮服务;中餐厅;海鲜酒楼」→ 海鲜酒楼）。"""
+    parts = [p.strip() for p in str(item.get("type") or "").split(";") if p.strip()]
+    return parts[-1] if parts else ""
+
+
+
+
 def _parse_location(loc: str) -> Location:
     """高德返回的 "lng,lat" 字符串 -> Location。"""
     lng, lat = loc.split(",")
@@ -90,6 +158,10 @@ def _to_poi(item: Dict[str, Any], poi_type: str = "景点") -> POI:
     price = float(cost) if cost else None
     rating = _to_rating(biz_ext.get("rating"))
     tips = f"参考消费约 {price:.0f} 元" if price else ""
+    # 命中权威名录就标出来（零外部调用、纯本地查表）
+    official = match_authority(_text(item.get("name")))
+    if official:
+        tips = ("国家级5A景区" + ("；" + tips if tips else ""))
     return POI(
         name=_text(item.get("name")),
         type=poi_type,
@@ -100,6 +172,10 @@ def _to_poi(item: Dict[str, Any], poi_type: str = "景点") -> POI:
         price=price,
         rating=rating,
         photos=_photos(item),
+        # 这三个字段高德本来就给了，以前直接丢掉：
+        open_time=_open_time(item),
+        tags=_tags(item),
+        cuisine=_cuisine(item),
     )
 
 
@@ -159,6 +235,9 @@ def _to_recommendation(item: Dict[str, Any], kind: str) -> POI:
         check_in=check_in,
         check_out=check_out,
         photos=_photos(item),
+        open_time=_open_time(item),
+        tags=_tags(item),
+        cuisine=_cuisine(item),
     )
 
 
@@ -230,11 +309,66 @@ class RetrieveSkill(Skill):
         self,
         amap: AmapClient | None = None,
         weather: WeatherService | None = None,
-        retriever: Retriever | None = None,
+        search: WebSearchClient | None = None,
     ):
         self.amap = amap or AmapClient()
         self.weather_svc = weather or WeatherService()
-        self.retriever = retriever or Retriever()
+        self.search = search or WebSearchClient()
+
+    def _find_attraction(
+        self, name: str, city: str, entry: Any, city_name: str = ""
+    ) -> Optional[POI]:
+        """按「景点分类码」找这个景点，返回带评分与实拍图的真实高德记录。
+
+        为什么必须按分类码过滤：不筛类型时，「长江澳」返回的是
+        「自然地名 · 海湾海峡」——它的坐标是海湾的几何中心，画在地图上就落在海里；
+        同一批结果里还混着 3 个停车场。而且下拉候选本身不带图片，
+        只有真实的景点记录才有评分与实拍图。
+
+        有下拉坐标时，在多个同名命中里挑离它最近的那个：
+        候选坐标不一定准，但至少给了大致方位。
+
+        **检索范围从窄到宽试两次**（区县 → 父级城市），每一次都走同一套名字校验：
+        实测踩过——目的地是「杭州市」但下拉那条候选的 adcode 落成了 330102（上城区）时，
+        在「上城区」范围内搜「青山湖景区」（临安区）返回的是南昌青山湖那一堆无关记录，
+        匹配失败 → 退化成没有图、没有评分的占位点，用户看到的就是"必去景点没有图片"。
+        """
+        def select(pois: List[POI]) -> Optional[POI]:
+            # 只接受"名字确实是同一个地方"的命中：完全同名，或互为子串
+            # （「雷峰塔」/「雷峰塔景区」）。
+            #
+            # 这里是**富集**，不是重新找地方：如果搜出来的都不是同一个地方，
+            # 宁可返回 None 让调用方退回用户给的坐标，也不能挑一条最近的顶上去——
+            # 那等于悄悄把用户想去的地方换成了别的地方（实测踩过：没有这道校验时，
+            # 「九溪烟树」会被换成杭州候选池里离它最近的另一个景点）。
+            exact = [p for p in pois if p.name == name]
+            if exact:
+                candidates = exact
+            else:
+                candidates = [p for p in pois if name in p.name or p.name in name]
+                if not candidates:
+                    return None
+            if entry.has_location and entry.lat is not None and entry.lng is not None:
+                return min(
+                    candidates,
+                    key=lambda p: haversine(
+                        p.location.lat, p.location.lng, entry.lat, entry.lng
+                    ),
+                )
+            return candidates[0]
+
+        scopes = [city]
+        if city_name and city_name != city:
+            scopes.append(city_name)
+        for scope in scopes:
+            hits = self.amap.search_poi(name, scope, types=ATTRACTION_TYPES, offset=20)
+            pois = [_to_poi(h) for h in hits if h.get("location")]
+            if not pois:
+                continue
+            found = select(pois)
+            if found is not None:
+                return found
+        return None
 
     def run(self, ctx: dict[str, Any]) -> dict[str, Any]:
         pref = ctx["preference"]
@@ -257,6 +391,14 @@ class RetrieveSkill(Skill):
 
         # 1. 实时天气（多拿 3 天：高德 extensions=all 最多返回未来 4 天）
         ctx["weather"] = self.weather_svc.forecast(city, pref.duration_days + 3)
+
+        # 1.5 实时攻略检索（可选，默认关闭；没配搜索 API 就直接跳过）
+        #    只带目的地，不带任何画像信息；结果只当"偏好提示"用，
+        #    模型据此挑出来的名字仍要能在高德候选池里找到才算数。
+        if self.search.enabled:
+            notes = self.search.search(f"{destination} 必去 景点 攻略", limit=6)
+            notes += self.search.search(f"{destination} 必吃 餐厅 本地人推荐", limit=4)
+            ctx["web_notes"] = notes
 
         # 2. 景点 POI：按兴趣分类码搜索，计算综合分（热门程度 + 评分）后排序
         items_by_id: Dict[str, Dict[str, Any]] = {}
@@ -292,10 +434,20 @@ class RetrieveSkill(Skill):
             )
         # 综合分 = 距上一景点 × 权重 + 热门程度 × 权重 + 评分 × 权重，
         # 贪心排出一条顺路的候选链（而不是只按评分/热度把相隔很远的点堆在前面）
-        attractions: List[POI] = [
-            _to_poi(item)
-            for item in order_attractions(list(items_by_id.values()), hit_counts, max_raw)
-        ]
+        # 只按"值不值得去"排序（热门 × 0.6 + 评分 × 0.4），**不在这里串链**：
+        # 距离与路线是规划阶段的事（planner 的 order_chain / split_chain_into_days）。
+        # 以前这里掺了一个贪心的距离链，结果"给模型的前 15 个候选"带上了地理偏置。
+        items_sorted = sorted(
+            items_by_id.values(),
+            key=lambda item: attraction_rank(
+                item, hit_counts.get(item.get("id") or item.get("name", ""), 1), max_raw
+            ),
+            reverse=True,
+        )
+        attractions: List[POI] = [_to_poi(item) for item in items_sorted]
+        # 同一片景区在高德往往是多条独立记录（名字还各不相同），这里先合并掉：
+        # 否则会出现"同一天上午走 78 米去下一个景点"，以及把相距 5 公里的点塞进同一天。
+        attractions, dedupe_notes = dedupe_attractions(attractions)
 
         # 3. 餐饮 / 酒店 POI：多关键词 + 翻页扩大候选池，按综合分排序分档
         restaurant_items = _search_multi(self.amap, "餐厅", city, pages=2)
@@ -304,7 +456,9 @@ class RetrieveSkill(Skill):
         if "美食" in pref.preferences:
             extra_keywords.append("特色美食")
         extra_keywords.extend(
-            DIET_KEYWORDS[r] for r in pref.dietary_restrictions if r in DIET_KEYWORDS
+            DIET_SEARCH_KEYWORDS[r]
+            for r in pref.dietary_restrictions
+            if r in DIET_SEARCH_KEYWORDS
         )
         for kw in extra_keywords:
             for item in _search_multi(self.amap, kw, city, pages=2):
@@ -340,42 +494,116 @@ class RetrieveSkill(Skill):
             _to_recommendation(item, "住宿") for item in hotel_items if item.get("location")
         ]
 
-        # 4. 特别想去的景点（必去）：优先复用已搜到的 POI，否则按名称单独搜索；
-        #    仍定位不到就保留占位数据（无坐标）并在体检中提示，不让它凭空消失。
+        # 4. 特别想去的景点（必去）。解析顺序体现「谁更可信」：
+        #    a) 候选池里名字完全一致：直接复用，顺带拿到评分 / 票价 / 图片；
+        #    b) 按「景点分类码」在目的地搜这个景点，取真实的景点记录。
+        #       这一步是必需的：用户在下拉里选中的条目可能根本不是景点——
+        #       实测「长江澳」在不筛类型时返回的是「自然地名·海湾海峡」，
+        #       坐标是海湾中心，画在地图上就落在海里；同一批结果里还有 3 个停车场。
+        #       而且下拉候选本身不带图片，只有真实的景点记录才有评分与实拍图。
+        #       有下拉坐标时，在多个命中里挑离它最近的那个（用户选的时候给了方位）；
+        #    c) 高德景点库里确实没有：只能用下拉坐标，并明确标注"未匹配到景点"；
+        #    d) 连坐标都没有：保留 (0,0) 占位并记下来，由体检点名提示。
         must_pois: List[POI] = []
-        for name in pref.must_visit:
-            matched = next(
-                (p for p in attractions if p.name == name or name in p.name or p.name in name),
-                None,
-            )
-            if matched:
+        unlocated: List[str] = []
+        coord_only: List[str] = []
+        for entry in pref.must_visit:
+            name = (entry.name or "").strip()
+            if not name:
+                continue
+            # (a) 候选池里有完全同名的，直接复用
+            matched = next((p for p in attractions if p.name == name), None)
+            if matched is not None and not entry.has_location:
                 must_pois.append(matched)
                 continue
-            hits = self.amap.search_poi(name, city)
-            if hits:
-                must_pois.append(_to_poi(hits[0]))
-            else:
+            # (b) 按景点分类码找真实景点记录
+            hit = self._find_attraction(name, city, entry, city_name)
+            if hit is not None:
+                must_pois.append(hit)
+                continue
+            # (c) 有下拉坐标但没有对应的景点记录
+            if entry.has_location and entry.lat is not None and entry.lng is not None:
+                coord_only.append(name)
                 must_pois.append(
                     POI(
                         name=name,
                         type="景点",
-                        location=Location(lat=0, lng=0),
+                        location=Location(lat=entry.lat, lng=entry.lng),
                         city=city,
-                        tips="未能在高德定位到坐标，建议到地后在地图中搜索确认",
+                        tips="未在高德景点库中匹配到同名景点，位置取自输入时的候选坐标；"
+                        "建议到地后在地图上确认一下。",
                     )
                 )
+                continue
+            # (d) 什么都没有
+            unlocated.append(name)
+            must_pois.append(
+                POI(
+                    name=name,
+                    type="景点",
+                    location=Location(lat=0, lng=0),
+                    city=city,
+                    tips="未能在高德定位到坐标，建议到地后在地图中搜索确认",
+                )
+            )
 
-        # 必去景点置于候选池最前，规划阶段优先安排
+        # 用户在必去景点里也可能选到同一处的两条（下拉里是两个不同条目），先合并
+        must_pois, must_notes = dedupe_attractions(must_pois)
+
+        # 必去景点置于候选池最前，规划阶段优先安排。
+        # 与必去景点是"同一处"的普通候选要去掉：否则会出现"上午去了点名的沙滩，
+        # 下午又去同片沙滩的另一个高德条目"（实测那份平潭规划就是这样）。
         must_names = {m.name for m in must_pois}
-        attraction_pool = must_pois + [p for p in attractions if p.name not in must_names]
+        pool_others: List[POI] = []
+        same_as_must: List[Dict[str, Any]] = []
+        for poi in attractions:
+            if poi.name in must_names:
+                continue
+            matched = None
+            for must in must_pois:
+                reason = same_spot(poi, must)
+                if reason:
+                    matched = {"kept": must.name, "merged": [poi.name], "reason": reason}
+                    break
+            if matched is not None:
+                same_as_must.append(matched)
+                continue
+            pool_others.append(poi)
+        attraction_pool = must_pois + pool_others
 
-        # 5. 本地 RAG 知识（防坑 / 拍照 / 动线），按城市过滤避免串到别的目的地
-        rag_query = " ".join(pref.preferences) + " " + city_name
-        ctx["rag_tips"] = self.retriever.search(rag_query, top_k=5, city=city_name)
-
-        ctx["attractions"] = attraction_pool
+        # 4.5) 地域收敛：把离「必去点 / 候选最密集的一带」太远的候选挡在**自动选点**之外。
+        #      高德是按行政区给结果的（千岛湖在淳安县，也算杭州市），而综合分不含距离，
+        #      于是 127 公里外的千岛湖能排到第 4 名，被模型挑中或补足进来。
+        #      详见 skills/geo_gate.py。
+        #      注意：前端「换一个」的备选池仍然给全量——系统自动决策时收敛，
+        #      用户想手动加远郊的点，能力还在（体检里也会告诉用户怎么加）。
+        gate = apply_gate(
+            attraction_pool,
+            must_pois=must_pois,
+            min_keep=max(GEO_GATE_MIN_CANDIDATES, 3 * max(pref.duration_days, 1)),
+        )
+        ctx["geo_gate"] = {
+            "gate_km": gate.gate_km,
+            "dropped": [(p.name, km) for p, km in gate.dropped],
+        }
+        ctx["attractions"] = gate.kept
         ctx["attraction_options"] = attraction_pool
         ctx["must_visit_pois"] = must_pois
+        ctx["unlocated_must_visit"] = unlocated
+        ctx["coord_only_must_visit"] = coord_only
+        # 合并说明交给规划阶段写进体检清单：改了什么要让用户看得见
+        ctx["dedupe_notes"] = dedupe_notes + must_notes + same_as_must
+        # 饮食禁忌：把明显违反的餐厅挡在候选之外（只能按店名判断，见 _filter_diet）
+        dining_options, diet_dropped = _filter_diet(
+            dining_options, pref.dietary_restrictions
+        )
+        # planner 用的是 ctx["dining_pool"]（未截断的全量候选），这里一并过滤
+        ctx["dining_pool"], _ = _filter_diet(
+            ctx.get("dining_pool") or [], pref.dietary_restrictions
+        )
+        ctx["diet_dropped"] = diet_dropped
+        # 本地特色词：从招牌菜标签里统计出来（零人工），供挑餐厅时给一点加分
+        ctx["local_keywords"] = local_specialty_keywords(ctx.get("dining_pool") or [])
         ctx["dining_options"] = dining_options
         ctx["hotel_options"] = hotel_options
         ctx["restaurants"] = dining_options

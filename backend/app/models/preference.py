@@ -23,6 +23,29 @@ class Travelers(BaseModel):
         return self.adults + self.children + self.elderly
 
 
+class MustVisit(BaseModel):
+    """特别想去的景点。
+
+    为什么不是简单的字符串列表：用户写的名字与高德 POI 的名字经常对不上
+    （「雷峰塔」/「雷峰塔景区」、「西湖」/「杭州西湖风景名胜区」），
+    只靠名字匹配就得在检索阶段猜，猜不中还会退化成没有坐标的占位点。
+
+    所以前端下拉选中具体地点时会把 adcode 与坐标一起带上——坐标是权威，
+    规划阶段直接用它，不再按名字猜。手输与大模型抽取的纯名字仍然兼容
+    （坐标留空），由检索阶段去解析，解析不到会明确提示用户。
+    """
+
+    name: str = Field(description="景点名称")
+    adcode: str = Field(default="", description="高德 adcode（来自下拉选择，可空）")
+    lat: Optional[float] = Field(default=None, description="纬度（来自下拉选择，可空）")
+    lng: Optional[float] = Field(default=None, description="经度（来自下拉选择，可空）")
+
+    @property
+    def has_location(self) -> bool:
+        """是否带有效坐标（下拉选定）。"""
+        return bool(self.lat) and bool(self.lng)
+
+
 class UserPreference(BaseModel):
     """用户画像输入模型。
 
@@ -50,11 +73,11 @@ class UserPreference(BaseModel):
     # ---- 画像特征 ----
     preferences: List[str] = Field(
         default_factory=list,
-        description="兴趣导向：人文历史 / 自然风光 / 美食 / 娱乐",
+        description="兴趣导向：人文历史 / 自然风光 / 美食 / 娱乐（空数组 = 未填写，检索时按全部类别）",
     )
-    must_visit: List[str] = Field(
+    must_visit: List[MustVisit] = Field(
         default_factory=list,
-        description="特别想去的景点（规划中必须包含，如：雷峰塔、西湖）",
+        description="特别想去的景点（规划中必须包含）。可带坐标（下拉选定），也可只给名字",
     )
     # None 表示「用户没有填写」：由规划时结合同行人判断，不静默套用某个节奏
     pace: Optional[Literal["悠闲", "适中", "特种兵"]] = Field(
@@ -66,9 +89,6 @@ class UserPreference(BaseModel):
     # ---- 禁忌与避雷 ----
     dietary_restrictions: List[str] = Field(
         default_factory=list, description="饮食禁忌：过敏 / 清真 / 素食 / 无海鲜 等"
-    )
-    avoidances: List[str] = Field(
-        default_factory=list, description="极其讨厌的项目：爬山 / 排队 / 网红打卡 等"
     )
 
     # ---- 时间约束 ----
@@ -97,4 +117,30 @@ class UserPreference(BaseModel):
                 cleaned[field] = None
             elif isinstance(value, str) and value not in allowed:
                 cleaned[field] = None
+        return cleaned
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_must_visit(cls, data: Any) -> Any:
+        """允许 must_visit 写纯名字（大模型抽取、旧数据、手输）。
+
+        大模型只会给出名字，老版本库里存的也是字符串数组，
+        这里统一归一成 MustVisit，避免为了兼容而在每个消费方各写一遍分支。
+        """
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("must_visit")
+        if not isinstance(raw, list):
+            return data
+        cleaned = dict(data)
+        items: List[Any] = []
+        for entry in raw:
+            if isinstance(entry, str):
+                if entry.strip():
+                    items.append({"name": entry.strip()})
+            elif isinstance(entry, MustVisit):
+                items.append(entry)
+            elif isinstance(entry, dict) and entry.get("name"):
+                items.append(entry)
+        cleaned["must_visit"] = items
         return cleaned

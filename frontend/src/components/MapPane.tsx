@@ -22,12 +22,29 @@ interface Props {
  * 图例改成浮在地图左下角，可收起。
  */
 export default function MapPane({ planner, day, theme, focus }: Props) {
-  const { plan, mapData, mapLoading, mapError, mapConfig, env } = planner
+  const { plan, mapData, mapLoading, mapError, mapConfig, env, loading } = planner
   // 默认收起：展开的图例会盖住地图一大片，把下面的标记全挡死
   // （高德按坐标命中检测，被 DOM 盖住就收不到鼠标事件）。
   const [legendOpen, setLegendOpen] = useState(false)
 
-  if (!plan) return <aside className="pane pane--right" />
+  // 还没有规划（生成中，或首次进入还没生成）：以前这里返回一个空的 aside，
+  // 右栏就是一整块空白——边上的行程在动、地图一动不动，观感就是"地图坏了"。
+  // 现在给一个明确的等待态，说明地图什么时候会出现。
+  if (!plan) {
+    return (
+      <aside className="pane pane--right">
+        <div className="map-canvas map-canvas--fill">
+          <div className="map-placeholder">
+            <div>
+              <p style={{ margin: 0 }}>
+                {loading ? '正在生成行程，地图会在行程排好后自动出现' : '还没有行程，生成后会在这里显示地图'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    )
+  }
 
   const interactive = Boolean(mapConfig?.enabled)
   const points = collectPoints(plan)

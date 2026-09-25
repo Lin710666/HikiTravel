@@ -3,12 +3,12 @@ import type { Planner } from '../hooks/usePlanner'
 import type { Pace, Transportation, UserPreference } from '../types/preference'
 import { monthDay } from '../lib/format'
 import DestinationPicker from './DestinationPicker'
+import MustVisitPicker from './MustVisitPicker'
 
 type Mode = 'chat' | 'form' | 'history'
 
 const PREFERENCES = ['人文历史', '自然风光', '美食', '娱乐']
 const DIETARY = ['清真', '素食', '无海鲜', '不吃辣']
-const AVOIDANCES = ['爬山', '排队', '网红打卡']
 const PACES: Pace[] = ['悠闲', '适中', '特种兵']
 const TRANSPORTS: Transportation[] = ['自驾', '高铁', '飞机', '本地']
 const DAY_OPTIONS = [1, 2, 3, 4, 5, 6, 7]
@@ -24,7 +24,6 @@ const DEFAULT_FORM: UserPreference = {
   pace: '适中',
   budget: 5000,
   dietary_restrictions: ['不吃辣'],
-  avoidances: ['爬山'],
   start_date: '2026-04-03',
   departure_time: '09:00',
   return_hotel_time: '21:00',
@@ -110,6 +109,26 @@ export default function LeftRail({ planner, notify }: Props) {
           <div>未检测到高德密钥（AMAP_API_KEY），实时 POI 与天气无法获取。</div>
         </div>
       )}
+
+      {/* 预热进度：后端启动时在后台跑，跑完之前第一次生成要额外等预填充 */}
+      {env?.ollama_warm?.state === 'warming' && (
+        <div className="alert">
+          <i className="alert__dot" />
+          <div>
+            正在预热本地大模型与提示词缓存（{env.ollama_warm.done}/
+            {env.ollama_warm.total}）… 预热完成后首次生成会快很多。
+          </div>
+        </div>
+      )}
+
+      {env?.ollama_warm &&
+        env.ollama_available &&
+        (env.ollama_warm.state === 'failed' || env.ollama_warm.state === 'partial') && (
+          <div className="alert">
+            <i className="alert__dot" />
+            <div>{env.ollama_warm.detail}</div>
+          </div>
+        )}
 
       <div className="card">
         <div className="segmented">
@@ -303,34 +322,13 @@ export default function LeftRail({ planner, notify }: Props) {
                 </span>
               </div>
               <div className="field field--stack">
-                <span className="field__label">排斥项</span>
-                <span className="chips">
-                  {AVOIDANCES.map((a) => (
-                    <button
-                      key={a}
-                      className={`chip ${form.avoidances.includes(a) ? 'is-on' : ''}`}
-                      onClick={() => patch({ avoidances: toggleIn(form.avoidances, a) })}
-                    >
-                      {a}
-                    </button>
-                  ))}
-                </span>
-              </div>
-              <div className="field field--stack">
-                <span className="field__label">必去景点（用逗号分隔）</span>
-                <input
-                  className="mini"
-                  style={{ maxWidth: '100%', textAlign: 'left', width: '100%' }}
-                  value={form.must_visit.join('、')}
-                  onChange={(e) =>
-                    patch({
-                      must_visit: e.target.value
-                        .split(/[,，、]/)
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                  placeholder="如：雷峰塔、西溪湿地"
+                <span className="field__label">必去景点（可选，从候选里选更准）</span>
+                {/* 候选限定在目的地城市内，所以目的地要先填 */}
+                <MustVisitPicker
+                  value={form.must_visit}
+                  city={form.destination_adcode || form.destination}
+                  disabled={loading}
+                  onChange={(items) => patch({ must_visit: items })}
                 />
               </div>
               <div className="field">

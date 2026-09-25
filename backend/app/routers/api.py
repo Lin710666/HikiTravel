@@ -7,15 +7,21 @@
 - 大模型输出不可解析 → 502，提示用户重试
 - 未配置高德密钥 / 网络异常 → 503
 """
-from typing import Any, Dict, List, Literal, Optional
+import json
+import logging
+import queue
+import threading
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 import base64
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .. import store
 from ..config import settings
+from ..llm.warmup import warmer
 from ..models.plan import TravelPlan
 from ..models.preference import UserPreference
 from ..orchestrator import Orchestrator
@@ -27,16 +33,18 @@ from ..skills.errors import (
     MissingRequiredInfoError,
     SkillError,
 )
+from ..skills.photo_backfill import backfill_plan_photos, enrich_missing_photos
+from ..skills.retrieve_skill import ATTRACTION_TYPES
 
 router = APIRouter(prefix="/api")
 orchestrator = Orchestrator()
+logger = logging.getLogger("travelplanner.api")
 
 
 class ChatRequest(BaseModel):
     """对话模式请求。"""
 
     message: str
-    apply_suggestions: bool = False  # 用户是否已同意采纳异常拦截建议
     preference: Optional[Dict[str, Any]] = None  # 表单已填的部分画像（作为底，覆盖对话模糊解析）
 
 
@@ -44,7 +52,6 @@ class PlanRequest(BaseModel):
     """表单模式请求。"""
 
     preference: UserPreference
-    apply_suggestions: bool = False
 
 
 class ReviseRequest(BaseModel):
@@ -52,7 +59,6 @@ class ReviseRequest(BaseModel):
 
     message: str
     plan: TravelPlan
-    apply_suggestions: bool = False
 
 
 class MapRequest(BaseModel):
@@ -99,15 +105,78 @@ def _execute(call) -> TravelPlan:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _run_plan(raw_text=None, preference=None, apply_suggestions=False, base=None) -> TravelPlan:
+def _run_plan(raw_text=None, preference=None, base=None) -> TravelPlan:
     return _execute(
         lambda: orchestrator.run(
             raw_text=raw_text,
             preference=preference,
-            apply_suggestions_flag=apply_suggestions,
             base=base,
         )
     )
+
+
+# ---------------- 流式生成（SSE） ----------------
+#
+# 为什么需要它：整单生成要 100 秒上下，其中"规划体检"就占 59~75 秒。
+# 非流式接口下用户只能对着一个转动的小圈等两分钟，而且体检一旦最后一步失败，
+# 前面 100 秒的成果（一份已经完整可用的行程）会连带着被丢掉。
+# 流式把过程摊开：
+#   step 事件 → 前端显示"正在做什么、已经花了多久"
+#   plan 事件 → 行程初稿/优化稿一到就先渲染出来，用户不用等体检
+#   done 事件 → 最终规划 + 体检结论
+#   error 事件 → 失败原因（HTTP 状态码在流开始时就已定为 200，无法再改）
+
+
+def _sse(payload: Dict[str, Any]) -> str:
+    """一条 SSE 消息。事件类型放在 JSON 里，前端只需解析 data。"""
+    return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+
+
+def _error_event(exc: Exception) -> Dict[str, Any]:
+    """把 Skill 层异常翻译成前端能识别的错误事件（口径与 _execute 一致）。"""
+    if isinstance(exc, LLMUnavailableError):
+        return {"type": "error", "kind": "network", "message": str(exc)}
+    if isinstance(exc, (MissingRequiredInfoError, SkillError, AmapDestinationError, AmapError)):
+        return {"type": "error", "kind": "http", "message": str(exc)}
+    logger.exception("流式生成出现未预期异常")
+    return {"type": "error", "kind": "network", "message": f"生成过程中出现异常：{exc}"}
+
+
+def _stream(work: Callable[[Callable[[Dict[str, Any]], None]], None]) -> Iterator[str]:
+    """把一次生成过程转成 SSE 事件流。
+
+    为什么要多开一个线程：orchestrator 是同步的，如果在生成器里直接跑，
+    事件只能等它整个跑完才吐得出来，就失去了"实时"的意义。
+    所以生成跑在工作线程、事件经队列流回生成器，两者通过队列解耦。
+    """
+    events: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
+    outcome: Dict[str, Any] = {}
+
+    def emit(event: Dict[str, Any]) -> None:
+        events.put(event)
+
+    def run() -> None:
+        try:
+            work(emit)
+        except Exception as exc:  # 兜底：任何异常都要变成一条 error 事件，不能让流挂住
+            outcome.update(_error_event(exc))
+        finally:
+            events.put(None)  # 哨兵：通知生成器结束
+
+    threading.Thread(target=run, name="plan-stream", daemon=True).start()
+
+    while True:
+        event = events.get()
+        if event is None:
+            break
+        yield _sse(event)
+    if outcome:
+        yield _sse(outcome)
+
+
+def _stream_headers() -> Dict[str, str]:
+    # X-Accel-Buffering: no 是给反向代理看的：不缓冲，逐条转发（否则要等流结束）
+    return {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
 
 
 @router.post("/chat", response_model=TravelPlan)
@@ -115,7 +184,6 @@ def chat(req: ChatRequest) -> TravelPlan:
     """对话式生成规划（可携带表单已填画像作为底，弥补对话解析的模糊性）。"""
     plan = _run_plan(
         raw_text=req.message,
-        apply_suggestions=req.apply_suggestions,
         base=req.preference,
     )
     store.save_plan(plan.model_dump())
@@ -125,7 +193,7 @@ def chat(req: ChatRequest) -> TravelPlan:
 @router.post("/plan", response_model=TravelPlan)
 def make_plan(req: PlanRequest) -> TravelPlan:
     """表单式生成规划。"""
-    plan = _run_plan(preference=req.preference, apply_suggestions=req.apply_suggestions)
+    plan = _run_plan(preference=req.preference)
     store.save_plan(plan.model_dump())
     return plan
 
@@ -140,11 +208,64 @@ def revise_plan(req: ReviseRequest) -> TravelPlan:
         lambda: orchestrator.revise(
             message=req.message,
             plan=req.plan,
-            apply_suggestions_flag=req.apply_suggestions,
         )
     )
     store.save_plan(plan.model_dump())
     return plan
+
+
+@router.post("/chat/stream")
+def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """对话式生成规划（SSE 流式）：边生成边推送进度与行程快照。
+
+    事件格式见 _stream 上方的说明；前端用 fetch + ReadableStream 读取，
+    因为 EventSource 不支持 POST 请求体。
+    """
+
+    def work(emit) -> None:
+        plan = orchestrator.run(
+            raw_text=req.message,
+            base=req.preference,
+            on_event=emit,
+        )
+        store.save_plan(plan.model_dump())
+
+    return StreamingResponse(
+        _stream(work), media_type="text/event-stream", headers=_stream_headers()
+    )
+
+
+@router.post("/plan/stream")
+def plan_stream(req: PlanRequest) -> StreamingResponse:
+    """表单式生成规划（SSE 流式）。"""
+
+    def work(emit) -> None:
+        plan = orchestrator.run(
+            preference=req.preference,
+            on_event=emit,
+        )
+        store.save_plan(plan.model_dump())
+
+    return StreamingResponse(
+        _stream(work), media_type="text/event-stream", headers=_stream_headers()
+    )
+
+
+@router.post("/plan/revise/stream")
+def revise_plan_stream(req: ReviseRequest) -> StreamingResponse:
+    """对话式修改规划（SSE 流式）。"""
+
+    def work(emit) -> None:
+        plan = orchestrator.revise(
+            message=req.message,
+            plan=req.plan,
+            on_event=emit,
+        )
+        store.save_plan(plan.model_dump())
+
+    return StreamingResponse(
+        _stream(work), media_type="text/event-stream", headers=_stream_headers()
+    )
 
 
 @router.post("/map/static")
@@ -247,13 +368,94 @@ def autocomplete_places(q: str, city: str = "", limit: int = 8) -> List[PlaceTip
     return result
 
 
+class AttractionTip(BaseModel):
+    """「必去景点」下拉候选项：只包含真正的景点（已按分类码过滤）。"""
+
+    name: str
+    district: str
+    adcode: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    rating: Optional[float] = None
+    address: str = ""
+    photos: List[str] = []
+
+
+@router.get("/places/attractions", response_model=List[AttractionTip])
+def search_attractions(q: str, city: str = "", limit: int = 10) -> List[AttractionTip]:
+    """「必去景点」的下拉候选：只搜真正的景点。
+
+    为什么不能复用上面的 /places/autocomplete（高德 inputtips）：
+    那个接口不认类型。实测同一个词「长江澳」返回的 6 条里，
+    有一条是「自然地名 · 海湾海峡」——它的坐标是海湾的几何中心，
+    标在地图上会落在海里；还有 3 条是停车场。
+
+    这里改用 /place/text 并限定「景点类」分类码，返回的都是风景名胜/公园/场馆，
+    而且自带评分与实拍图（下拉候选本身是没有图的）。
+    """
+    keyword = (q or "").strip()
+    if not keyword:
+        return []
+    capped = max(1, min(limit, 20))
+    try:
+        hits = orchestrator.retrieve.amap.search_poi(
+            keyword, city, types=ATTRACTION_TYPES, offset=capped
+        )
+    except AmapError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    result: List[AttractionTip] = []
+    for item in hits[:capped]:
+        name = item.get("name") if isinstance(item.get("name"), str) else ""
+        location = item.get("location") if isinstance(item.get("location"), str) else ""
+        if not name or "," not in location:
+            continue
+        lng_text, _, lat_text = location.partition(",")
+        try:
+            lng, lat = float(lng_text), float(lat_text)
+        except ValueError:
+            continue
+        biz = item.get("biz_ext") or {}
+        try:
+            rating = float(biz.get("rating"))
+        except (TypeError, ValueError):
+            rating = None
+        photos: List[str] = []
+        for photo in item.get("photos") or []:
+            url = photo.get("url") if isinstance(photo, dict) else None
+            if isinstance(url, str) and url.startswith("http"):
+                photos.append(url.replace("http://", "https://", 1))
+            if len(photos) >= 3:
+                break
+        result.append(
+            AttractionTip(
+                name=name,
+                district=_text_field(item.get("adname")) or _text_field(item.get("cityname")) or name,
+                adcode=_text_field(item.get("adcode")),
+                lat=lat,
+                lng=lng,
+                rating=rating if rating and rating > 0 else None,
+                address=_text_field(item.get("address")),
+                photos=photos,
+            )
+        )
+    return result
+
+
+def _text_field(value: Any) -> str:
+    """高德偶尔把字符串字段返回成空 list，统一转成安全字符串。"""
+    return value if isinstance(value, str) else ""
+
+
 @router.get("/health")
 def health() -> Dict[str, Any]:
-    """健康检查：返回 Ollama / 高德密钥配置状态。"""
+    """健康检查：返回 Ollama / 高德密钥配置状态，以及启动预热进度。"""
     return {
         "status": "ok",
         "ollama_available": orchestrator.planner.llm.available(),
         "amap_configured": bool(orchestrator.retrieve.amap.key),
+        # 启动预热（模型加载 + 提示词缓存）的进度：预热跑完前，第一次生成会明显更慢
+        "ollama_warm": warmer.status(),
     }
 
 
@@ -265,11 +467,17 @@ def plans() -> List[Dict[str, Any]]:
 
 @router.get("/plans/{plan_id}")
 def get_plan(plan_id: str) -> Dict[str, Any]:
-    """按 ID 读取规划（供导出/分享）。"""
+    """按 ID 读取规划（供历史打开 / 导出 / 分享）。
+
+    旧规划里可能存着"没有图的占位点"（必去景点当年匹配不到高德记录时会退化成
+    只有坐标的条目，见 skills/photo_backfill.py 的说明）。读的时候用同一份规划
+    自带的候选池补一次图：零网络、不改坐标与行程，只补图片。
+    """
     plan = store.get_plan(plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="计划不存在")
-    return plan
+    # 两步：先零网络（用规划自带的候选池补），还缺的再按坐标护栏查一次高德
+    return enrich_missing_photos(backfill_plan_photos(plan), amap=orchestrator.retrieve.amap)
 
 
 @router.post("/plans/save", response_model=Dict[str, Any])

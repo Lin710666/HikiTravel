@@ -36,6 +36,43 @@ class LLMClient:
         except httpx.HTTPError:
             return False
 
+    def prefill(
+        self, system: str, user: str = "预热。", model: Optional[str] = None
+    ) -> bool:
+        """把一段系统提示词预先填进模型上下文缓存（不取值、不解析 JSON）。
+
+        供启动预热使用（见 llm/warmup.py）。Ollama 的上下文缓存按前缀命中，
+        因此只要系统提示词与真实调用逐字一致，后续请求就能跳过这段预填充——
+        实测 788 token 的系统提示词由此从 19.0s 降到 0.7s。
+
+        所以这里只要请求成功就达到目的；num_predict=1 把生成开销压到可忽略，
+        也刻意不带 format="json"（不需要约束输出，省掉语法开销）。
+        注意 num_ctx 必须与真实调用一致，否则上下文缓存对不上。
+        """
+        self.last_error = ""
+        payload = {
+            "model": model or self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            "keep_alive": settings.ollama_keep_alive,
+            "options": {"num_predict": 1, "num_ctx": 4096},
+        }
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/api/chat",
+                json=payload,
+                timeout=self.timeout,
+                trust_env=self._trust_env,
+            )
+            resp.raise_for_status()
+            return True
+        except httpx.HTTPError as exc:
+            self.last_error = f"预热请求失败（{exc}）"
+            return False
+
     def chat_json(
         self,
         system: str,

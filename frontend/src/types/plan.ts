@@ -22,6 +22,10 @@ export interface POI {
   check_out: string
   // 高德 POI 的图片（已统一为 https），供地图悬停卡片使用
   photos?: string[]
+  // 下面三项来自高德本来就返回、以前我们没存的字段
+  open_time?: string   // 营业时间，如 10:00-22:00
+  tags?: string[]      // 招牌菜/标签（来自高德 keytag + atag）
+  cuisine?: string     // 菜系，如 海鲜酒楼
 }
 
 export interface TransportToNext {
@@ -58,13 +62,6 @@ export interface BudgetBreakdown {
   hotel: number
 }
 
-export interface Conflict {
-  id: string
-  message: string
-  suggestion: string
-  field: string | null
-}
-
 export type CheckCategory = '路径' | '地点' | '重复' | '覆盖' | '时间' | '预算' | '其他'
 export type CheckSeverity = 'high' | 'medium' | 'low'
 
@@ -93,7 +90,6 @@ export interface TravelPlan {
   attraction_options: POI[]
   travelers: number
   user_budget: number | null
-  conflicts: Conflict[]
   checks: PlanCheck | null
   // 生成这份规划时用的画像：用于「对话式修改」，改完的画像会跟着新规划一起返回
   user_preference: UserPreference | null

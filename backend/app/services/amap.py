@@ -180,7 +180,16 @@ class AmapClient:
                 if name:
                     if matched_by_code.get("level") in ("province", "city"):
                         return name, name
-                    return name, self._city_of(name) or name
+                    parent = self._city_of(name) or name
+                    # 用户填的就是父级城市（「杭州」/「杭州市」），而下拉那条候选的 adcode
+                    # 恰好是某个区时，不能把整趟行程缩进那个区。
+                    # 实测踩过：目的地「杭州市 + 330102（上城区）」→ 检索范围被缩成上城区，
+                    # 池子里全是上城区的点，而必去景点「青山湖景区」（临安区）在区县范围内
+                    # 搜不到 → 退化成没有图、没有评分的占位点。
+                    # 反过来，用户明确选的是区（「上城区」）时照旧保留区级范围。
+                    if parent and (parent == target or (target and target in parent)):
+                        return parent, parent
+                    return name, parent
             # adcode 失效（例如行政区划调整过）就继续按名字走，不让用户卡住
 
         if not target:

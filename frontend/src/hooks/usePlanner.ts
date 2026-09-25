@@ -6,18 +6,21 @@ import {
   getPlan,
   health,
   listPlans,
-  planByChat,
-  planByForm,
-  revisePlan,
   savePlan,
+  streamPlanByChat,
+  streamPlanByForm,
+  streamPlanRevise,
   type ApiErrorKind,
   type Health,
   type MapConfig,
+  type PlanEvent,
+  type PlanStep,
   type PlanSummary,
   type StaticMapData,
 } from '../api/client'
 import type { TravelPlan } from '../types/plan'
 import type { UserPreference } from '../types/preference'
+import { loadAmap } from '../lib/amap'
 
 /** 最近一次请求：重试与「采纳建议」都基于它重放，用户不用重填 */
 type LastRequest =
@@ -43,12 +46,18 @@ export function usePlanner(notify: (text: string) => void) {
   const [mapError, setMapError] = useState<string | null>(null)
   const [mapConfig, setMapConfig] = useState<MapConfig | null>(null)
   const [dirty, setDirty] = useState(false)
+  /** 生成过程中的实时进度（后端 SSE 推来），用于给用户看到"正在做什么" */
+  const [steps, setSteps] = useState<PlanStep[]>([])
+  /** 行程已经可以先看了，但体检还在跑：这一行说明当前处于哪个阶段 */
+  const [stageNote, setStageNote] = useState<string | null>(null)
 
   const lastReqRef = useRef<LastRequest | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const mapAbortRef = useRef<AbortController | null>(null)
   /** 交给 loadMap 判断要不要打静态图：交互地图可用时就不必再请求一次 */
   const mapConfigRef = useRef<MapConfig | null>(null)
+  /** 用户点了「重新获取」：强制走静态图（交互地图可能因网络/Key 白名单失败） */
+  const mapPreferStaticRef = useRef(false)
 
   /* 生成中显示已等待时长：本地 7B 生成一整份要 1~2 分钟，用户需要知道没卡死 */
   useEffect(() => {
@@ -77,20 +86,35 @@ export function usePlanner(notify: (text: string) => void) {
     void checkHealth()
   }, [checkHealth])
 
+  /* 预热是后端启动后在后台跑的：还在预热时定时刷新，
+     让用户知道"再等一会，第一次生成会快很多" */
+  useEffect(() => {
+    if (env?.ollama_warm?.state !== 'warming') return
+    const id = window.setTimeout(() => void checkHealth(), 4000)
+    return () => window.clearTimeout(id)
+  }, [env, checkHealth])
+
   /* 交互地图配置：一次就够，失败不阻断（退回静态图） */
   useEffect(() => {
     fetchMapConfig()
       .then((cfg) => {
         mapConfigRef.current = cfg
         setMapConfig(cfg)
+        // 提前把高德 JS API 拉下来（约 1MB，异步加载）。
+        // 以前是等 PlanMap 挂载才开始下载，也就是等行程排好之后才开始——
+        // 于是右栏总比中栏的行程晚几秒才出现，看起来像"地图不跟着规划走"。
+        // 拿到配置就预加载，行程一到就能立刻画出来。
+        if (cfg.enabled) void loadAmap(cfg).catch(() => {})
       })
       .catch(() => setMapConfig({ enabled: false, key: '', security_code: '' }))
   }, [])
 
   /* 静态地图：Key 在后端，前端只拿 data URL 与图例 */
   const loadMap = useCallback(async (target: TravelPlan) => {
-    // 已经有交互地图了，就没必要再花一次高德 Web服务 额度画静态图
-    if (mapConfigRef.current?.enabled) return
+    // 已经有交互地图了，就没必要再花一次高德 Web服务 额度画静态图。
+    // 例外：用户点了「重新获取」——那是交互地图用不了时的兜底入口，
+    // 不能再因为"配置说交互地图可用"就什么都不做。
+    if (mapConfigRef.current?.enabled && !mapPreferStaticRef.current) return
     mapAbortRef.current?.abort()
     const controller = new AbortController()
     mapAbortRef.current = controller
@@ -112,28 +136,70 @@ export function usePlanner(notify: (text: string) => void) {
   }, [])
 
   const reloadMap = useCallback(() => {
+    mapPreferStaticRef.current = true
     if (plan) void loadMap(plan)
   }, [loadMap, plan])
 
   const run = useCallback(
-    async (req: LastRequest, applySuggestions = false) => {
+    async (req: LastRequest) => {
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
       setLoading(true)
       setError(null)
+      setSteps([])
+      setStageNote(null)
       try {
-        const next =
-          req.kind === 'form'
-            ? await planByForm(req.pref, applySuggestions, controller.signal)
-            : req.kind === 'chat'
-              ? await planByChat(req.message, applySuggestions, req.base, controller.signal)
-              : await revisePlan(req.message, req.plan, controller.signal)
-        setPlan(next)
-        setDirty(false)
+        // 流式生成：行程初稿一到就先渲染出来（体检还要再跑一分钟左右），
+        // 之后每次收到新的行程快照都覆盖一次，最终由 done 事件收尾。
+        // 用对象持有终稿：赋值发生在回调里，直接写 let 变量会被 TS 收窄成 never
+        const finalized: { plan: TravelPlan | null } = { plan: null }
+        const onEvent = (event: PlanEvent) => {
+          if (event.type === 'step') {
+            setSteps((cur) => {
+              // 同一个环节的 done 覆盖它的 start，保持列表顺序 = 执行顺序
+              const next = cur.filter((s) => s.skill !== event.skill)
+              next.push({
+                skill: event.skill,
+                label: event.label,
+                state: event.state,
+                seconds: event.seconds,
+              })
+              return next
+            })
+            return
+          }
+          if (event.type === 'plan') {
+            setPlan(event.plan)
+            setStageNote(`${event.stage}：${event.note}`)
+            setDirty(false)
+            // 地图跟着行程走，让用户看到点位与轨迹逐步成形（同一版规划只画一次）
+            void loadMap(event.plan)
+            return
+          }
+          if (event.type === 'done') {
+            finalized.plan = event.plan
+            setPlan(event.plan)
+            setStageNote(null)
+            setDirty(false)
+            // 终稿同样要让地图跟上：体检可能重排过路线、也可能整份重生成过。
+            // 交互地图会随 plan 变化自己重画，静态图则必须在这里再取一次。
+            void loadMap(event.plan)
+          }
+        }
+
+        if (req.kind === 'form') {
+          await streamPlanByForm(req.pref, onEvent, controller.signal)
+        } else if (req.kind === 'chat') {
+          await streamPlanByChat(req.message, req.base, onEvent, controller.signal)
+        } else {
+          await streamPlanRevise(req.message, req.plan, onEvent, controller.signal)
+        }
+
+        if (finalized.plan) {
+          window.history.replaceState(null, '', `?plan=${finalized.plan.plan_id}`)
+        }
         lastReqRef.current = req
-        window.history.replaceState(null, '', `?plan=${next.plan_id}`)
-        void loadMap(next)
       } catch (e) {
         const err = e as ApiError
         if (err.kind === 'aborted') {
@@ -143,6 +209,7 @@ export function usePlanner(notify: (text: string) => void) {
         setError({ message: err.message || '生成失败', kind: err.kind ?? 'network' })
       } finally {
         setLoading(false)
+        setStageNote(null)
         if (abortRef.current === controller) abortRef.current = null
       }
     },
@@ -160,18 +227,6 @@ export function usePlanner(notify: (text: string) => void) {
       // 从历史打开的计划没有「本次请求」，但它自带画像，用画像重放即可
       void run({ kind: 'form', pref: plan.user_preference })
     } else notify('请先填写偏好，或输入一句话')
-  }, [notify, plan, run])
-
-  /** 采纳异常拦截建议：按原请求带 apply_suggestions 重放（后端只在用户明确同意后才改画像） */
-  const applySuggestions = useCallback(() => {
-    if (lastReqRef.current) {
-      void run(lastReqRef.current, true)
-      return
-    }
-    // 从历史打开的规划没有「本次请求」，改用规划自带画像重放
-    const pref = plan?.user_preference
-    if (pref) void run({ kind: 'form', pref }, true)
-    else notify('这版规划没有保存画像，无法自动采纳建议')
   }, [notify, plan, run])
 
   const runForm = useCallback((pref: UserPreference) => run({ kind: 'form', pref }), [run])
@@ -223,7 +278,6 @@ export function usePlanner(notify: (text: string) => void) {
           hotel_options: p.hotel_options || [],
           attraction_options: p.attraction_options || [],
           travelers: p.travelers || 1,
-          conflicts: p.conflicts || [],
           daily_plans: (p.daily_plans || []).map((d) => ({
             ...d,
             hotel: d.hotel || null,
@@ -292,11 +346,12 @@ export function usePlanner(notify: (text: string) => void) {
     reloadMap,
     mapConfig,
     dirty,
+    steps,
+    stageNote,
     runForm,
     runChat,
     runRevise,
     swapOption,
-    applySuggestions,
     cancel,
     retry,
     refreshHistory,

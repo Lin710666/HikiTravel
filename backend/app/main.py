@@ -7,6 +7,7 @@
 from pathlib import Path
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from .config import settings
+from .llm.warmup import warmer
 from .routers.api import router
 
 # 让 Skill 耗时日志能在控制台看到（定位"生成慢在哪一步"）
@@ -25,9 +27,22 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时在后台预热模型与提示词缓存。
+
+    不阻塞服务启动——预热跑在守护线程里，Ollama 不可用时只记日志。
+    目的是把「第一次生成要额外等 60 秒预填充」这笔开销挪到用户点击之前，
+    详见 app/llm/warmup.py。
+    """
+    warmer.start()
+    yield
+
+
 app = FastAPI(
     title="文旅智能辅助 - 个性化可交互旅游规划系统",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS（本地开发前后端分离；生产可收紧来源）

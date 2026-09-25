@@ -57,7 +57,6 @@ def summarize(plan: dict) -> None:
         print("体检:", checks["passed"], checks["summary"])
         for issue in checks["issues"]:
             print("   -", issue["category"], issue["severity"], issue["message"])
-    print("冲突:", [c["id"] for c in plan.get("conflicts", [])])
     print("推荐池大小: 餐饮", len(plan.get("dining_options", [])),
           "酒店", len(plan.get("hotel_options", [])),
           "景点", len(plan.get("attraction_options", [])))
@@ -82,7 +81,11 @@ def main() -> int:
             "budget": 3000,
             "travelers": {"adults": 2, "children": 0, "elderly": 1},
             "preferences": ["人文历史", "自然风光"],
-            "must_visit": ["雷峰塔"],
+            # 两种输入都覆盖：下拉选定（带坐标，后端直接用）与手输（只有名字，按名解析）
+            "must_visit": [
+                {"name": "灵隐寺", "adcode": "330100", "lat": 30.2409, "lng": 120.1016},
+                {"name": "雷峰塔"},
+            ],
             "pace": "悠闲",
             "transportation": "高铁",
             "departure_time": "08:30",       # 表单新增项：每天出发时间
@@ -125,8 +128,10 @@ def main() -> int:
             json={"message": "带80岁老人特种兵游杭州，3天，预算2000，特别想去雷峰塔"},
         )
         print(f"耗时 {time.time() - t0:.1f}s 状态 {r.status_code}")
+        chat_plan = None
         if r.status_code == 200:
-            summarize(r.json())
+            chat_plan = r.json()
+            summarize(chat_plan)
         else:
             print("错误:", r.json())
 
