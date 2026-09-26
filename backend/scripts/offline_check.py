@@ -884,6 +884,29 @@ def main():
         "（应为 1 张 / 4.6 / 君山镇磹水村）",
     )
 
+    # 16) 非景点场所：影城 / 剧院 / 文体中心 / 体育馆不该被推荐成景点
+    from app.skills.spot_filter import is_non_attraction, split_non_attractions
+
+    mixed = [
+        spot("杭州西湖风景名胜区", 30.25, 120.15),
+        spot("杭州博物馆", 30.24, 120.16),
+        spot("西航国际影城(康湖路店)", 25.50, 119.80),
+        spot("西湖区文体中心", 30.26, 120.07),
+        spot("运河大剧院", 30.30, 120.15),
+        spot("奥体中心体育馆", 30.20, 120.20),
+        spot("黄龙体育中心体育场", 30.26, 120.13),
+        spot("湘湖体育公园", 30.15, 120.20),   # 真公园，不能被误伤
+    ]
+    kept_spots, dropped_spots = split_non_attractions(
+        mixed, exempt_names=["西航国际影城(康湖路店)"]  # 用户点名要去的照样保留
+    )
+    print(
+        "== 非景点场所过滤 ==",
+        "切掉 " + "、".join(p.name for p in dropped_spots),
+        "| 体育公园是否被误伤:", is_non_attraction(mixed[7]),
+        "| 点名的影城是否保留:", any("影城" in p.name for p in kept_spots),
+    )
+
 
 if __name__ == "__main__":
     sys.exit(main())

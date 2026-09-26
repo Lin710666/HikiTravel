@@ -412,6 +412,7 @@ class PlannerSkill(Skill):
         self._note_schedule_rules(pref, issues)
         self._note_dedupe(ctx.get("dedupe_notes", []), issues)
         self._note_geo_gate(ctx.get("geo_gate", {}), issues)
+        self._note_spot_filter(ctx.get("spot_filter", []), issues)
         self._note_diet(ctx.get("diet_dropped", []), pref.dietary_restrictions, issues)
 
         start_date = self._resolve_start_date(pref, issues)
@@ -1777,6 +1778,31 @@ class PlannerSkill(Skill):
                 ),
                 suggestion="想保留其中某个，可以把它填进左侧「必去景点」，系统会照办；"
                 "也可以把天数加长，单独安排一天去远郊。",
+            )
+        )
+
+    @staticmethod
+    def _note_spot_filter(dropped: List[str], issues: List[CheckIssue]) -> None:
+        """如实说明"哪些候选更像城市场馆、被排除在自动选点之外"。
+
+        实测：兴趣里选了「娱乐」时，高德会把电影院（080601）当景点返回，
+        于是「西航国际影城」排进了第 2 天的行程；「西湖区文体中心」（140800 文化宫）
+        同理。现在分类码那一层已经断了源头，这里再如实汇报名字护栏拦下的点。
+        """
+        names = [name for name in dropped or [] if name]
+        if not names:
+            return
+        issues.append(
+            CheckIssue(
+                category="地点",
+                severity="low",
+                message=(
+                    "这些候选更像电影院 / 剧院 / 文体场馆，不属于景点，"
+                    "已排除在自动选点之外：" + "、".join(names[:4])
+                    + ("…" if len(names) > 4 else "") + "。"
+                ),
+                suggestion="想去的话可以在左侧「必去景点」里点名，系统会照办；"
+                "也可以在下方景点备选池里手动替换进去。",
             )
         )
 

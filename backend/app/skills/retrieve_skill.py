@@ -24,6 +24,7 @@ from .base import Skill
 from .authority import match_authority
 from .constraints import DIET_SEARCH_KEYWORDS, restaurant_excluded
 from .geo_gate import GEO_GATE_MIN_CANDIDATES, apply_gate
+from .spot_filter import split_non_attractions
 from .dedupe import dedupe_attractions, same_spot
 from .errors import MissingRequiredInfoError
 from .scoring import (
@@ -41,10 +42,15 @@ from .scoring import (
 #   110205 寺庙道观/110208 海滩/110209 观景点 | 110204 纪念馆
 #   140100 博物馆 | 140200 展览馆 | 140400 美术馆 | 140600 科技馆 | 140700 天文馆 | 140800 文化宫
 #   080501 游乐园/主题乐园 | 080600 影剧院 | 080401 度假村
+#
+# 注意：影剧院(080600) 与 文化宫(140800) **只放在 ATTRACTION_TYPES 里**，
+# 不放进兴趣分类码——实测「西航国际影城」（080601 电影院）、「西湖区文体中心」
+# （140800 文化宫）就是这样被"推荐"成景点的。用户自己点名要去时照样能解析
+# （ATTRACTION_TYPES 里保留），只是不再由系统主动推荐；另见 skills/spot_filter.py。
 PREFERENCE_TYPES: Dict[str, str] = {
-    "人文历史": "140100|140200|140400|140600|140700|140800|110201|110204|110205",
+    "人文历史": "140100|140200|140400|140600|140700|110201|110204|110205",
     "自然风光": "110101|110103|110200|110208|110209",
-    "娱乐": "080501|080600|080401",
+    "娱乐": "080501|080401",
     # 「美食」不产生景点，走独立餐厅检索，避免餐馆混进景点池
 }
 
@@ -582,11 +588,18 @@ class RetrieveSkill(Skill):
             must_pois=must_pois,
             min_keep=max(GEO_GATE_MIN_CANDIDATES, 3 * max(pref.duration_days, 1)),
         )
+        # 4.6) 非景点场所：影城 / 剧院 / 文体中心 / 体育馆这类不该被"推荐"成景点。
+        #      分类码那一层已经断了源头（见 PREFERENCE_TYPES 的注释），这里再兜一道
+        #      名字护栏；用户点名的必去景点不排除。见 skills/spot_filter.py。
+        kept, non_attractions = split_non_attractions(
+            gate.kept, exempt_names=[m.name for m in must_pois]
+        )
         ctx["geo_gate"] = {
             "gate_km": gate.gate_km,
             "dropped": [(p.name, km) for p, km in gate.dropped],
         }
-        ctx["attractions"] = gate.kept
+        ctx["spot_filter"] = [p.name for p in non_attractions]
+        ctx["attractions"] = kept
         ctx["attraction_options"] = attraction_pool
         ctx["must_visit_pois"] = must_pois
         ctx["unlocated_must_visit"] = unlocated
