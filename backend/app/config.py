@@ -45,12 +45,16 @@ class Settings:
     )
 
     # ---- 高德开放平台（POI / 天气 / 路线 / 周边酒店餐饮 实时数据）----
-    amap_api_key: str = os.getenv("AMAP_API_KEY", "")
+    # 三把密钥都**已内置**，clone 下来不配 .env 也能直接跑；
+    # 想换成自己的，就复制 .env.example 为 .env 填同名变量覆盖（.env 不入库）。
+    amap_api_key: str = os.getenv("AMAP_API_KEY", "e15977855225aaaedebd91c466a3c39e")
     # 浏览器端交互地图（高德 JS API）单独一套凭据：
     # 类型是「Web端(JS API)」，与上面的 Web服务 Key 不通用。
     # 缺失时前端自动退回静态地图，不会开天窗。
-    amap_js_key: str = os.getenv("AMAP_JS_KEY", "")
-    amap_security_code: str = os.getenv("AMAP_SECURITY_CODE", "")
+    # 安全提醒：JS Key 按设计必然出现在浏览器里，安全密钥同理，藏不住也没必要藏。
+    # 真正的防滥用是在高德控制台给该 Key 配「安全域名白名单」。
+    amap_js_key: str = os.getenv("AMAP_JS_KEY", "2b8f3210dc65ebae33324896c40150cf")
+    amap_security_code: str = os.getenv("AMAP_SECURITY_CODE", "20d4d829c08555735655a2c35707a444")
 
     # ---- 前端静态目录（生产环境托管 dist/）----
     static_dir: str = os.getenv("STATIC_DIR", "")
