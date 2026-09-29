@@ -1669,3 +1669,48 @@ textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================================================
+   顶层兜底页（ErrorBoundary）
+   渲染期抛错时整棵树会被卸载，普通界面样式都用不上，
+   所以这里只用最基本的居中卡片，颜色仍然走主题变量。
+   ============================================================ */
+.crash {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--canvas);
+  color: var(--text);
+}
+.crash__card {
+  width: min(560px, 100%);
+  padding: 28px 30px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.crash__title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.crash__msg {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--danger);
+  word-break: break-word;
+}
+.crash__hint {
+  margin: 0 0 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.crash__acts {
+  display: flex;
+  gap: 10px;
+}
+

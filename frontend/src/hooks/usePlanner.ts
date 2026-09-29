@@ -50,6 +50,15 @@ export function usePlanner(notify: (text: string) => void) {
   const [steps, setSteps] = useState<PlanStep[]>([])
   /** 行程已经可以先看了，但体检还在跑：这一行说明当前处于哪个阶段 */
   const [stageNote, setStageNote] = useState<string | null>(null)
+  /** 体检是否已经有结论（收到 done 事件，或从历史计划打开）。
+      没有结论 + 已不在生成中 = 这次被取消/中断了，界面要如实这么说，
+      不能显示成「未发现明显问题」。 */
+  const [checksSettled, setChecksSettled] = useState(false)
+  /** 「当前这一单」的序号。
+      同一单里初稿→终稿会换 plan_id（体检重生成会换新 uuid），
+      界面如果盯着 plan_id 判断"换了一单"，终稿一到就会把用户弹回第 1 天。
+      所以另外用一个只在"真的换了一单"时才涨的序号。 */
+  const [viewKey, setViewKey] = useState(0)
 
   const lastReqRef = useRef<LastRequest | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -149,6 +158,8 @@ export function usePlanner(notify: (text: string) => void) {
       setError(null)
       setSteps([])
       setStageNote(null)
+      setChecksSettled(false) // 新的一单：体检要从头跑，先别拿旧结论说事
+      setViewKey((k) => k + 1) // 只有"换了一单"才让界面回到第 1 天
       try {
         // 流式生成：行程初稿一到就先渲染出来（体检还要再跑一分钟左右），
         // 之后每次收到新的行程快照都覆盖一次，最终由 done 事件收尾。
@@ -182,6 +193,8 @@ export function usePlanner(notify: (text: string) => void) {
             setPlan(event.plan)
             setStageNote(null)
             setDirty(false)
+            // 体检到此为止有结论了（结论也可能是"没能完成"，但那也是结论）
+            setChecksSettled(true)
             // 终稿同样要让地图跟上：体检可能重排过路线、也可能整份重生成过。
             // 交互地图会随 plan 变化自己重画，静态图则必须在这里再取一次。
             void loadMap(event.plan)
@@ -287,6 +300,10 @@ export function usePlanner(notify: (text: string) => void) {
         setPlan(normalized)
         setDirty(false)
         setError(null)
+        // 历史计划里的体检结论是存下来的，直接算「已有结论」
+        setChecksSettled(true)
+        // 打开了另一份规划：界面回到第 1 天
+        setViewKey((k) => k + 1)
         window.history.replaceState(null, '', `?plan=${normalized.plan_id}`)
         void loadMap(normalized)
         if (!silent) notify('已打开历史计划')
@@ -348,6 +365,8 @@ export function usePlanner(notify: (text: string) => void) {
     dirty,
     steps,
     stageNote,
+    checksSettled,
+    viewKey,
     runForm,
     runChat,
     runRevise,

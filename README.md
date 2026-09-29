@@ -109,9 +109,25 @@ HikiTravel/
 ```bash
 cd backend
 cp .env.example .env      # 已内置 AMAP_API_KEY，可直接使用
-uv sync                    # 或 pip install -e .
+# 推荐 uv（会自动建 .venv）：
+uv sync
 uv run uvicorn app.main:app --reload   # http://localhost:8000
 ```
+
+> 没有 uv、只用 pip 的话，**务必先建虚拟环境再装依赖，不要装进全局 Python**，
+> 也**不要用 `pip install -e .`**：
+>
+> ```bash
+> python -m venv .venv
+> .venv\Scripts\python -m pip install .
+> .venv\Scripts\python -m uvicorn app.main:app --reload
+> ```
+>
+> 原因：`-e`（editable 安装）会把项目的**绝对路径**写进 `site-packages\*.pth`，
+> 而 `.pth` 是按系统编码（中文 Windows 上是 GBK）解码的。路径里只要有非 ASCII
+> 字符（例如项目放在中文目录下），整台机器的 Python 每次启动都会
+> `Fatal Python error: Failed to import the site module`——连 `python -c` 都跑不起来，
+> `install.bat` / `start.bat` 也会跟着全部失效。这个坑真实踩过。
 
 **前端**：
 

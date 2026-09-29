@@ -5,9 +5,17 @@
 #   uv sync                # 创建 .venv 并安装依赖，同时生成 uv.lock 锁文件
 #   uv run uvicorn app.main:app --reload
 #
-# 评委未安装 uv 时，pip 同样可用：
-#   pip install -e ".[dev]"
-#   uvicorn app.main:app --reload
+# 评委未安装 uv 时，pip 同样可用 —— 但务必先建虚拟环境，依赖装进 venv，
+# 不要装进全局 Python：
+#   python -m venv .venv
+#   .venv\Scripts\python -m pip install .
+#   .venv\Scripts\python -m uvicorn app.main:app --reload
+#
+# ★ 不要用 pip install -e .（editable 安装）。
+#   editable 会把项目的绝对路径写进 site-packages\*.pth，而 .pth 是按
+#   系统编码解码的：路径里只要有非 ASCII 字符（比如项目放在中文目录下），
+#   整台机器的 Python 每次启动都会 Fatal error —— 连 python -c 都跑不起来，
+#   start.bat / install.bat 也会跟着全部失效。（这个坑真实踩过。）
 
 [project]
 name = "travelplanner-backend"

@@ -29,12 +29,19 @@ export default function App() {
     window.localStorage.setItem('tp-theme', theme)
   }, [theme])
 
-  /* 换了一版规划就回到第 1 天，避免停在上一个行程的「第 3 天」 */
-  const planId = planner.plan?.plan_id
+  /* 换了一单才回到第 1 天，避免停在上一个行程的「第 3 天」。
+     这里**不能**盯着 plan_id：同一单里终稿会换一个新的 plan_id
+     （体检判定有硬伤时会重新生成、带新 uuid），那样用户正翻到第 3 天，
+     终稿一到达就被弹回第 1 天——而这件事几乎每一单都会发生。 */
   useEffect(() => {
     setDay(0)
     setFocus(null)
-  }, [planId])
+  }, [planner.viewKey])
+
+  /* day 可能越界：换了一单之后天数变少、或深链打开一份更短的规划。
+     收敛成合法下标再往下传，否则会「标题写第 5 天、内容却是第 1 天」。 */
+  const dayCount = planner.plan?.daily_plans.length ?? 0
+  const safeDay = dayCount > 0 ? Math.min(day, dayCount - 1) : 0
 
   const toggleTheme = useCallback(
     () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
@@ -61,12 +68,12 @@ export default function App() {
           <WorkColumn
             planner={planner}
             notify={notify}
-            day={day}
+            day={safeDay}
             setDay={setDay}
             focus={focus}
             setFocus={setFocus}
           />
-          <MapPane planner={planner} day={day} theme={theme} focus={focus} />
+          <MapPane planner={planner} day={safeDay} theme={theme} focus={focus} />
         </div>
       </div>
 

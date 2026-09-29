@@ -5,6 +5,26 @@ title Travel Planner - One-Click Deploy
 
 cd /d "%~dp0"
 
+REM ============================================================
+REM Force Python to read .pth files as UTF-8.
+REM
+REM Why: .pth files are decoded with the system locale codec (GBK on a
+REM Chinese Windows). If any .pth holds a non-ASCII path - which is exactly
+REM what "pip install -e ." writes when the project lives in a folder whose
+REM path has non-ASCII characters - the interpreter dies at startup with
+REM   UnicodeDecodeError -> Fatal Python error: Failed to import the site module
+REM and even "python -c" stops working, so every step below would fail.
+REM This script no longer does editable installs, so such a .pth is never
+REM created again; this line also rescues machines that already have one.
+REM ============================================================
+set "PYTHONUTF8=1"
+
+REM Keep this file ASCII-only. cmd reads a .bat with the console code page,
+REM and non-ASCII characters shift the parser offset, which eats the "REM"
+REM keyword off following lines and makes cmd try to run the leftover text
+REM as commands. (That is a real, already-hit failure mode.)
+chcp 65001 >nul
+
 echo.
 echo  ==================================================
 echo    Travel Planner - One-Click Deploy
@@ -21,8 +41,18 @@ set "HAS_UV="
 
 uv --version >nul 2>nul && set "HAS_UV=1"
 
-if exist "%~dp0backend\.venv\Scripts\python.exe" (
-    set "PYEXE=%~dp0backend\.venv\Scripts\python.exe"
+REM A venv that was moved or renamed is broken: python.exe still exists, but
+REM its internal paths point at the old folder, so even "import pip" fails.
+REM Such a venv must NEVER be picked as PYEXE - step 1.5 deletes it, and we
+REM would otherwise end up trying to run a python.exe that no longer exists.
+set "VENV_PY=%~dp0backend\.venv\Scripts\python.exe"
+set "VENV_BROKEN="
+if exist "%VENV_PY%" (
+    "%VENV_PY%" -m pip --version >nul 2>nul
+    if errorlevel 1 set "VENV_BROKEN=1"
+)
+if exist "%VENV_PY%" if not defined VENV_BROKEN (
+    set "PYEXE=%VENV_PY%"
     goto :py_ready
 )
 if defined HAS_UV (
@@ -77,6 +107,42 @@ if not defined PYEXE (
     goto :fail
 )
 echo [1/5] Python found
+
+REM ============================================================
+REM 1.5 Create the project venv.
+REM
+REM The old script only DETECTED a venv and never created one, so on a
+REM machine without uv it fell through to installing with the SYSTEM
+REM Python. Two bad consequences:
+REM   (1) dependencies landed in the global environment;
+REM   (2) that command used -e (editable), which writes the project's
+REM       absolute path into site-packages\*.pth - and a non-ASCII path
+REM       there kills Python for the whole machine (start.bat included).
+REM A venv that was moved or renamed is also broken: python.exe still
+REM exists but its internal paths point at the old folder, so "import pip"
+REM fails. Those get rebuilt here.
+REM ============================================================
+set "VPY=%~dp0backend\.venv\Scripts\python.exe"
+if defined HAS_UV (
+    echo        uv detected - uv sync will create/refresh the venv
+) else (
+    if defined VENV_BROKEN (
+        echo        existing venv is broken [moved or renamed folder?] - rebuilding
+        rmdir /s /q "%~dp0backend\.venv"
+        REM give Windows a moment to release the directory handles
+        ping -n 2 127.0.0.1 >nul
+    )
+    if exist "%VPY%" (
+        echo        venv found: backend\.venv
+    ) else (
+        echo        creating venv: backend\.venv
+        "%PYEXE%" %PYARGS% -m venv "%~dp0backend\.venv"
+        if errorlevel 1 (
+            echo [ERROR] Failed to create the virtual environment.
+            goto :fail
+        )
+    )
+)
 
 REM ============================================================
 REM 2. Locate npm
@@ -158,7 +224,18 @@ if defined HAS_UV (
     popd
 ) else (
     pushd backend
-    "%PYEXE%" %PYARGS% -m pip install -e . --quiet
+    REM Install into the venv, with a NON-editable install.
+    REM The old line was: pip install -e .
+    REM That "-e" is what wrote the project path into site-packages\*.pth and
+    REM broke Python machine-wide when the path was non-ASCII. A plain install
+    REM puts only the dependencies in the venv and writes no .pth at all.
+    "%VPY%" -m pip --version >nul 2>nul
+    if errorlevel 1 (
+        echo        bootstrapping pip into the venv...
+        "%VPY%" -m ensurepip --upgrade
+    )
+    "%VPY%" -m pip install --upgrade pip --quiet
+    "%VPY%" -m pip install . --quiet
     if errorlevel 1 (
         popd
         echo [ERROR] Backend dependencies install failed [pip].
@@ -184,7 +261,7 @@ popd
 
 echo.
 echo  ==================================================
-echo    Deploy done! Starting service...
+echo    Deploy done - Starting service...
 echo    Open http://localhost:8000 in your browser.
 echo    Health check: http://localhost:8000/api/health
 echo    Press Ctrl+C to stop.
@@ -195,7 +272,12 @@ set "STATIC_DIR=%~dp0frontend\dist"
 set "DB_PATH=%~dp0backend\data\travelplanner.db"
 
 pushd backend
-"%PYEXE%" %PYARGS% -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+REM Always prefer the venv interpreter: the dependencies live in it.
+if exist "%VPY%" (
+    "%VPY%" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+) else (
+    "%PYEXE%" %PYARGS% -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+)
 popd
 
 echo.
