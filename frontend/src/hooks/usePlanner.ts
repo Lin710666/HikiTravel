@@ -31,6 +31,8 @@ type LastRequest =
 export interface PlannerError {
   message: string
   kind: ApiErrorKind
+  /** 后端给的问题编号（仅未预期异常带）：界面展示出来便于用户报障时对上号 */
+  traceId?: string
 }
 
 export function usePlanner(notify: (text: string) => void) {
@@ -206,7 +208,11 @@ export function usePlanner(notify: (text: string) => void) {
           notify('已取消本次生成')
           return
         }
-        setError({ message: err.message || '生成失败', kind: err.kind ?? 'network' })
+        setError({
+          message: err.message || '生成失败',
+          kind: err.kind ?? 'network',
+          traceId: err.traceId,
+        })
       } finally {
         setLoading(false)
         setStageNote(null)
@@ -291,7 +297,13 @@ export function usePlanner(notify: (text: string) => void) {
         void loadMap(normalized)
         if (!silent) notify('已打开历史计划')
       } catch (e) {
-        if (!silent) setError({ message: (e as Error).message || '读取计划失败', kind: 'http' })
+        if (!silent) {
+          setError({
+            message: (e as Error).message || '读取计划失败',
+            kind: 'http',
+            traceId: (e as ApiError).traceId,
+          })
+        }
       }
     },
     [loadMap, notify],

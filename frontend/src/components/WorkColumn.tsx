@@ -127,6 +127,9 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
           <i className="alert__dot" />
           <div>
             {error.message}
+            {error.traceId && (
+              <div className="alert__trace">问题编号 {error.traceId}（反馈问题时请附上）</div>
+            )}
             <div className="alert__acts">
               <button className="btn btn--link" onClick={retry}>
                 重试
