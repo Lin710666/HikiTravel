@@ -11,6 +11,7 @@ import json
 import logging
 import queue
 import threading
+import uuid
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 import base64
@@ -133,13 +134,25 @@ def _sse(payload: Dict[str, Any]) -> str:
 
 
 def _error_event(exc: Exception) -> Dict[str, Any]:
-    """把 Skill 层异常翻译成前端能识别的错误事件（口径与 _execute 一致）。"""
+    """把 Skill 层异常翻译成前端能识别的错误事件（口径与 _execute 一致）。
+
+    已知领域异常：用异常自带的、本来就是写给用户看的中文提示；
+    未预期异常：只回一句通用提示 + 问题编号，原始内容（可能带请求地址 / 配置）
+    只进日志、不发给前端——与 main.py 的全局兜底同一口径。
+    """
     if isinstance(exc, LLMUnavailableError):
         return {"type": "error", "kind": "network", "message": str(exc)}
     if isinstance(exc, (MissingRequiredInfoError, SkillError, AmapDestinationError, AmapError)):
         return {"type": "error", "kind": "http", "message": str(exc)}
-    logger.exception("流式生成出现未预期异常")
-    return {"type": "error", "kind": "network", "message": f"生成过程中出现异常：{exc}"}
+    # 编号生成与 main.py 的 _problem_id 同一规则；这里不 import 它，避免循环依赖
+    trace_id = uuid.uuid4().hex[:8]
+    logger.exception("流式生成出现未预期异常 [%s]", trace_id)
+    return {
+        "type": "error",
+        "kind": "network",
+        "message": "服务内部出现异常，请稍后重试。",
+        "trace_id": trace_id,
+    }
 
 
 def _stream(work: Callable[[Callable[[Dict[str, Any]], None]], None]) -> Iterator[str]:

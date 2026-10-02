@@ -31,24 +31,66 @@ export type PlanEvent =
   | ({ type: 'step' } & PlanStep)
   | { type: 'plan'; stage: string; note: string; plan: TravelPlan }
   | { type: 'done'; plan: TravelPlan; checks: PlanCheck | null }
-  | { type: 'error'; kind: ApiErrorKind; message: string }
+  | { type: 'error'; kind: ApiErrorKind; message: string; trace_id?: string }
 
 /** 带类型的请求错误：前端据此决定提示文案与是否显示「重试 / 检查连接」 */
 export class ApiError extends Error {
   kind: ApiErrorKind
   status?: number
+  /** 后端给的问题编号：用户报障时报它，后端日志里一搜即得（仅未预期异常才有） */
+  traceId?: string
 
-  constructor(message: string, kind: ApiErrorKind, status?: number) {
+  constructor(message: string, kind: ApiErrorKind, status?: number, traceId?: string) {
     super(message)
     this.name = 'ApiError'
     this.kind = kind
     this.status = status
+    this.traceId = traceId
   }
 }
 
 interface RequestOptions {
   timeoutMs?: number
   signal?: AbortSignal
+}
+
+/** 后端统一错误结构：{detail, code, trace_id} */
+interface ErrorBody {
+  detail?: unknown
+  code?: string
+  trace_id?: string
+}
+
+/**
+ * 从后端的错误响应里取出一句给用户看的话。
+ *
+ * 三种情况都要扛住，否则用户就会看到 `请求失败 (500)` 这种干巴巴的文案：
+ * - detail 是字符串：已知领域异常，直接用（本来就是写给用户看的）；
+ * - detail 是数组/对象：参数校验类错误，换成一句人话；
+ * - 整体不是 JSON（网关超时可能回 HTML）：按状态码兜底。
+ */
+function messageFromBody(data: unknown, status: number): string {
+  const detail = (data as ErrorBody | null)?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) return '提交的内容格式不正确，请检查后重试。'
+  if (detail && typeof detail === 'object') {
+    const nested = (detail as { message?: unknown }).message
+    if (typeof nested === 'string' && nested.trim()) return nested
+  }
+  if (status >= 500) return '服务内部出现异常，请稍后重试。'
+  return `请求失败 (${status})`
+}
+
+/** 把一次失败响应（非 2xx）统一转成带文案与问题编号的 ApiError。 */
+async function readApiError(res: Response): Promise<ApiError> {
+  const data = await res.json().catch(() => null)
+  const traceId = (data as ErrorBody | null)?.trace_id
+  return new ApiError(
+    messageFromBody(data, res.status),
+    'http',
+    res.status,
+    typeof traceId === 'string' ? traceId : undefined,
+  )
 }
 
 async function post<T>(path: string, body: unknown, options: RequestOptions = {}): Promise<T> {
@@ -70,14 +112,7 @@ async function post<T>(path: string, body: unknown, options: RequestOptions = {}
       body: JSON.stringify(body),
       signal: controller.signal,
     })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new ApiError(
-        (data as { detail?: string }).detail || `请求失败 (${res.status})`,
-        'http',
-        res.status,
-      )
-    }
+    if (!res.ok) throw await readApiError(res)
     return (await res.json()) as T
   } catch (e) {
     if (e instanceof ApiError) throw e
@@ -131,14 +166,8 @@ async function streamPlan(
       body: JSON.stringify(body),
       signal: controller.signal,
     })
-    if (!res.ok || !res.body) {
-      const data = await res.json().catch(() => ({}))
-      throw new ApiError(
-        (data as { detail?: string }).detail || `请求失败 (${res.status})`,
-        'http',
-        res.status,
-      )
-    }
+    if (!res.ok) throw await readApiError(res)
+    if (!res.body) throw new ApiError('后端没有返回可读的数据流，请重试。', 'network')
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
@@ -163,7 +192,7 @@ async function streamPlan(
             // 流式响应一开始就是 200，业务失败只能靠事件传达；
             // 这里转成 ApiError，让调用方的错误处理与非流式接口完全一致。
             await reader.cancel().catch(() => {})
-            throw new ApiError(event.message, event.kind)
+            throw new ApiError(event.message, event.kind, undefined, event.trace_id)
           }
           onEvent(event)
         }
@@ -292,7 +321,7 @@ export async function health(): Promise<Health> {
   const timer = window.setTimeout(() => controller.abort(), SHORT_TIMEOUT_MS)
   try {
     const res = await fetch(`${BASE}/health`, { signal: controller.signal })
-    if (!res.ok) throw new ApiError(`健康检查失败 (${res.status})`, 'http', res.status)
+    if (!res.ok) throw await readApiError(res)
     return (await res.json()) as Health
   } catch (e) {
     if (e instanceof ApiError) throw e
@@ -331,14 +360,7 @@ export async function autocompletePlaces(
     `${BASE}/places/autocomplete?q=${encodeURIComponent(q)}${cityParam}`,
     { signal },
   )
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new ApiError(
-      (data as { detail?: string }).detail || `候选获取失败 (${res.status})`,
-      'http',
-      res.status,
-    )
-  }
+  if (!res.ok) throw await readApiError(res)
   return res.json()
 }
 
@@ -371,14 +393,7 @@ export async function searchAttractions(
     `${BASE}/places/attractions?q=${encodeURIComponent(q)}${cityParam}`,
     { signal },
   )
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new ApiError(
-      (data as { detail?: string }).detail || `候选获取失败 (${res.status})`,
-      'http',
-      res.status,
-    )
-  }
+  if (!res.ok) throw await readApiError(res)
   return res.json()
 }
 
@@ -391,21 +406,21 @@ export interface MapConfig {
 
 export async function fetchMapConfig(signal?: AbortSignal): Promise<MapConfig> {
   const res = await fetch(`${BASE}/map/config`, { signal })
-  if (!res.ok) throw new ApiError('获取地图配置失败', 'http', res.status)
+  if (!res.ok) throw await readApiError(res)
   return res.json()
 }
 
 // 历史计划列表
 export async function listPlans(): Promise<PlanSummary[]> {
   const res = await fetch(`${BASE}/plans`)
-  if (!res.ok) throw new ApiError('获取历史计划失败', 'http', res.status)
+  if (!res.ok) throw await readApiError(res)
   return res.json()
 }
 
 // 按 ID 读取一条历史计划
 export async function getPlan(id: string): Promise<TravelPlan> {
   const res = await fetch(`${BASE}/plans/${id}`)
-  if (!res.ok) throw new ApiError('读取计划失败', 'http', res.status)
+  if (!res.ok) throw await readApiError(res)
   return res.json()
 }
 

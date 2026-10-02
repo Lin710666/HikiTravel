@@ -36,6 +36,7 @@
   --gutter: 16px;
   /* 应用外壳尺寸：左输入栏固定宽，右地图栏按视口比例伸缩（上限 680） */
   --rail-w: 300px;
+  --gut-w: 6px;              /* 拖宽分隔条的宽度（触屏下会加宽） */
   --map-w: clamp(360px, 41vw, 680px);
   --content-w: 600px;
 }
@@ -125,12 +126,24 @@ textarea {
   font-weight: 600;
   letter-spacing: -0.01em;
   flex: none;
+  /* 真正居中于顶栏。
+     为什么不用 margin:auto：flex 里的 auto margin 是在剩余空间里平分，
+     而右边那组按钮占了一大块，结果 brand 只到 1/4 处、看着还是偏左（实测 x=346/1410）。
+     绝对定位才是相对整行中心。左上角那块被反代注入的「返回主页」占着
+     （fixed 定位，不在这个 flex 流里），居中之后同时也躲开了它。 */
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 .topbar__trip {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  /* brand 改成绝对定位后不再占位，行程标题会顶到最左边 ——
+     让开那个固定的「返回主页」按钮，并限宽，免得长标题撞到居中的 brand。 */
+  margin-left: 112px;
+  max-width: 34%;
   padding-left: 16px;
   border-left: 1px solid var(--hairline);
   font-size: 13px;
@@ -542,7 +555,8 @@ textarea {
 }
 .shell {
   display: grid;
-  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--map-w);
+  /* 5 列：左栏 | 分隔条 | 中栏 | 分隔条 | 右栏 —— 两条分隔条可以拖动，改左右栏宽度 */
+  grid-template-columns: var(--rail-w) var(--gut-w) minmax(0, 1fr) var(--gut-w) var(--map-w);
   min-height: 0;
   background: var(--canvas);
 }
@@ -1714,3 +1728,60 @@ textarea {
   gap: 10px;
 }
 
+/* ---------------------------------------------------------------- 触屏 / 窄屏适配 */
+/* 这两条必须放在文件**末尾**：同优先级下后面的规则才生效，
+   而 .iconbtn{width:32px} 在前面 —— 放前面会被它压掉（实测就是这么翻的车）。 */
+@media (pointer: coarse), (max-width: 1024px) {
+  /* 顶栏那排小图标按钮（外观切换等）只有 32×32，鼠标点得中、手指点不中（建议 ≥44×44） */
+  .iconbtn {
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (max-width: 420px) {
+  /* 顶栏右侧按钮宽度是固定的，左边再留 112px 给「返回主页」，320px 的屏会被撑出去 51px（实测）。
+     小屏上把这行品牌字让出来 —— 它信息量最低。 */
+  .brand {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- 拖动分栏 */
+/* 两条分隔条：拖它改左右栏宽度。宽度只存在内存里，刷新回默认 ——
+   免得哪天被拖成一个奇怪的比例又找不回来。 */
+.gutter {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;          /* 拖动时不要顺带滚动页面 */
+  z-index: 2;
+  background: transparent;
+}
+.gutter::before {
+  /* 中间那根看得见的细线 */
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--hairline);
+  transform: translateX(-50%);
+}
+.gutter::after {
+  /* 加宽的命中区：细线不好抓，真正能抓的是这一圈 */
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.gutter:hover::after,
+.gutter:active::after {
+  background: var(--accent-soft);
+}
+@media (pointer: coarse), (max-width: 1024px) {
+  /* 手指点不中 6px 的细线，触屏上加宽 */
+  :root {
+    --gut-w: 14px;
+  }
+}

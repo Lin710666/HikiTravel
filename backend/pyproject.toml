@@ -16,6 +16,9 @@
 #   系统编码解码的：路径里只要有非 ASCII 字符（比如项目放在中文目录下），
 #   整台机器的 Python 每次启动都会 Fatal error —— 连 python -c 都跑不起来，
 #   start.bat / install.bat 也会跟着全部失效。（这个坑真实踩过。）
+#
+# 注：上游 main 分支这里是 `pip install -e ".[dev]"`，正是上面警告的那条命令。
+#     从远端同步时保留了这条本地警告，别被上游文档带回坑里。
 
 [project]
 name = "travelplanner-backend"

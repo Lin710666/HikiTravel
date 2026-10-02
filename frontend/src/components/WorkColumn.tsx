@@ -127,6 +127,9 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
           <i className="alert__dot" />
           <div>
             {error.message}
+            {error.traceId && (
+              <div className="alert__trace">问题编号 {error.traceId}（反馈问题时请附上）</div>
+            )}
             <div className="alert__acts">
               <button className="btn btn--link" onClick={retry}>
                 重试
@@ -161,7 +164,7 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
     const current = plan.daily_plans[day] ?? first
     const hasRemoved = plan.daily_plans.some((d, di) => di === day && d.timeline.length === 0)
     // 有坐标的行程项（地图上画了点）才可点击定位；酒店另有 hotelKey
-    const geoKeys = new Set(collectPoints(plan).map((p) => poiKey(p.lng, p.lat)))
+    const geoKeys = new Set(collectPoints(plan).map((p) => poiKey(p.day, p.itemIndex)))
     const hotelFocusKey = current?.hotel && current.hotel.location ? hotelKey(day) : null
     const hotelFocused = hotelFocusKey != null && focus === hotelFocusKey
 
@@ -259,12 +262,8 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
           {current && current.timeline.length > 0 ? (
             <ol className="timeline">
               {current.timeline.map((item, ii) => {
-                // 用坐标当键（缘由见 lib/amap.ts 的 poiKey 注释）：删掉一项、
-                // 或者后台体检重排了顺序，下标都会变，但「是哪个地方」没变 ——
-                // 用下标的话高亮会落到邻居身上，地图还会飞错点。
-                const loc = item.poi.location
-                const key = loc ? poiKey(loc.lng, loc.lat) : null
-                const hasGeo = key !== null && geoKeys.has(key)
+                const key = poiKey(day, ii)
+                const hasGeo = geoKeys.has(key)
                 const focused = hasGeo && focus === key
                 const pool = poolOf(plan, item.poi.type)
                 return (
@@ -462,8 +461,7 @@ export default function WorkColumn({ planner, notify, day, setDay, focus, setFoc
 
         <ChecksCard
           plan={plan}
-          loading={loading}
-          settled={planner.checksSettled}
+          disabled={loading}
           notify={notify}
         />
 

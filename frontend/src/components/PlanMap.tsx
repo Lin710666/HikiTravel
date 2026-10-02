@@ -151,7 +151,7 @@ export default function PlanMap({ plan, day, theme, config, focus, fallback }: P
 
       points.forEach((p, i) => {
         const active = p.day === day
-        const key = poiKey(p.lng, p.lat)
+        const key = poiKey(p.day, p.itemIndex)
         const focused = focusRef.current === key
         const size = focused ? 34 : active ? 26 : 22
         const marker = new AMap.Marker({
@@ -255,13 +255,6 @@ export default function PlanMap({ plan, day, theme, config, focus, fallback }: P
       const dayHotel = hotelsRef.current.find((h) => h.hotel.day === day)
       if (dayHotel) fitTargets.push(dayHotel.marker)
       if (fitTargets.length) map.setFitView(fitTargets, false, [70, 70, 70, 70])
-    }).catch((e: Error) => {
-      /* 上面初始化那次是带 catch 的，这里原来漏了。
-         高德脚本加载失败（Key 平台类型不对、安全域名不在白名单、内网被墙）时，
-         漏掉 catch 会变成 unhandled rejection：failed 不置位、fallback 也就不渲染，
-         用户只看到一块**空白**地图，连「重新获取」按钮都不出现。
-         补上 catch，失败就走静态图 / 占位那条正常的降级路径。 */
-      if (!cancelled) setFailed(e?.message || '地图加载失败')
     })
 
     return () => {
