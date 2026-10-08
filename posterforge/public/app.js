@@ -558,6 +558,14 @@ function applyTemplateById(id) {
   if (!t) return;
   window.__pickedTemplate = t;
 
+  // 版式也跟着切到模板指定的那个。
+  // 不切的话 state.composition 会残留上一个版式并压过模板，
+  // 用户看到的就是"套了模板但样式没变"；而且版式列表里的「当前」标记
+  // 也要跟着走，否则界面显示和实际出图是两套东西。
+  state.composition = t.composition || "";
+  renderCompChips();
+  renderTplPicker();
+
   // 把示例内容填进输入框
   const box = $("#promptInput");
   if (box && t.brief) {
@@ -703,6 +711,13 @@ async function loadTemplates() {
 
 function pickTemplate(t) {
   window.__pickedTemplate = t;
+  // 与 applyTemplateById 保持一致：版式切到模板指定的那个，
+  // 否则残留的 state.composition 会压过模板（见 composeWithModel 里的取值顺序）。
+  if ("composition" in t) {
+    state.composition = t.composition || "";
+    renderCompChips();
+    renderTplPicker();
+  }
   const c = currentContent();
   $("#genBtn").textContent = "生成海报";
   // 滚动到生成区并给一个短暂高亮，让用户明确"模板已套用"
@@ -2064,7 +2079,15 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       brief, photos, facts, mode,
-      composition: state.composition || (picked && picked.composition ? picked.composition : null),
+      // 模板的构图优先于 state.composition。
+      //
+      // 原来写的是 `state.composition || 模板构图` —— 顺序反了。state.composition
+      // 会被「手选版式」和「参考图分析」写值，而套用模板时并不会清它，
+      // 于是只要用户先点过版式或先分析过参考图，之后套模板都会**被旧版式盖掉**，
+      // 表现就是"套了模板，生成出来却不是那个样式"。
+      // 选版式那边会清 __pickedTemplate（见 renderCompositionPicker），
+      // 两侧互相排斥，所以这里以模板为准是安全的。
+      composition: (picked && picked.composition) ? picked.composition : (state.composition || null),
       variant: picked && picked.variant ? picked.variant : "a",
       // 精调只跟模板走 —— 用户手选版式后 __pickedTemplate 会被清空，
       // 这时不该再套用旧模板的字号档位

@@ -319,43 +319,84 @@ function stripLayers(urls, height) {
   return out;
 }
 
+/**
+ * 打卡卡的版面（构图）。
+ *
+ * 键名与海报的 POSTER_COMPOSITIONS **刻意对齐** —— 界面上两个模式共用同一排
+ * 版式按钮，用户在哪个模式点的是同一个词，就不该出现"这个词在打卡卡里没用"
+ * 的情况。原来打卡卡的版面只能由照片张数决定，用户点什么都不会变。
+ *
+ * photo 字段决定照片区怎么摆：
+ *   full  铺满整张卡（文字压图上，需要遮罩保证可读）
+ *   band  上方一条（文字在下方实色区，图字不重叠）
+ *   side  右侧出血，文字走左侧窄栏
+ *   card  居中悬浮的圆角卡片
+ *   none  不用图，纯文字卡
+ */
+export const CHECKIN_COMPOSITIONS = {
+  fullbleed: { label: "满版压暗", photo: "full", align: "left" },
+  axial:     { label: "中轴对称", photo: "full", align: "center" },
+  split:     { label: "上下分割", photo: "band", align: "left" },
+  splitv:    { label: "左右分割", photo: "side", align: "left" },
+  focal:     { label: "重心环绕", photo: "card", align: "left" },
+  grid:      { label: "网格信息", photo: "band", align: "left", cells: true },
+  typeled:   { label: "文字主导", photo: "none", align: "left" },
+};
+
 /** 打卡卡的照片网格（比例值，间隙 0.015 ≈ 60px @1080） */
-export function checkinPhotoGrid(n) {
+export function checkinPhotoGrid(n, composition) {
   const G = 0.015;
-  if (n <= 1) {
-    return { cells: [{ box: [0.068, 0.106], size: [0.864, 0.522] }], framed: true };
+  const comp = CHECKIN_COMPOSITIONS[composition] || CHECKIN_COMPOSITIONS.split;
+
+  if (comp.photo === "none" || n <= 0) return { cells: [], framed: false, mode: "none" };
+
+  // 照片区：不同版面占的位置完全不同，这是"版面"而不是"参数"
+  let area;
+  if (comp.photo === "full")      area = { x: 0,     y: 0,     w: 1,     h: 1     };
+  else if (comp.photo === "side") area = { x: 0.516, y: 0.106, w: 0.416, h: 0.780 };
+  else if (comp.photo === "card") area = { x: 0.088, y: 0.132, w: 0.824, h: 0.400 };
+  // grid 与 split 都用"上方带"，但 grid 的照片带更矮、文字区更大，
+  // 并在两者之间压一道分隔线 —— 否则这两个版式在打卡卡里长得一模一样，
+  // 用户点了会觉得"没生效"。
+  else if (comp.photo === "band" && comp.cells) area = { x: 0.068, y: 0.106, w: 0.864, h: 0.404 };
+  else                            area = { x: 0.068, y: 0.106, w: 0.864, h: 0.522 };
+
+  // 单张：直接占满照片区
+  if (n === 1) {
+    return {
+      cells: [{ box: [area.x, area.y], size: [area.w, area.h] }],
+      framed: comp.photo !== "full",
+      mode: comp.photo,
+    };
   }
+  // 多张：在照片区内部再分格
   if (n === 2) {
-    const w = (0.864 - G) / 2;
+    const w = (area.w - G) / 2;
     return {
       cells: [
-        { box: [0.068, 0.106], size: [w, 0.522] },
-        { box: [0.068 + w + G, 0.106], size: [w, 0.522] },
+        { box: [area.x, area.y], size: [w, area.h] },
+        { box: [area.x + w + G, area.y], size: [w, area.h] },
       ],
-      framed: false,
+      framed: false, mode: comp.photo,
     };
   }
   if (n === 3) {
-    const w = (0.864 - 2 * G) / 3;
+    const w = (area.w - 2 * G) / 3;
     return {
-      cells: [
-        { box: [0.068, 0.106], size: [w, 0.522] },
-        { box: [0.068 + (w + G), 0.106], size: [w, 0.522] },
-        { box: [0.068 + 2 * (w + G), 0.106], size: [w, 0.522] },
-      ],
-      framed: false,
+      cells: [0, 1, 2].map((i) => ({ box: [area.x + i * (w + G), area.y], size: [w, area.h] })),
+      framed: false, mode: comp.photo,
     };
   }
-  const w = (0.864 - G) / 2;
-  const h = (0.522 - G) / 2;
+  const w = (area.w - G) / 2;
+  const h = (area.h - G) / 2;
   return {
     cells: [
-      { box: [0.068, 0.106], size: [w, h] },
-      { box: [0.068 + w + G, 0.106], size: [w, h] },
-      { box: [0.068, 0.106 + h + G], size: [w, h] },
-      { box: [0.068 + w + G, 0.106 + h + G], size: [w, h] },
+      { box: [area.x, area.y], size: [w, h] },
+      { box: [area.x + w + G, area.y], size: [w, h] },
+      { box: [area.x, area.y + h + G], size: [w, h] },
+      { box: [area.x + w + G, area.y + h + G], size: [w, h] },
     ],
-    framed: false,
+    framed: false, mode: comp.photo,
   };
 }
 
@@ -370,9 +411,10 @@ export function checkinPhotoGrid(n) {
 export function buildCheckinSpecFrom(content, opts = {}) {
   const urls = (opts.photoUrls || []).filter(Boolean).slice(0, 4);
   const n = urls.length;
-  const gridName = opts.grid ||
-    ({ 0: "single", 1: "single", 2: "two-col", 3: "three-col", 4: "quad" }[n]) || "single";
-  const grid = checkinPhotoGrid(n);
+  const compName = CHECKIN_COMPOSITIONS[opts.composition] ? opts.composition : "split";
+  const comp = CHECKIN_COMPOSITIONS[compName];
+  // 文字主导不需要照片，其余版面按张数分格
+  const grid = checkinPhotoGrid(comp.photo === "none" ? 0 : n, compName);
   const srcs = n ? urls.map((u) => String(u).replace(/^\//, "")) : ["assets/sample-photo.png"];
 
   const palette = {
@@ -381,12 +423,16 @@ export function buildCheckinSpecFrom(content, opts = {}) {
     gold: "#8fd6c2", price: "#ffd08a", panel: "#0a111c", divider: "#ffffff2e",
   };
 
+  const centered = comp.align === "center";
+  const pad = grid.mode === "full" ? 0.068 : 0.068;
+
   const layers = [
     { type: "text", name: "topLabel",
       text: content.topLabel || "现场打卡 · ○○（填你的店名）",
-      x: 0.068, y: 0.046, font: "bold", size: 28, color: "accent" },
+      x: centered ? 0.5 : pad, y: 0.046, ...(centered ? { align: "center" } : {}),
+      font: "bold", size: 28, color: "accent" },
     { type: "text", name: "topDate",
-      text: n ? `已载入 ${n} 张照片` : "未上传照片",
+      text: comp.photo === "none" ? "文字卡" : (n ? `已载入 ${n} 张照片` : "未上传照片"),
       x: 0.932, y: 0.046, align: "right", font: "sans", size: 22, color: "inkMute" },
   ];
 
@@ -394,10 +440,30 @@ export function buildCheckinSpecFrom(content, opts = {}) {
     layers.push({
       type: "image", name: "photo" + (i || ""),
       src: srcs[i] || srcs[0],
-      box: { box: g.box, size: g.size }, fit: "cover", radius: 0.04,
+      box: { box: g.box, size: g.size }, fit: "cover",
+      radius: grid.mode === "full" ? 0 : 0.04,
       ...(grid.framed ? {} : { stroke: "#ffffff40", strokeWidth: 2 }),
     });
   });
+
+  // 满版：文字压在照片上，必须压一层逐行遮罩，否则深色照片配深色字直接看不见
+  if (grid.mode === "full") {
+    layers.push({
+      type: "shape", name: "scrim", shape: "rect",
+      box: { box: [0, 0], size: [1, 1] },
+      fill: "#000000", opacity: 0.42,
+    });
+  }
+
+  // 网格信息：在照片带下缘压一道分隔线，把"图区"和"信息区"明确切开
+  if (comp.cells && grid.cells.length) {
+    const bottom = grid.cells[0].box[1] + grid.cells[0].size[1];
+    layers.push({
+      type: "shape", name: "cellsDivider", shape: "rect",
+      box: { box: [0.068, bottom + 0.016], size: [0.864, 0.002] },
+      fill: "accent", opacity: 0.55,
+    });
+  }
 
   if (grid.framed) {
     const first = grid.cells[0];
@@ -409,19 +475,27 @@ export function buildCheckinSpecFrom(content, opts = {}) {
     });
   }
 
-  const captionY = n >= 4 ? 0.700 : 0.672;
+  // 文字区随版面走：满版压在图上；左右分割走左侧窄栏；其余在照片下方的实色区
+  const isSide = comp.photo === "side";
+  const textW = isSide ? 0.40 : (comp.photo === "full" ? 0.864 : 0.864);
+  const tx = isSide ? 0.068 : (centered ? 0.5 : pad);
+  const captionY = comp.photo === "full" ? 0.618 : (n >= 4 ? 0.700 : 0.672);
+  const bodyY = comp.photo === "full" ? 0.790 : 0.836;
+
   layers.push(
     { type: "text", name: "caption",
       text: content.caption || "○○（填这次打卡的标题）",
-      x: 0.068, y: captionY, font: "heavy", size: 56, lineHeight: 1.32, color: "ink",
-      fit: { maxSize: 56, minSize: 30, maxWidth: 0.864, maxHeight: 0.14, maxLines: 3 },
+      x: tx, y: captionY, ...(centered ? { align: "center" } : {}),
+      font: "heavy", size: isSide ? 46 : 56, lineHeight: 1.32, color: "ink",
+      fit: { maxSize: 56, minSize: 30, maxWidth: textW, maxHeight: 0.14, maxLines: 3 },
       shadow: { color: "#00000088", dx: 0, dy: 3, blur: 10 } },
     { type: "text", name: "body",
       text: content.body || "在输入里写一句这次打卡的实情，文案就跟着变",
-      x: 0.068, y: 0.836, font: "sans", size: 28, lineHeight: 1.55, color: "inkSoft",
-      fit: { maxSize: 28, minSize: 18, maxWidth: 0.864, maxHeight: 0.10, maxLines: 3 } },
+      x: tx, y: bodyY, ...(centered ? { align: "center" } : {}),
+      font: "sans", size: isSide ? 24 : 28, lineHeight: 1.55, color: "inkSoft",
+      fit: { maxSize: 28, minSize: 18, maxWidth: textW, maxHeight: 0.10, maxLines: 3 } },
     { type: "shape", name: "tag1Bg", shape: "rect",
-      box: { box: [0.068, 0.922], size: [0.22, 0.042] }, fill: "#ffffff22", radius: 24 },
+      box: { box: [isSide ? 0.068 : 0.068, 0.922], size: [0.22, 0.042] }, fill: "#ffffff22", radius: 24 },
     { type: "text", name: "tag1",
       text: opts.mixed ? "#混搭" : "#现场打卡", x: 0.178, y: 0.943,
       align: "center", valign: "center", font: "sans", size: 22, color: "accent" },
@@ -441,7 +515,8 @@ export function buildCheckinSpecFrom(content, opts = {}) {
     theme: { palette },
     background: { type: "gradient", from: "bgFrom", to: "bgTo", angle: 160 },
     layers,
-    grid: gridName,
+    composition: compName,
+    grid: comp.photo === "none" ? "none" : ({ 1: "single", 2: "two-col", 3: "three-col", 4: "quad" }[n] || "single"),
   };
 }
 

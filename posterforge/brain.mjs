@@ -18,9 +18,10 @@
  * 本文件不依赖任何第三方 npm 包，走 Ollama 的 HTTP API。
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 // Ollama 装在哪由 paths.mjs 统一解析（环境变量 → 系统目录拼出来的常见位置 → PATH）
 import { findOllama } from "./paths.mjs";
@@ -213,6 +214,10 @@ export function loadBrainConfig(siteRoot) {
     copy: "qwen2.5:7b",
     timeoutMs: 120000,
     maxImageSide: 896,
+    // 上下文窗口。必须显式传：模型的 Modelfile 里若没写 num_ctx，
+    // Ollama 会退到很保守的默认值（本机实测是 4096），
+    // 读一张大图就撑爆 —— 见 visionImageB64 的说明。
+    numCtx: 8192,
     visionMaxTokens: 160,
     copyMaxTokens: 500,
     temperature: 0.7,
@@ -299,6 +304,75 @@ async function ensureOllama(cfg, { waitMs = 40000 } = {}) {
   return { ok: false, message: `已尝试启动 ollama，但 ${waitMs / 1000}s 内没起来` };
 }
 
+/* ------------------------------------------------------------------ 读图前的缩图 */
+/**
+ * 调 shrink.py 把图缩到长边 limit 以内，返回给模型用的 base64。
+ *
+ * **为什么必须缩**（这不是优化，是能不能跑通的问题）：
+ *   Ollama 把图片编码成图像 token，Qwen2.5-VL 每 1 个 token 覆盖 28x28 像素。
+ *   用户上传的素材常是截图或相机原图 —— 实测一张 2642x1715 的 PNG
+ *   约 5779 个图像 token，加起来 4338 个有效 token，而配置里用的
+ *   qwen2.5vl:3b 因为 Modelfile 没写 num_ctx，Ollama 给了 4096 的窗口，
+ *   请求被直接拒掉：
+ *     {"code":400,"message":"request (4338 tokens) exceeds available
+ *      context size (4096 tokens)","type":"exceed_context_size_error"}
+ *   报错里 n_prompt_tokens 是 0，很容易被误读成"提示词太长" ——
+ *   其实撑爆窗口的是图，不是字。
+ *
+ * **只缩给模型看的那一份**：渲染海报用的原图不动。
+ * 所以缩图发生在这里，而不是用户上传的时候 —— 上传时就缩会把成品画质一起降下去。
+ *
+ * 结果按「文件名 + 修改时间 + 长边」缓存到 .visioncache，
+ * 同一张图反复分析（调版式、再生成）不会重复起进程。
+ */
+async function visionImageB64(cfg, absImagePath) {
+  const limit = Math.max(64, Number(cfg.maxImageSide) || 896);
+  const st = await stat(absImagePath).catch(() => null);
+  const cacheDir = path.join(path.dirname(absImagePath), ".visioncache");
+  // 换了图或改了上限，缓存键就变了，不会读到旧图
+  const key = `${path.basename(absImagePath)}__${st ? Math.round(st.mtimeMs) : 0}__${limit}`
+    .replace(/[^\w.-]/g, "_");
+  const cacheFile = path.join(cacheDir, `${key}.jpg`);
+
+  if (existsSync(cacheFile)) return (await readFile(cacheFile)).toString("base64");
+
+  await mkdir(cacheDir, { recursive: true });
+  const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "shrink.py");
+  const res = await runProcess(cfg.python || "python", [script, absImagePath, String(limit), cacheFile]);
+
+  // 缩图失败不该让整个分析失败 —— 退回原图，至少行为和改动前一致
+  if (!res.ok || !existsSync(cacheFile)) {
+    const why = (res.stderr || res.message || "").trim().split(/\r?\n/).pop() || "未知原因";
+    console.warn(`[brain] 缩图失败，改用原图：${why}`);
+    return (await readFile(absImagePath)).toString("base64");
+  }
+  return (await readFile(cacheFile)).toString("base64");
+}
+
+/** 跑一个子进程，收集 stdout/stderr。失败不抛异常，交给调用方决定怎么退。 */
+function runProcess(cmd, args) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, { windowsHide: true });
+    } catch (e) {
+      return resolve({ ok: false, message: e.message, stderr: "" });
+    }
+    let stdout = "", stderr = "";
+    const timer = setTimeout(() => { try { child.kill(); } catch {} }, 30000);
+    child.stdout.on("data", (d) => { stdout += d.toString(); });
+    child.stderr.on("data", (d) => { stderr += d.toString(); });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, message: e.message, stderr });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ ok: code === 0, code, stdout, stderr });
+    });
+  });
+}
+
 async function ollamaChat(cfg, { model, messages, format, maxTokens, temperature }) {
   if (!model) throw new BrainError("没有配置模型", { kind: "config" });
   // 进来先确认模型服务在 —— 不在就自己拉，别等请求失败了再说
@@ -336,6 +410,7 @@ async function ollamaChatOnce(cfg, { model, messages, format, maxTokens, tempera
         options: {
           temperature: temperature ?? cfg.temperature,
           num_predict: maxTokens,
+          num_ctx: cfg.numCtx,
         },
       }),
     });
@@ -439,7 +514,7 @@ export async function describeImage(cfg, absImagePath) {
   if (!cfg.vision) return { ok: false, reason: "未配置视觉模型" };
   if (!existsSync(absImagePath)) return { ok: false, reason: "图片不存在" };
   try {
-    const b64 = (await readFile(absImagePath)).toString("base64");
+    const b64 = await visionImageB64(cfg, absImagePath);
     const text = await ollamaChat(cfg, {
       model: cfg.vision,
       messages: [
@@ -488,7 +563,7 @@ export async function analyzeLayout(cfg, absImagePath) {
   if (!cfg.vision) return { ok: false, reason: "未配置视觉模型（brain.config.json 的 vision）" };
   if (!absImagePath || !existsSync(absImagePath)) return { ok: false, reason: "图片不存在" };
   try {
-    const b64 = (await readFile(absImagePath)).toString("base64");
+    const b64 = await visionImageB64(cfg, absImagePath);
     const text = await ollamaChat(cfg, {
       model: cfg.vision,
       messages: [

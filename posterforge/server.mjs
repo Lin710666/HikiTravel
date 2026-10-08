@@ -1936,6 +1936,12 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       return json(res, 400, { ok: false, message: "既没有文字也没有图片，无可生成的内容" });
     }
 
+    // 请求诊断：把「这次生成到底带了什么」记下来。
+    // 为什么需要它：出现过"用户明明传了素材，成品里却没有那张图"的情况，
+    // 而前端状态（state.files）和服务端收到的 photos 是两回事 ——
+    // 没有这行日志就只能靠猜是哪一端丢的。
+    console.log(`[compose] photos=${photoUrls.length} autoBg=${payload.autoBg !== false} brief=${brief.length}字 url=${photoUrls.join(",") || "(无)"}`);
+
     // 照片 url → 本地绝对路径（视觉模型要读文件）
     const absPhotos = [];
     for (const u of photoUrls) {
@@ -2018,7 +2024,15 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
         grid: c.grid,
         topLabel: facts.brand || "现场打卡 · " + (facts.brand || "○○（填你的店名）"),
       };
-      spec = buildCheckinSpecFrom(merged, { photoUrls, grid: c.grid, mixed });
+      // 打卡卡现在也吃 composition —— 界面上两个模式共用同一排版式按钮，
+      // 用户点了没反应就是死控件。原来这里只传 grid，版式被整个丢掉。
+      spec = buildCheckinSpecFrom(merged, {
+        photoUrls,
+        grid: c.grid,
+        mixed,
+        composition: RE_COMPOSITIONS.has(String(payload.composition || ""))
+          ? String(payload.composition) : null,
+      });
       if (payload.render === false) {
         return json(res, 200, { ok: true, mode, copy: merged, modelCopy: c, spec, scenes: out.scenes, mixed, ms: out.ms });
       }

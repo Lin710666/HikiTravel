@@ -14,8 +14,13 @@
  * 用法：node watchdog.mjs          （前台跑，Ctrl+C 停）
  *       node watchdog.mjs --once   （只检查一次，不循环；给测试用）
  *
- * 注意：它自己必须**脱离父进程**跑（见 启动看门狗.bat 用 WMI 起），
+ * 注意：它自己必须**脱离父进程**跑（用 WMI 或 start /b 起），
  * 否则父进程一收工它就跟着没了 —— 那样等于没守。
+ *
+ * 和仓库根的 start.mjs 的关系：**职责是重复的**（两者都守 8800/8001/11434）。
+ * 整个项目请用根目录的「启动全部.bat」→ start.mjs：它还会先跑部署检查，
+ * 并且一次把三个服务都拉起来。本文件保留给"只想单独守 PosterForge"的场景，
+ * 它的 .bat 入口已经删掉了（见 _backup-before-bat-merge/启动守门狗.bat）。
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
