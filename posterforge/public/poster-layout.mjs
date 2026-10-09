@@ -236,12 +236,40 @@ export const POSTER_TONES = {
   bureau: { name: "政务", bgFrom: "#101826", bgTo: "#26344a", accent: "#8fd6c2" },
 };
 
-/** tone 数值 → 调色板 */
+/** 两个 #rrggbb 之间按 k（0~1）线性插值 */
+function mixHex(a, b, k) {
+  const pa = parseInt(String(a).slice(1), 16), pb = parseInt(String(b).slice(1), 16);
+  const ch = (shift) => {
+    const va = (pa >> shift) & 255, vb = (pb >> shift) & 255;
+    return Math.round(va * (1 - k) + vb * k).toString(16).padStart(2, "0");
+  };
+  return "#" + ch(16) + ch(8) + ch(0);
+}
+
+/**
+ * tone 数值 → 调色板。
+ *
+ * 在三个锚点之间**连续插值**：0 = 清冷，0.5 = 安静，1 = 热闹。
+ *
+ * 为什么不再用"三档查表"：templates.json 里 tone 有 38 个不同的值，
+ * 而三档查表把它们压成只有 3 种配色：同一构图内落进同一档的模板就长得一样。
+ * 实测同一构图内两套模板的成品平均像素差低到 0.3/255（肉眼完全看不出区别），
+ * 用户反馈就是"选了模板不生成相应的图"。连续插值后 38 个 tone 值 → 38 种配色，
+ * 这是用户第一眼就能看到的维度。
+ */
 export function toneFor(tone) {
-  if (typeof tone !== "number") return POSTER_TONES.calm;
-  if (tone >= 0.66) return POSTER_TONES.warm;
-  if (tone <= 0.33) return POSTER_TONES.cool;
-  return POSTER_TONES.calm;
+  if (typeof tone !== "number" || !Number.isFinite(tone)) return POSTER_TONES.calm;
+  const t = Math.max(0, Math.min(1, tone));
+  const [from, to, k] = t <= 0.5
+    ? [POSTER_TONES.cool, POSTER_TONES.calm, t * 2]
+    : [POSTER_TONES.calm, POSTER_TONES.warm, (t - 0.5) * 2];
+  return {
+    // name 必须留着：界面要显示"调性 安静/热闹/清冷"，取最近的那个锚点
+    name: k < 0.5 ? from.name : to.name,
+    bgFrom: mixHex(from.bgFrom, to.bgFrom, k),
+    bgTo: mixHex(from.bgTo, to.bgTo, k),
+    accent: mixHex(from.accent, to.accent, k),
+  };
 }
 
 /* ------------------------------------------------------------------ 断行 */
@@ -572,14 +600,38 @@ export function buildPosterSpecFrom(content, opts = {}) {
   // 为什么要有这一层：只有"构图 × 变体"的话，同构图同变体的模板几何完全一样，
   // 达不到"任意两套模板都要有实质差异"。精调让每套模板能各自定位到不同档位。
   const T = opts.tuning && typeof opts.tuning === "object" ? opts.tuning : {};
-  const vShift = Number.isFinite(T.y) ? Math.max(0, Math.min(1, T.y)) : V.shift;
+  // tuning.y 是**在 variant 的 shift 基础上做微调**，不是覆盖它。
+  //
+  // 原来写的是 `Number.isFinite(T.y) ? T.y : V.shift`，而模板里绝大多数
+  // tuning.y 的值就是 0：Number.isFinite(0) 为真，于是 vShift 恒为 0，
+  // variant 的 shift 被整个抹掉。实测 variant a/b/c 渲出来的 title/divider
+  // 坐标完全相同，41 套模板的版面差异只剩下"标题字号"一个维度。
+  const vShift = Math.max(0, Math.min(1, V.shift + (Number.isFinite(T.y) ? T.y : 0)));
   const vSize = V.size * (Number.isFinite(T.s) ? Math.max(0.88, Math.min(1.16, T.s)) : 1);
   const vH = V.maxH;
-  // 尾部边界：有价格面板就贴着面板上沿，没有就贴着分隔线
-  const tailTop = hasPrice ? L.panelTop : L.divider;
-  const blockBottom = L.subtitle + L.subMaxH * vH;      // 文字块原本的底部
-  const slack = Math.max(0, (tailTop - 0.028) - blockBottom);
-  const dy = slack * vShift;
+  // 版心整体下移量。
+  //
+  // 原来算的是「文字块底部到价格面板上沿的剩余间隙」：
+  //     slack = (tailTop - 0.028) - (subtitle + subMaxH * vH)
+  // 在 strip 版面上这个值恒为负（文字块本来就排到了面板上沿），
+  // Math.max(0, ...) 一夹就是 0：实测 variant a/b/c 三套的 title/divider/phone
+  // 坐标完全相同，说明 shift 和 tuning.y 从来没有生效过。
+  // 41 套模板的版面差异因此只剩"标题字号"一个维度，用户看不到选的是哪套。
+  //
+  // 改成以画布高度为基准的固定比例下移。上限 0.045 是算出来的：
+  // 再大联系方式会顶到钉死在 0.946 的页脚。
+  const dy = 0.045 * vShift;
+
+  // 版心整体呼吸：下移量不只作用于标题块。
+  //
+  // 原来 dy 只加到 eyebrow / title / titleRule / subtitle 上，分隔线、价格面板、
+  // 联系方式全部钉在原位：于是同一构图内两套模板的成品除了标题那几十像素之外
+  // 完全重合，实测平均像素差低到 0.3/255，用户看不出自己选的是哪套
+  // （原话："选了之后不会生成相应的图片"）。
+  // 让后面的版块按递减系数跟着走，差异才落到整张图上；
+  // 系数递减是为了不让联系方式顶到页脚（footer 钉在 0.946 不动）。
+  const dyMid = dy * 0.55;    // 分隔线、价格面板
+  const dyTail = dy * 0.28;   // 电话、地址
 
   const photo = urls.length ? String(urls[0]).replace(/^\//, "") : null;
 
@@ -645,8 +697,13 @@ export function buildPosterSpecFrom(content, opts = {}) {
         : bgGradient);
   }
 
-  // 顶部图带：原有多图模式，以及「AI 底图 + 用户照片」并存时（照片走图带当前景）
-  const stripL = comp.imgMode === "full" && (many || photoBand)
+  // 顶部图带：原有多图模式，以及「AI 底图 + 用户照片」并存时（照片走图带当前景）。
+  //
+  // 必须检查 L.stripHeight > 0：只有 strip / stripNoPrice 两套版面真的预留了图带高度。
+  // 其余构图的 stripHeight 是 0（axial 靠铺满放图、focal 靠卡片、splitv 靠侧栏，
+  // 本来就不走顶部图带）。不检查就会生成高度为 0 的图元，渲染器判定
+  // 「image 图元尺寸非法」后整张海报直接失败：实测 6 套 axial 模板全中招。
+  const stripL = comp.imgMode === "full" && (many || photoBand) && L.stripHeight > 0
     ? stripLayers(urls, L.stripHeight)
     : [];
 
@@ -714,23 +771,23 @@ export function buildPosterSpecFrom(content, opts = {}) {
     const narrow = W < 0.5;
     layers.push(
       { type: "shape", name: "pricePanel", shape: "rect",
-        box: [0.074, L.panelTop, pR, L.panelTop + L.panelH], fill: "panel", radius: 22, opacity: 0.72 },
+        box: [0.074, L.panelTop + dyMid, pR, L.panelTop + L.panelH + dyMid], fill: "panel", radius: 22, opacity: 0.72 },
       { type: "shape", name: "pricePanelEdge", shape: "rect",
-        box: { box: [0.074, L.panelTop], size: [0.010, L.panelH] }, fill: "gold", radius: 6 });
+        box: { box: [0.074, L.panelTop + dyMid], size: [0.010, L.panelH] }, fill: "gold", radius: 6 });
 
     if (narrow) {
       layers.push(
-        { type: "text", name: "priceNote", text: "限时特惠价", x: 0.100, y: L.panelTop + 0.014,
+        { type: "text", name: "priceNote", text: "限时特惠价", x: 0.100, y: L.panelTop + 0.014 + dyMid,
           font: "sans", size: 20, color: "inkMute" },
-        { type: "text", name: "price", text: String(content.price), x: 0.100, y: L.panelTop + 0.046,
+        { type: "text", name: "price", text: String(content.price), x: 0.100, y: L.panelTop + 0.046 + dyMid,
           font: "heavy", size: 44, color: "price",
           fit: { maxSize: 44, minSize: 26, maxWidth: W - 0.05, maxLines: 1 },
           shadow: { color: "#00000088", dx: 0, dy: 3, blur: 10 } });
     } else {
       layers.push(
-        { type: "text", name: "priceNote", text: "限时特惠价", x: 0.112, y: L.priceRow,
+        { type: "text", name: "priceNote", text: "限时特惠价", x: 0.112, y: L.priceRow + dyMid,
           font: "sans", size: 26, color: "inkMute", valign: "center" },
-        { type: "text", name: "price", text: String(content.price), x: pR - 0.024, y: L.priceRow,
+        { type: "text", name: "price", text: String(content.price), x: pR - 0.024, y: L.priceRow + dyMid,
           align: "right", font: "heavy", size: 74, color: "price", valign: "center",
           shadow: { color: "#00000088", dx: 0, dy: 3, blur: 10 } });
     }
@@ -738,15 +795,15 @@ export function buildPosterSpecFrom(content, opts = {}) {
 
   layers.push(
     { type: "shape", name: "divider", shape: "rect",
-      box: { box: [0.074, L.divider], size: [0.852, 0.0014] }, fill: "divider", radius: 2 },
+      box: { box: [0.074, L.divider + dyMid], size: [0.852, 0.0014] }, fill: "divider", radius: 2 },
     // 网格版把电话/地址放进格子里了，尾部再印一遍就是重复信息。
     // 尾行只留"预订"这一条行动号召，其余交给格子。
     { type: "text", name: "phone",
       text: L.cellsTop ? "" : (content.phone ? "预订 " + content.phone : ""),
-      x: 0.074, y: L.phone, font: "bold", size: 30, color: "ink" },
+      x: 0.074, y: L.phone + dyTail, font: "bold", size: 30, color: "ink" },
     { type: "text", name: "address",
       text: L.cellsTop ? "" : (content.address || ""),
-      x: 0.074, y: L.address, font: "sans", size: 22, color: "inkMute",
+      x: 0.074, y: L.address + dyTail, font: "sans", size: 22, color: "inkMute",
       fit: { maxSize: 22, minSize: 16, maxWidth: 0.62, maxLines: 2 } },
     { type: "text", name: "footerNote", text: "示意物料 · 替换真实文案后发布",
       x: 0.902, y: L.footer, align: "right", font: "sans", size: 15, color: "inkMute" }
@@ -758,7 +815,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
     layers.push({
       type: "text", name: "contactHint",
       text: "在输入里写「电话：…」或「地址：…」，就会印在这条线上",
-      x: 0.074, y: L.phone, font: "sans", size: 22, color: "inkMute",
+      x: 0.074, y: L.phone + dyTail, font: "sans", size: 22, color: "inkMute",
       fit: { maxSize: 22, minSize: 16, maxWidth: 0.78, maxLines: 2 },
     });
   }

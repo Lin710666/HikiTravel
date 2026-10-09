@@ -1361,16 +1361,36 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     };
   }
 
-  // 注意：**不再卸载 Ollama 模型**。
-  // 旧路径（ComfyUI + Qwen-Image）整模型塞满 8GB 显存，必须先把对话模型踢出去；
-  // 新路径用 model cpu offload，出图只占约 1.2GB，两者可以共存，
-  // 少一次"踢出去再重载"，用户下次提问不用等模型冷启动。
+  // 显存不够时把文案模型请走，给扩散模型腾地方。
+  //
+  // 原来的注释写着"新路径用 cpu offload，出图只占约 1.2GB，两者可以共存"，
+  // 但实测 SDXL worker 常驻约 3.6GB，加上 Ollama 的 qwen2.5:7b 与 qwen2.5vl:3b，
+  // 8GB 卡直接爆掉：nvidia-smi 报已用 7785/8188 MiB、仅剩 172 MiB、GPU 100%，
+  // 于是不停换页：同一批请求实测 55s → 97s → 400s 超时，越跑越慢。
+  //
+  // 只在真的放不下时才动 LLM。此时文案与提示词都已经生成完（本函数在它们之后调用），
+  // 卸掉不影响这次出图；出完由 warmUpBrainLater() 在后台请回来，
+  // 所以用户下一步提问也不会撞上冷加载。
+  let evictedLLM = false;
+  try {
+    const freeGB = await vramFreeGB();
+    if (freeGB !== null && freeGB < 3) {
+      const bcfg = loadBrainConfig(SITE_ROOT);
+      const names = [bcfg.copy, bcfg.vision].filter(Boolean);
+      if (names.length) {
+        await unloadModels(bcfg, names);
+        evictedLLM = true;
+        log(`显存只剩 ${freeGB.toFixed(1)} GB，先请走文案模型：${names.join("、")}`);
+      }
+    }
+  } catch { /* 卸载失败不该挡住出图：慢总比不出图好 */ }
 
   log("开始生成底图（本地 diffusers / SDXL-Turbo）");
   const t0 = Date.now();
   const out = cached;
   const r = await aigenGenerate({ prompt: imagePrompt, out, width: size, height, steps, seed: 0 });
   log(`底图完成 ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  if (evictedLLM) warmUpBrainLater();
   return {
     ok: true, url: `/uploads/.bgcache/bg-${key}.png`,
     cached: false, elapsedMs: Date.now() - t0, prompt: imagePrompt,
@@ -1997,15 +2017,25 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     // 实测白花 13~46 秒（一次打卡卡生成总耗时被拖到 115 秒）。
     const wantAutoBg = payload.autoBg !== false && mode !== "checkin";
     if (wantAutoBg) {
-      const ip = await deriveImagePrompt(cfg, { brief, copy: c, scenes: out.scenes });
+      // 模板信息参与两件事，缺一不可：
+      //   1. 喂给提示词：让底图的**风格**跟着模板走（酒店雪季 / 景区红叶 / 国庆黄金周…）
+      //   2. 进缓存键：否则同一句文案选不同模板会命中同一张底图，
+      //      差异只剩文字位置那几十像素（实测平均像素差 0.3/255，用户看不出选的是哪套）
+      const tplTags = Array.isArray(payload.templateTags)
+        ? payload.templateTags.map((x) => String(x)).filter(Boolean).slice(0, 6) : [];
+      const tplId = payload.templateId ? String(payload.templateId).slice(0, 60) : "";
+      const ip = await deriveImagePrompt(cfg, {
+        brief, copy: c, scenes: out.scenes, templateTags: tplTags,
+      });
       if (!ip.ok) {
         autoBg = { ok: false, code: "prompt_failed", message: ip.reason };
       } else {
         try {
           const bg = await ensureBackground({
             imagePrompt: ip.prompt,
-            // 用「用户原话 + 模式」当缓存种子，保证同一句要求稳定复用同一张底图
-            cacheKeySeed: `${mode}::${brief.trim()}`,
+            // 缓存种子 = 用户原话 + 模式 + 模板。
+            // 加上模板这一项是关键：不加的话，同一句话换模板会复用同一张底图。
+            cacheKeySeed: `${mode}::${tplId}::${tplTags.join("/")}::${brief.trim()}`,
             size: Number(payload.bgSize) || 768,
             height: Number(payload.bgHeight) || 1024,
             steps: Number(payload.bgSteps) || 4,

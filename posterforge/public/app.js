@@ -2063,6 +2063,16 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
       // 精调只跟模板走，用户手选版式后 __pickedTemplate 会被清空，
       // 这时不该再套用旧模板的字号档位
       tuning: (picked && picked.tuning) ? picked.tuning : null,
+      // 模板的标签与调性一起传上去，它们决定 **AI 底图的风格**。
+      //
+      // 为什么必须传：底图缓存键原来只含"模式::用户原话"，不含模板，
+      // 于是同一句文案下 41 套模板共用同一张底图，差别只剩文字位置那几十像素。
+      // 实测同一构图内两套模板的成品平均像素差低到 0.3/255，肉眼完全看不出
+      // 选的是哪套（用户原话："选了之后不会生成相应的图片"）。
+      // 把模板主题喂给提示词之后，每套模板的底图才是真的不一样。
+      templateId: picked && picked.id ? picked.id : null,
+      templateTags: (picked && Array.isArray(picked.tags)) ? picked.tags : null,
+      templateTone: (picked && typeof picked.tone === "number") ? picked.tone : null,
     }),
     timeoutMs: 240000,   // 模型首次加载权重可能要十几秒，读图 + 写文案再叠加
     onTick: (ms) => onProgress && onProgress(ms),
@@ -2230,13 +2240,18 @@ async function doGenerate() {
         const composed = await composeWithModel({
           mode: isCheckin ? "checkin" : "poster",
           onProgress: (ms) => {
-            // 进度里必须写清"后面还有出底图"这一步。
+            // 进度必须写清"现在在干什么"。
             // 原来只写「读图 + 写文案」，用户盯着这句以为马上就好，
-            // 实际后面还要跑一遍扩散模型（首次 13~46 秒），于是就成了"怎么这么久"。
+            // 实际后面还要跑一遍扩散模型（首次十几秒到几十秒），于是就成了"怎么这么久"。
+            // 现在按时间估算阶段：前 25 秒是模型读写文案，之后是在画底图。
             const sec = Math.round(ms / 1000);
-            btn.textContent = isCheckin
-              ? `模型创作中… ${sec}s（读图 + 写打卡文案）`
-              : `模型创作中… ${sec}s（读图 + 写文案，之后还要生成 AI 底图）`;
+            if (isCheckin) {
+              btn.textContent = `模型创作中… ${sec}s（读图 + 写打卡文案）`;
+            } else if (sec < 25) {
+              btn.textContent = `模型创作中… ${sec}s（读图 + 写文案）`;
+            } else {
+              btn.textContent = `正在生成 AI 底图… ${sec}s（本机扩散模型，选不同模板会重画一张）`;
+            }
           },
         });
         state.composeSpec = composed.spec;

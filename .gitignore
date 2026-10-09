@@ -74,3 +74,6 @@ ml-weights/
 # 改动前的本地备份（留着回滚用，不进仓库 —— 里面会带旧机器的绝对路径）
 _backup-before-*/
 *.bak-before-*
+
+# 验证脚本跑出来的临时产物（下划线开头：中间 .py/.json 等）
+.verify-tools/_*

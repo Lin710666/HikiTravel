@@ -142,9 +142,19 @@ prompt 要求：
  * 而且必须刻意避开中文和文字，扩散模型画汉字会糊成乱码，
  * 把这条写进提示词规则里比事后补救靠谱。
  */
-export async function deriveImagePrompt(cfg, { brief = "", copy = null, scenes = [] } = {}) {
+export async function deriveImagePrompt(cfg, { brief = "", copy = null, scenes = [], templateTags = [] } = {}) {
   if (!cfg.copy) return { ok: false, reason: "未配置文案模型", prompt: "" };
   const parts = [`【这次要宣传的内容】\n${brief || "（用户只说要一张海报）"}`];
+  // 模板主题必须进提示词。
+  // 不加这一段的话，同一句文案选任何模板都会得到**同一张**底图
+  // （提示词只由 brief + 文案 + 照片画面决定），于是 41 套模板的差别
+  // 只剩文字位置那几十像素：实测平均像素差 0.3/255，用户看不出选的是哪套。
+  if (Array.isArray(templateTags) && templateTags.length) {
+    parts.push(
+      `【选用的海报模板主题】\n${templateTags.join(" / ")}\n` +
+      `画面的场景、季节、光线与色调请贴合这个主题，让它和别的模板明显不同。`
+    );
+  }
   if (copy) {
     const head = copy.title || copy.caption || "";
     const tail = copy.sub || copy.body || "";
