@@ -12,7 +12,7 @@
       "description": "物料元数据。用于审核、归档与可追溯。",
       "properties": {
         "id": { "type": "string", "description": "物料唯一编号，如 hotel-2026-autumn-01" },
-        "client": { "type": "string", "description": "委托方名称。必须填真实客户名 —— 不要留示例名，示例名会被当成事实印到物料上。" },
+        "client": { "type": "string", "description": "委托方名称。必须填真实客户名：不要留示例名，示例名会被当成事实印到物料上。" },
         "audience": {
           "type": "string",
           "enum": ["bureau", "hotel", "restaurant", "tourist"],
@@ -66,7 +66,7 @@
 
     "background": {
       "type": "object",
-      "description": "基底图层。type=image 时可指向 AI 生成的背景图 —— 这是 AI 图像模型的唯一合法接入点。",
+      "description": "基底图层。type=image 时可指向 AI 生成的背景图：这是 AI 图像模型的唯一合法接入点。",
       "properties": {
         "type": { "type": "string", "enum": ["gradient", "solid", "image"], "default": "gradient" },
         "from": { "type": "string", "description": "渐变起始色" },
@@ -116,7 +116,7 @@
 
   "definitions": {
     "box": {
-      "description": "矩形区域。两种写法：[x,y,w,h]（比例，0..1）或 {box:[x,y], size:[w,h]}。所有几何均为画布比例，与像素尺寸解耦 —— 同一份 spec 可渲任意分辨率。",
+      "description": "矩形区域。两种写法：[x,y,w,h]（比例，0..1）或 {box:[x,y], size:[w,h]}。所有几何均为画布比例，与像素尺寸解耦：同一份 spec 可渲任意分辨率。",
       "oneOf": [
         {
           "type": "array",

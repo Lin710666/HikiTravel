@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * pf-template-link-check.mjs —— 验证「套用模板 → 生成」这条链路上，模板的构图有没有真的生效。
+ * pf-template-link-check.mjs，验证「套用模板 → 生成」这条链路上，模板的构图有没有真的生效。
  *
  * 为什么要有这个：出现过"套了模板，生成出来却不是那个样式"。根因是
- * state.composition 会压过模板的 composition —— 用户只要先手选过版式、
+ * state.composition 会压过模板的 composition，用户只要先手选过版式、
  * 或者先跑过一次「参考图分析」（它会把结果写进 state.composition），
  * 之后套任何模板都会被旧版式盖掉。这是个只在**特定操作顺序**下才复现的
  * 交叉污染，光看单条路径的代码是看不出来的，必须把顺序走一遍。
@@ -80,7 +80,7 @@ async function main() {
   const pollute = others.find((c) => c !== tpl.composition) || "typeled";
 
   const polluted = await evalJs(`(() => {
-    // 版式列表由 renderTplPicker 渲染，页面刚加载时可能还没渲染过 ——
+    // 版式列表由 renderTplPicker 渲染，页面刚加载时可能还没渲染过，
     // 先强制渲染一次，否则点不到版式按钮，"污染"这一步会静默跳过，
     // 后面的断言就变成了在验一个没被污染的干净状态（等于没验）。
     try { window.posterforge.__debug.renderTplPicker(); } catch (e) {}

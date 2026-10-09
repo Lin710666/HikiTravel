@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pf-corner-probe.mjs —— 把页面上某个角落里的元素连坐标一起列出来。
+ * pf-corner-probe.mjs，把页面上某个角落里的元素连坐标一起列出来。
  *
  * 用途：视觉模型（本地那个小模型）对"谁压着谁"经常说不清，
  * 而"两个元素挤在一起"本质是**矩形重叠**，用坐标算比看图靠谱得多。
@@ -112,7 +112,7 @@ async function main() {
   }
 
   // --js=表达式：在页面里求值并打印。
-  // 用来查 shadow DOM 内部的东西 —— 普通 DOM 查询穿不进 shadow 边界，
+  // 用来查 shadow DOM 内部的东西，普通 DOM 查询穿不进 shadow 边界，
   // 而右下角那个 AI 助手组件正好就是个 shadow 组件。
   const jsArg = process.argv.find((a) => a.startsWith("--js="));
   if (jsArg) {

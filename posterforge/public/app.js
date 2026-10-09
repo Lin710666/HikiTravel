@@ -21,7 +21,7 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 
 /**
- * HTML 转义。**必须放在模块作用域** ——
+ * HTML 转义。**必须放在模块作用域**，
  * 它原先只在 renderComposeNote 内部以 const 声明，是函数级作用域；
  * 套用模板的选择器也用到了它，于是抛 ReferenceError: esc is not defined。
  * 这类错误 node --check 查不出来（语法没问题），只有真的在浏览器里点一遍才暴露。
@@ -140,7 +140,7 @@ function selectCap(id) {
   if (id === "checkin") setMode("checkin");
   else if (id === "poster") setMode("poster");
   // 换功能必须让上一次的模型结果作废。
-  // 否则切到「打卡」后仍会拿海报那份 composeSpec 出图 ——
+  // 否则切到「打卡」后仍会拿海报那份 composeSpec 出图，
   // 表现就是"我要打卡却拿到带价格的海报"（矩阵测试抓到的真实 bug）。
   invalidateCompose();
   renderCapMenu();
@@ -173,9 +173,9 @@ function syncCapCard() {
   $("#toggles").style.display = hideGen ? "none" : "";
   // 输入框那一整块。
   //
-  // **手册模式要保留输入框** —— 它的用法就是"写内容 → 生成 PDF"。
+  // **手册模式要保留输入框**，它的用法就是"写内容 → 生成 PDF"。
   // 注意：我为了修"分析面板下露出多余控件"，用 hideGen 一刀切把它藏了，
-  // 而 hideGen 里含 isBook —— 结果文案手册整个面板空了，用户反馈"用不了了"。
+  // 而 hideGen 里含 isBook，结果文案手册整个面板空了，用户反馈"用不了了"。
   // 一刀切的隐藏条件，总会误伤某个模式：这里把"要输入"和"要出图"分开判断。
   const needPrompt = !(isPicker || isHistory || c.id === "analyze");
   const pw = $("#promptWrap"); if (pw) pw.style.display = needPrompt ? "" : "none";
@@ -193,14 +193,14 @@ function syncCapCard() {
   }
   // 版式片 + 参考图分析。
   // 版式片只在**海报类**模式有意义（手册是多页 PDF，没有"构图"这个概念）。
-  // 但**参考图分析在手册里也有用** —— 用户传张参考图，至少能定调性，
+  // 但**参考图分析在手册里也有用**，用户传张参考图，至少能定调性，
   // 而且手册的图片页也能用上。所以两者分开判断，不再一刀切。
   const isGenMode = !(isPicker || isHistory || c.id === "analyze");
   const cc = $("#compChips"); if (cc) cc.style.display = isGenMode && !isBook ? "" : "none";
   const ai = $("#anaInline"); if (ai) ai.style.display = isGenMode ? "" : "none";
   const ar = $("#anaResult"); if (ar && !isGenMode) ar.hidden = true;
   const kw = $("#kwChips"); if (kw) kw.style.display = isGenMode ? "" : "none";
-  // 生成按钮：**手册模式要留着** —— 它用的就是这个按钮（点了出 PDF）。
+  // 生成按钮：**手册模式要留着**，它用的就是这个按钮（点了出 PDF）。
   // 注意：hideGen 一刀切把它连同手册一并隐藏了，面板上没有任何按钮可点，
   // 用户反馈"文案手册用不了了"。
   // 只有"不是生成模式的"那几个入口（挑模板、看历史、图片分析）才该藏。
@@ -211,13 +211,13 @@ function syncCapCard() {
 
 /** 七种构图的键名与中文名（与服务端 poster-layout.mjs 的键一一对应）*/
 const COMPOSITIONS = [
-  ["fullbleed", "满版压暗", "图铺满，文字压图上 —— 风景、氛围强的照片"],
-  ["axial", "中轴对称", "全部居中，沿中轴排列 —— 仪式感、正式场合"],
-  ["split", "上下分割", "图在上，文字在下方实色区 —— 要写清价格/时间"],
-  ["splitv", "左右分割", "图在右侧，文字挤左窄栏 —— 竖构图的单品特写"],
-  ["focal", "重心环绕", "图是居中悬浮卡片，文字环绕 —— 主体明确"],
-  ["grid", "网格信息", "图 + 四格信息（时间/价格/电话/地址）—— 票务、赛事"],
-  ["typeled", "文字主导", "不用图，居中大标题 —— 通知、公告"],
+  ["fullbleed", "满版压暗", "图铺满，文字压图上：风景、氛围强的照片"],
+  ["axial", "中轴对称", "全部居中，沿中轴排列：仪式感、正式场合"],
+  ["split", "上下分割", "图在上，文字在下方实色区：要写清价格/时间"],
+  ["splitv", "左右分割", "图在右侧，文字挤左窄栏：竖构图的单品特写"],
+  ["focal", "重心环绕", "图是居中悬浮卡片，文字环绕：主体明确"],
+  ["grid", "网格信息", "图 + 四格信息（时间/价格/电话/地址）， 票务、赛事"],
+  ["typeled", "文字主导", "不用图，居中大标题：通知、公告"],
 ];
 
 /** 分析一张参考图，得出建议版式；顺手把它设成当前构图 */
@@ -227,7 +227,7 @@ async function analyzePhoto(file) {
   box.hidden = false;
   box.innerHTML = `<div class="ana-loading">正在上传并分析…这一步要读图，约 10~30 秒</div>`;
   try {
-    // 复用普通上传接口落盘 —— 但**不进 state.files**，所以不会成为海报底图
+    // 复用普通上传接口落盘，但**不进 state.files**，所以不会成为海报底图
     const dataUrl = await new Promise((res, rej) => {
       const fr = new FileReader();
       fr.onload = () => res(fr.result);
@@ -249,7 +249,7 @@ async function analyzePhoto(file) {
 
     const key = r.data.composition;
     const hit = COMPOSITIONS.find((c) => c[0] === key);
-    // 手册模式没有"构图"这个概念（它是多页 PDF），但**调性有用** ——
+    // 手册模式没有"构图"这个概念（它是多页 PDF），但**调性有用**，
     // 调性决定手册的配色。所以这里分两种落地方式，而不是生搬构图。
     const inBook = state.cap === "copybook";
     if (!inBook) {
@@ -258,7 +258,7 @@ async function analyzePhoto(file) {
     }
     if (r.data.tone && TONES[r.data.tone]) {
       state.tone = r.data.tone;
-      // 风格片的选中态要跟着走 —— 只改 state 的话按钮上还是旧的选中项，
+      // 风格片的选中态要跟着走，只改 state 的话按钮上还是旧的选中项，
       // 用户看不出"分析帮我选了调性"
       $$("#styleChips .chip").forEach((x) => {
         x.setAttribute("aria-pressed",
@@ -281,7 +281,7 @@ async function analyzePhoto(file) {
   }
 }
 
-// 参考图分析：生成区里的一个按钮 —— **与普通上传分开走**
+// 参考图分析：生成区里的一个按钮，**与普通上传分开走**
 // （普通上传的照片会成为海报素材，参考图只是用来判断版式的，不该混进去）
 $("#anaBtn")?.addEventListener("click", () => {
   const inp = document.createElement("input");
@@ -308,7 +308,7 @@ $("#compChips")?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-comp]");
   if (!b) return;
   state.composition = b.dataset.comp || "";
-  // 手动选了版式就不再跟模板走 —— 否则用户会疑惑"我选了为什么没生效"
+  // 手动选了版式就不再跟模板走，否则用户会疑惑"我选了为什么没生效"
   if (state.composition) window.__pickedTemplate = null;
   renderCompChips();
 });
@@ -370,10 +370,10 @@ $("#hisClear")?.addEventListener("click", async () => {
 /* ---------------------------------------------------------------- 套用模板 */
 //
 // 独立入口。原先模板只能在大图预览弹层里套用：用户得先滚到「热门模板」区块、
-// 点开预览、再点套用 —— 三步，主页上没有任何直接入口。
+// 点开预览、再点套用，三步，主页上没有任何直接入口。
 //
 // 这里是一个轻量选择器：搜索框 + 受众筛选 + 紧凑列表。
-// 选中后把该模板的 brief 填进输入框、切回海报模式，用户改完即可出图 ——
+// 选中后把该模板的 brief 填进输入框、切回海报模式，用户改完即可出图，
 // 这才是"套用"的实际价值：不用从零写文案。
 let tplFilter = "all";
 let tplQuery = "";
@@ -414,7 +414,7 @@ function renderCompositionPicker(box) {
       const hint = $("#tplHint");
       const hit = state.compositions.find((c) => c.key === el.dataset.comp);
       if (hint && hit) {
-        hint.textContent = `已选「${hit.label}」——回「海报生成」写下内容点生成即可。文案由你自己填，不用套别人的。`;
+        hint.textContent = `已选「${hit.label}」，回「海报生成」写下内容点生成即可。文案由你自己填，不用套别人的。`;
       }
     };
   });
@@ -427,7 +427,7 @@ function renderTplPicker() {
   // 「套用模板」现在是**选版式**，不是选别人家的文案模板。
   //
   // 为什么改：原来 41 套各带一份文案（"烧烤摊夜宵档""火锅店冬季暖场"…），
-  // 用户真正要复用的是**版面结构**，不是那些文案 —— 而且 41 套看下来会觉得
+  // 用户真正要复用的是**版面结构**，不是那些文案，而且 41 套看下来会觉得
   // "都差不多"，因为它们本来就在同一个题材维度里重复。
   // 现在只列七种构图，选完结构，文案自己填。
   if (state.compositions && state.compositions.length) {
@@ -460,7 +460,7 @@ function renderTplPicker() {
   const cnt2 = $("#tplCountInline");
   if (cnt2) cnt2.textContent = `${list.length}/${all.length}`;
   // 今日轮换说明：模板顺序每天按联网抓到的图提取的配色倾向调整。
-  // 必须说清"图有版权、只用了颜色" —— 否则用户会以为站点在分发别人的图。
+  // 必须说清"图有版权、只用了颜色"，否则用户会以为站点在分发别人的图。
   const rot = state.rotation;
   const rotBox = $("#tplRotate");
   if (rotBox) {
@@ -512,7 +512,7 @@ async function saveCurrentAsTemplate() {
     if (ok) setTimeout(() => { msg.hidden = true; }, 4000);
   };
   if (brief.length < 4) {
-    show("输入框里还没有内容 —— 先写点文案，或者套用一套模板改改再存。", false);
+    show("输入框里还没有内容：先写点文案，或者套用一套模板改改再存。", false);
     return;
   }
   const name = ($("#tplSaveName")?.value || "").trim();
@@ -689,7 +689,7 @@ async function loadTemplates() {
     state.compositions = r.data.compositions || [];
     if (!$("#tplPicker")?.hidden) renderTplPicker();
   }).catch(() => { state.compositions = []; });
-  // 联网轮换结果（当天的配色倾向）——用来给用户一个"为什么今天这么排"的交代
+  // 联网轮换结果（当天的配色倾向），用来给用户一个"为什么今天这么排"的交代
   state.rotation = data.rotation || null;
   // 「热门模板」整块已从主页移除（和「套用模板」选择器重复，且每次开页面都要拉 41 张图）。
   // 这里保留判断：容器不在就只把数据装进 state，不再渲染网格。
@@ -882,7 +882,7 @@ async function loadFeed({ force = false } = {}) {
       grid.appendChild(card);
     });
 
-    // 状态与署名说明 —— 不能只展示图而不说明来源
+    // 状态与署名说明，不能只展示图而不说明来源
     const okSources = (data.status || []).filter((s) => s.ok);
     const skipped = (data.status || []).filter((s) => s.skipped);
     $("#feedSub").textContent =
@@ -965,7 +965,7 @@ async function addFiles(list) {
     if (idx >= 0) state.files.splice(idx, pending.length);
     state.lastUploadErrors = [{ name: take.map((f) => f.name).join("、"), reason: String(e.message || e) }];
     renderFileList();
-    // 注意：不要在这里用 alert —— 无头浏览器里 alert 会阻塞脚本，
+    // 注意：不要在这里用 alert，无头浏览器里 alert 会阻塞脚本，
     // 导致状态永远停在"上传中"。错误已经写进 lastUploadErrors 并在 chips 里显示。
     console.error("[upload] 失败:", e);
   }
@@ -1089,13 +1089,13 @@ function parsePrompt(raw) {
   if (tm) out.hours = tm[1];
 
   // 地址：只在用户**明确写了**地址时才取。
-  // 早先海报上的地址是写死的演示地址（"福建省厦门市…"）—— 通用模板一上来就
+  // 早先海报上的地址是写死的演示地址（"福建省厦门市…"）， 通用模板一上来就
   // 印一个编造的地址，等于把假信息当事实交给用户去发布，这条必须堵住。
   const am = clean.match(/(?:地址|位置|地点)\s*[:：]?\s*([^\n]{4,40})/);
   if (am) out.address = am[1].replace(/[（(][^）)]{0,50}[）)]/g, "").trim();
 
   // 品牌/地点名：带行业后缀的短语。
-  // 后缀表来自文旅实际场景 —— 少了"竹海/所城/古镇"这类专有名词就会漏识别。
+  // 后缀表来自文旅实际场景，少了"竹海/所城/古镇"这类专有名词就会漏识别。
   //
   // 专名类字符里刻意不含"的了是在和与及你我"：品牌名不会以这些字开头，
   // 含进去会一路吃到前面的说明话里（踩过："改成你的酒店"被整个当成店名）。
@@ -1106,7 +1106,7 @@ function parsePrompt(raw) {
   // "我的店名"这类占位是给用户看的，不该当成真店名往海报上印
   if (bm && !/^[你我]的/.test(bm[1])) out.brand = bm[1];
 
-  // 标题：优先取"含数字或动作"的卖点句 —— 那才是用户真正想突出的信息。
+  // 标题：优先取"含数字或动作"的卖点句，那才是用户真正想突出的信息。
   // 早先直接取第一段，结果"山海楼酒店秋季促销"被当成标题，
   // 而"住三晚送一晚"这个真正的卖点反而丢了。
   const OFFER = /送|赠|含|免费|连住|次|折|减|元|￥|¥|\d/;
@@ -1141,7 +1141,7 @@ function parsePrompt(raw) {
 //
 // 用户打的常常是"让我怎么干活"，不是"要印什么字"。
 // 真实案例：输入「帮我融合这两张图片并配上去西湖的旅游文案」，
-// 旧版把整句当成文案原样印到海报上 —— 海报上出现"帮我融合这两张…"这种话，
+// 旧版把整句当成文案原样印到海报上，海报上出现"帮我融合这两张…"这种话，
 // 完全是错的。这里把"要求"识别出来，转成实际文案再排。
 //
 // 处理顺序：
@@ -1167,7 +1167,7 @@ const PLACE_SUFFIX = "省|市|区|县|镇|乡|村|街道|路|街|巷|湖|山|河
 /**
  * 拆解出的候选是不是真地名。
  *
- * 有些词天生就不是地名，但结尾恰好撞上后缀表 —— "活动海报"撞"海"、
+ * 有些词天生就不是地名，但结尾恰好撞上后缀表，"活动海报"撞"海"、
  * "宣传海报"撞"海"、会生成出「来活动海的这一天」这种荒唐标题。
  * 这类词收进拒绝名单比逐个放行简单得多。
  */
@@ -1181,7 +1181,7 @@ const SUBJECT_REJECT = /海报|宣传|活动|文案|促销|广告|招贴|邀请|
  * 结果整个短语被当成地名，生成出「把片并配上去西湖收进一天里」这种句子（真踩过）。
  *
  * 现在的做法：先给每个字打上"能不能当地名组成字"的标记（动词、量词、标点、虚词一律不行），
- * 再从**每个后缀出现的位置往前取最短的合法连续片段** —— 短即优先，
+ * 再从**每个后缀出现的位置往前取最短的合法连续片段**，短即优先，
  * 所以"杭州西湖"会取到"西湖"，"请生成一张杭州西湖"也只会取到"西湖"。
  */
 function extractSubject(text) {
@@ -1283,7 +1283,7 @@ function detectBrief(raw) {
   return out;
 }
 
-/** 按"要求"生成文案 —— 确定性模板 + 关键词，不用第二个模型 */
+/** 按"要求"生成文案，确定性模板 + 关键词，不用第二个模型 */
 function briefCopy(brief, fallbackTitle) {
   const kind = brief.kind || "tourism";
   const s = brief.subject || "";
@@ -1359,7 +1359,7 @@ function titleFromParsed(p) {
 // 就在解析前被压平了，标题只会拿到第一行。放这里能原样保留 \n。
 //
 // 另一条硬规矩：这些模板必须是**通用的**，不许出现任何示例店名、真实电话、
-// 具体地名或编造的销量数字 —— 用户会把它当成模板去改，不是当数据去读。
+// 具体地名或编造的销量数字，用户会把它当成模板去改，不是当数据去读。
 const GENERIC_PROMPTS = {
   stay:
     "连住两晚立减 300 元，含双早，周末不加价\n" +
@@ -1392,11 +1392,11 @@ const GENERIC_PROMPTS = {
 // 服务端 poster-forge/validate.py 会因为广告法禁用词**直接拒绝出图**
 // （"最佳""最好""第一"这类，《广告法》第九条，处罚不是风格问题）。
 //
-// 但用户是在点完生成、等了几十秒之后才看到这个错 —— 体验很差，而且他不知道该改哪。
+// 但用户是在点完生成、等了几十秒之后才看到这个错，体验很差，而且他不知道该改哪。
 // 所以这里在**输入阶段**就用同一份词表做一次预检：当场标红 + 给一键改写。
 //
 // 注意这是宽松版预检（只挡硬禁词 + 提示需资质词），最终仍以服务端校验为准，
-// 两边词表不一致时以服务端为准 —— 预检只负责"避免用户白等一次"。
+// 两边词表不一致时以服务端为准，预检只负责"避免用户白等一次"。
 const AD_LAW_HARD = [
   "国家级", "世界级", "最高级", "最佳", "最好", "最优", "最强", "最便宜", "最低价",
   "第一品牌", "全国第一", "全市第一", "销量第一", "排名第一",
@@ -1455,7 +1455,7 @@ function checkAdLaw(text) {
  * 按建议表改写命中词。
  *
  * **必须循环到稳定**：替换词本身可能又命中禁词（"最"字就是这么漏的），
- * 单趟替换会留下一个仍然违规的结果，比不改更坑 —— 用户以为改好了，生成又失败。
+ * 单趟替换会留下一个仍然违规的结果，比不改更坑，用户以为改好了，生成又失败。
  * 上限 6 轮防死循环；仍不干净的直接删词兜底。
  */
 function fixAdLaw(text) {
@@ -1567,9 +1567,9 @@ function updatePromptHint() {
   } else if (typed) {
     box.textContent = brief?.isBrief
       ? "这句是「要求」不是「文案」，模型会按它写文案；想要原文照排就用「」把文案括起来。" + tail
-      : "已有文字，还没有图片 —— 现在是纯文字海报；上传一张照片，模型会读图后一起写。" + tail;
+      : "已有文字，还没有图片：现在是纯文字海报；上传一张照片，模型会读图后一起写。" + tail;
   } else {
-    // 手册模式不提"上传照片" —— 那个模式里上传是藏起来的，
+    // 手册模式不提"上传照片"，那个模式里上传是藏起来的，
     // 提示语却写着"或上传照片"，用户会去找一个不存在的按钮。
     const isBookNow = state.cap === "copybook";
     box.textContent = isBookNow
@@ -1613,7 +1613,7 @@ if ($("#promptInput")) {
   // 留空时点模板 = 直接填入；已有内容时点模板 = 追加，避免手一抖把写好的文案冲掉。
   //
   // 注意选择器必须带 [data-tpl]：这里原来只按 .mini-chip 类名选，
-  // 而 .mini-chip 是**样式类**，后来新增的「存为我的模板」按钮也用了它 ——
+  // 而 .mini-chip 是**样式类**，后来新增的「存为我的模板」按钮也用了它，
   // 于是那个按钮被当成通用模板芯片，它没有 data-tpl，
   // GENERIC_PROMPTS[undefined] 得到 undefined，点一下就把用户写好的内容清空了。
   // 行为选择器不能复用样式类名。
@@ -1692,11 +1692,11 @@ function currentContent() {
     const title = titleFromParsed(parsed) || (picked ? picked.title : "限时特惠");
 
     // 副标题放"卖点句"。
-    // 注意不要把品牌名塞进来 —— 品牌已经在顶部展示，副标题再写一遍是重复。
+    // 注意不要把品牌名塞进来，品牌已经在顶部展示，副标题再写一遍是重复。
     // 输入里没有独立卖点句时，明确说明文案来源，而不是拿品牌凑数。
     let subTitle = (parsed.points || [])
       .filter((s) => s && s !== parsed.brand && !/^[\d\s:：\-–~至]+$/.test(s))
-      // 地址已经从输入里单独解析出来、有专门的版位，别再当卖点重复一遍
+      // 地址已经从输入里单独解析出来、有专门的版位，不必再当卖点重复一遍
       .filter((s) => !/^(地址|地点|位置)\s*[:：]/.test(s))
       .filter((s) => !parsed.address || !s.includes(parsed.address))
       .slice(0, 3)
@@ -1740,13 +1740,13 @@ function currentContent() {
  *
  * 为什么需要：海报上的白字原本是压在自己生成的深色渐变上的，换成用户照片后
  * 照片亮部（天空、雪地、白墙）会把标题误删。用几块"上疏下密"的半透明矩形
- * 拼出近似竖向渐变，既保住照片观感，又保证文字对比度 —— 不需要给渲染器加新特性。
+ * 拼出近似竖向渐变，既保住照片观感，又保证文字对比度，不需要给渲染器加新特性。
  *
  * 几何定义已搬到 public/poster-layout.mjs（服务端与浏览器共用），
  * 这里只保留一个包装函数给打卡卡复用。
  */
 function bgConfig(fallbackFrom, fallbackTo, angle, photoUrl) {
-  // 照片优先当底图 —— 要求「图和文字一起出图」的核心。
+  // 照片优先当底图，要求「图和文字一起出图」的核心。
   // （AI 底图不走这里：它由服务端在 spec 的 background 上直接给，
   //   并且有照片时会调版面让照片走顶部图带、AI 图当氛围底，两个都用上。）
   if (photoUrl) {
@@ -1786,7 +1786,7 @@ function buildPosterSpec() {
  * 按照片数量给出网格几何（比例值，间隙 0.015 ≈ 60px @1080）。
  *
  * 边框策略：**只有单图用统一外框，多图一律每张各自描边。**
- * 原因是圆角半径不匹配 —— 外框半径 38 与图片半径 ~20 不一致，
+ * 原因是圆角半径不匹配，外框半径 38 与图片半径 ~20 不一致，
  * 框线会在角上切过图片，看起来像排版事故。
  */
 function photoGrid(n) {
@@ -1837,7 +1837,7 @@ function buildCheckinSpec() {
   const content = currentContent();
   const urls = state.files.filter((f) => f.uploaded && f.url).map((f) => f.url);
   const n = Math.min(urls.length, 4);
-  // 本地兜底只能拿用户原话凑，所以这里**不做指令识别**——
+  // 本地兜底只能拿用户原话凑，所以这里**不做指令识别**，
   // 真正的"把要求变成文案"由模型负责（见 /api/compose 的 checkin 模式）。
   const caption = content.fromPrompt
     ? (content.parsed.titleLine || content.title || "").replace(/\\n/g, "\n").slice(0, 40)
@@ -1867,7 +1867,7 @@ let __copybookSpecOverride = null;
 function buildCopybookSpec() {
   const content = currentContent();
   const t = TONES[state.tone] || TONES.auto;
-  // 手册也要消费用户传的照片 —— 见下面 image 版块
+  // 手册也要消费用户传的照片，见下面 image 版块
   const photoUrls = state.files.filter((f) => f.uploaded && f.url).map((f) => f.url);
   return {
     meta: {
@@ -1890,7 +1890,7 @@ function buildCopybookSpec() {
         subtitle: content.sub,
         footer: content.phone ? "预订 " + content.phone : "预订 ○○○-○○○○-○○○○" },
       // 用户传了照片就插一整页实拍图。
-      // 原先手册模式**没有任何位置能放图** —— 用户传了照片却被丢掉，
+      // 原先手册模式**没有任何位置能放图**，用户传了照片却被丢掉，
       // 界面还写着"这张图会作为海报底图"，是句骗人的提示。
       ...(photoUrls.length
         ? [{
@@ -1910,7 +1910,7 @@ function buildCopybookSpec() {
           ? [content.parsed.raw, "以上为示意内容。正式交付前请替换为客户确认的信息，并核对价格、电话、有效期。"]
           : [
               "这是文案手册的第一个正文版块。与海报不同，手册需要考虑阅读节奏：封面建立印象，导语交代背景，卖点展开细节，价格与联系方式收尾。",
-              "所有文字都走确定性排版，不经过图像模型 —— 这保证了中文的准确性，也保证了同一份内容每次渲染结果完全一致。",
+              "所有文字都走确定性排版，不经过图像模型：这保证了中文的准确性，也保证了同一份内容每次渲染结果完全一致。",
             ] },
       { type: "bullets", heading: "核心卖点",
         items: [
@@ -1920,7 +1920,7 @@ function buildCopybookSpec() {
         ] },
       { type: "table", heading: "版本与交付",
         columns: ["版本", "包含内容", "修改次数", "交付形式"],
-        // 这里**不放价格**。原先写的是 ￥299 / ￥899 / ￥1999 ——
+        // 这里**不放价格**。原先写的是 ￥299 / ￥899 / ￥1999，
         // 那是给 PosterForge 自己编的价目表，会被客户当成真实报价。
         // 和手机号/邮箱同一条规矩：客户没给的钱数，一个都不印。
         rows: [
@@ -1928,7 +1928,7 @@ function buildCopybookSpec() {
           ["标准版", "海报 + 文案手册", "5 次", "PNG + PDF"],
           ["定制版", "全套物料 + 专属版式", "按需", "PNG + PDF + spec"],
         ] },
-      // 价格页只在**用户真的给了价格**时才出 —— 与海报同一条规则：
+      // 价格页只在**用户真的给了价格**时才出，与海报同一条规则：
       // 没给价格就整块不画，绝不回落默认值（回落等于编造报价）。
       ...(content.price
         ? [{ type: "price", note: "参考价", price: content.price, unit: "元 / 套",
@@ -1938,7 +1938,7 @@ function buildCopybookSpec() {
         items: [
           { k: "咨询电话", v: content.phone || "○○○-○○○○-○○○○" },
           { k: "服务时间", v: content.parsed?.hours || "○○:○○ - ○○:○○" },
-          // 邮箱原先写死成 hello@example.com —— 那是**编造的联系方式**，
+          // 邮箱原先写死成 hello@example.com，那是**编造的联系方式**，
           // 和手机号同一条规矩：客户没给就留占位符，不能印一个能被人真去发的邮箱。
           { k: "电子邮箱", v: content.parsed?.email || "○○○@○○○.○○○" },
         ],
@@ -1949,7 +1949,7 @@ function buildCopybookSpec() {
 
 /* ---------------------------------------------------------------- 生成 */
 // 这里原来有个 generateAiBackground()：前端单独调 /api/aigen/background 生成一张
-// 固定提示词的底图。现在不用了 —— AI 底图改由服务端在 /api/compose 里按用户原话
+// 固定提示词的底图。现在不用了，AI 底图改由服务端在 /api/compose 里按用户原话
 // 生成提示词，而且**有照片也会生成**（AI 图当氛围底、照片走顶部图带）。
 // 前端不再需要知道"有没有 AI 底图"这件事，所以函数和它那个开关一起删了。
 function showResult({ imgUrl, metaText, errText, extraHTML }) {
@@ -1999,7 +1999,7 @@ function renderCopybookResult(data) {
     .map((p) => `<a href="${p}" target="_blank" rel="noopener"><img src="${p}" style="width:86px;border:1px solid var(--line-2);border-radius:6px" /></a>`)
     .join("");
 
-  // 手工内容触发 warning 时也要让用户看到 —— 不能只报"成功"
+  // 手工内容触发 warning 时也要让用户看到，不能只报"成功"
   const warnHTML = (data.warnings || []).length
     ? `<div style="margin-top:12px;text-align:left;max-width:560px;margin-left:auto;margin-right:auto;
             padding:10px 13px;border-radius:10px;border:1px solid rgba(232,160,94,.35);
@@ -2025,7 +2025,7 @@ function renderCopybookResult(data) {
  * 让大模型决定"生成什么"，拿回一份完整 spec。
  *
  * 这是主路径。模型不可用（没装 / 没开 / 超时 / 输出违规）时抛错，
- * 由调用方决定是否退回本地兜底 —— 兜底必须存在，否则模型一挂整站就不能出图。
+ * 由调用方决定是否退回本地兜底，兜底必须存在，否则模型一挂整站就不能出图。
  */
 async function composeWithModel({ onProgress, mode = "poster" } = {}) {
   const brief = currentPrompt().trim();
@@ -2043,7 +2043,7 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
   // composition 来自「套用模板」时选中的那套模板。
   // 为什么让模板决定构图而不是让模型现挑：构图是"这份物料该长什么样"，
   // 是版式决策，不该每次生成都变。用户看到的缩略图就是这个构图，
-  // 换一套模板就该换一种版面 —— 否则 41 套模板全是同一张脸。
+  // 换一套模板就该换一种版面，否则 41 套模板全是同一张脸。
   const picked = window.__pickedTemplate || null;
   const { data } = await apiWithProgress("/api/compose", {
     method: "POST",
@@ -2052,7 +2052,7 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
       brief, photos, facts, mode,
       // 模板的构图优先于 state.composition。
       //
-      // 原来写的是 `state.composition || 模板构图` —— 顺序反了。state.composition
+      // 原来写的是 `state.composition || 模板构图`，顺序反了。state.composition
       // 会被「手选版式」和「参考图分析」写值，而套用模板时并不会清它，
       // 于是只要用户先点过版式或先分析过参考图，之后套模板都会**被旧版式盖掉**，
       // 表现就是"套了模板，生成出来却不是那个样式"。
@@ -2060,7 +2060,7 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
       // 两侧互相排斥，所以这里以模板为准是安全的。
       composition: (picked && picked.composition) ? picked.composition : (state.composition || null),
       variant: picked && picked.variant ? picked.variant : "a",
-      // 精调只跟模板走 —— 用户手选版式后 __pickedTemplate 会被清空，
+      // 精调只跟模板走，用户手选版式后 __pickedTemplate 会被清空，
       // 这时不该再套用旧模板的字号档位
       tuning: (picked && picked.tuning) ? picked.tuning : null,
     }),
@@ -2080,21 +2080,21 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
  * 把模型决定的内容显示出来。
  *
  * 为什么必须显示：模型写的东西是"生成"的，用户有权看到它到底写了什么、
- * 依据是什么。藏在图片里等于黑箱 —— 出了错用户也不知道该改哪。
+ * 依据是什么。藏在图片里等于黑箱，出了错用户也不知道该改哪。
  */
 function renderComposeNote(composed, errMsg) {
   const box = $("#composeNote");
   if (!box) return;
   if (!composed) {
     box.hidden = false;
-    // 措辞不能再写"确认 Ollama 在运行" —— 那是把责任推给用户。
+    // 措辞不能再写"确认 Ollama 在运行"，那是把责任推给用户。
     // 服务端现在会**自己把本机模型拉起来**（见 brain.mjs 的 ensureOllama），
     // 走到这里说明自动拉起也失败了，该说的是"拉不起来"以及为什么。
     box.innerHTML =
       `<b>模型没有参与这次生成</b><br>` +
       `<span class="cn-err">${errMsg ? String(errMsg).slice(0, 200) : "原因未知"}</span><br>` +
       `<span class="cn-dim">已用本地确定性规则兜底，图照样能出。` +
-      `服务端会自动启动本机模型（ollama serve），本次没成功 —— 上面那句是原因。</span>`;
+      `服务端会自动启动本机模型（ollama serve），本次没成功：上面那句是原因。</span>`;
     return;
   }
   const c = composed.copy || {};
@@ -2144,7 +2144,7 @@ function renderComposeNote(composed, errMsg) {
         `<div class="cn-bg cn-bg-fail">` +
         `<b>没能自动生成底图</b>` +
         `<span class="cn-err">${esc(bg.message || "未知原因")}</span>` +
-        `<span class="cn-dim">这次用渐变底出了纯文字版。原因多半是本机没有可用的生图模型 —— ` +
+        `<span class="cn-dim">这次用渐变底出了纯文字版。原因多半是本机没有可用的生图模型：` +
         `有模型时这一步是自动的，不需要任何开关；也可以直接上传一张照片当底图。</span>` +
         (bg.prompt ? `<div class="cn-prompt">${esc(bg.prompt)}</div>` : "") +
         `</div>`;
@@ -2163,7 +2163,7 @@ function renderComposeNote(composed, errMsg) {
       : "");
 }
 
-/** 输入或照片一变，上一次的模型结果就作废 —— 否则会拿旧文案配新照片 */
+/** 输入或照片一变，上一次的模型结果就作废，否则会拿旧文案配新照片 */
 function invalidateCompose() {
   state.composeSpec = null;
   state.composeCopy = null;
@@ -2200,7 +2200,7 @@ async function doGenerate() {
           headers: { "content-type": "application/json" },
           body: bodyText,
           timeoutMs: 180000,
-          // 让按钮文字会动 —— 否则 15~25 秒的渲染看起来就是"卡死"
+          // 让按钮文字会动，否则 15~25 秒的渲染看起来就是"卡死"
           onTick: (ms) => {
             btn.textContent = `渲染中… ${Math.round(ms / 1000)}s（6 页 A4 需十几秒）`;
           },
@@ -2257,7 +2257,7 @@ async function doGenerate() {
         //
         // 但不是所有失败都该叫"模型未参与"：请求本身就不成立时（比如一句话一个字都没写、
         // 或者完全没给内容），服务端是 400 直接拒的，完全没轮到模型。
-        // 原来一律套"模型未参与"，用户看到的是"模型未参与（既没有文字也没有图片）"——
+        // 原来一律套"模型未参与"，用户看到的是"模型未参与（既没有文字也没有图片）"，
         // 会以为大模型坏了，其实是他还没输入内容。这里按错误性质分开说。
         state.composeSpec = null;
         const msg = String(e.message || e);
@@ -2268,7 +2268,7 @@ async function doGenerate() {
         renderComposeNote(null, msg);
       }
     } else {
-      // 用 brain 的实际状态说人话，别一律说"Ollama 未运行" ——
+      // 用 brain 的实际状态说人话，别一律说"Ollama 未运行"，
       // 也可能是模型没装、或在 brain.config.json 里被关掉了。
       const why = !state.brain
         ? "模型状态未知"
@@ -2286,7 +2286,7 @@ async function doGenerate() {
       renderComposeNote(
         null,
         why + "。本次没有模型参与：文案取自内置模板，底图退回渐变色块，"
-          + "整张图由本地 Pillow 引擎确定性排版渲染 —— 能出图，但画面里没有 AI 生成的内容。",
+          + "整张图由本地 Pillow 引擎确定性排版渲染：能出图，但画面里没有 AI 生成的内容。",
       );
     }
 
@@ -2378,7 +2378,7 @@ async function health() {
   health();
 
   // 深链：门户里的 AI 助手推荐模板时会带上 /?tpl=<id>。
-  // 这里读到就直接切到「套用模板」并套上那一套 —— 从助手到出图少点两下。
+  // 这里读到就直接切到「套用模板」并套上那一套，从助手到出图少点两下。
   // 放在 loadTemplates() 之后，因为 applyTemplateById 要在 state.templates 里找它。
   try {
     const want = new URLSearchParams(location.search).get("tpl");
@@ -2414,7 +2414,7 @@ async function loadBrain() {
 }
 
 /* 顶栏已按需求移除，相关占位按钮的处理也一并删掉。
-   如果以后加回顶栏，注意别用 alert() —— 无头浏览器里它会阻塞脚本。 */
+   如果以后加回顶栏，注意别用 alert()：无头浏览器里它会阻塞脚本。 */
 
 /* 暴露只读状态给自动化测试（drive-test.mjs）。不影响业务逻辑。 */
 window.posterforge = {
@@ -2432,7 +2432,7 @@ window.posterforge = {
     };
   },
   // 只读快照：测试要能在不改动页面的前提下看到"究竟会印什么字"。
-  // 必须与"真的会出图的那份 spec"一致 —— 早先这里写死用 buildPosterSpec()，
+  // 必须与"真的会出图的那份 spec"一致，早先这里写死用 buildPosterSpec()，
   // 于是在打卡模式下也回报海报的图层，审计脚本读到的全是错的东西
   //（据此误报了一堆"打卡卡里有价格层"）。
   snapshot(spec) {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * drive-brain.mjs —— 走真实浏览器，验收"大模型决定生成什么"这条完整链路。
+ * drive-brain.mjs，走真实浏览器，验收"大模型决定生成什么"这条完整链路。
  *
  * 为什么必须走浏览器而不是只打接口：
  *   1. app.js 现在改成了 ES module（要 import 共用版面模块），
- *      模块加载失败在接口测试里看不出来 —— 页面会白屏，但 /api 全是 200。
+ *      模块加载失败在接口测试里看不出来，页面会白屏，但 /api 全是 200。
  *   2. 真正要验的是"用户按下生成按钮之后看到什么"，
  *      包括模型内容回显面板、按钮文案、以及兜底路径。
  *
@@ -146,7 +146,7 @@ async function main() {
 
   /** 一次上传多张。
    *  为什么不分多次：file input 本来就是多选的，分多次触发 change 时
-   *  第 2 张经常会赶上"上一张还在上传"，导致 state 里只有 1 张 ——
+   *  第 2 张经常会赶上"上一张还在上传"，导致 state 里只有 1 张，
    *  接着 compose 就按单图处理，后面所有断言全错位（踩过）。 */
   async function uploadMany(items) {
     const payload = [];
@@ -259,7 +259,7 @@ async function main() {
     check("版式在白名单", ["poster_text", "poster_photo_bg", "poster_photo_strip"].includes(
       (st.composeCopy.layout || "").trim()), st.composeCopy.layout);
   } else {
-    check("本次用了模型", false, "composeCopy 为空 —— 走了兜底");
+    check("本次用了模型", false, "composeCopy 为空：走了兜底");
   }
 
   /* ---------------- C. 回显面板 ---------------- */
@@ -357,7 +357,7 @@ async function main() {
     check("读图拿到了画面", (stC.composeScenes || []).length === 2,
       (stC.composeScenes || []).map((s) => s.scene.slice(0, 14)).join(" / "));
   } else {
-    check("打卡也用了模型", false, "composeCopy 为空 —— 走了兜底");
+    check("打卡也用了模型", false, "composeCopy 为空：走了兜底");
   }
   const noteC = JSON.parse(await cdp.evalJs(`JSON.stringify({
     hidden: document.getElementById('composeNote').hidden,

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * start.mjs —— 一次把三个服务都起起来，并盯着它们别死。
+ * start.mjs，一次把三个服务都起起来，并盯着它们别死。
  *
  * 三件事：
  *   1. 检查部署是否完成（没完成就提示先跑 deploy.mjs，而不是让你对着报错猜）
  *   2. 拉起三个服务：海报站点(8800) / 旅游规划(8001) / Ollama(11434)
- *   3. **守着它们** —— 实测这三个服务会自己死（日志里是 ^C 信号，
+ *   3. **守着它们**，实测这三个服务会自己死（日志里是 ^C 信号，
  *      不是崩溃），每次都要人工去拉，用户看到的就是"又打不开了"。
  *      所以启动和保活合成一个程序，不用先开这个再开那个。
  *
@@ -79,7 +79,7 @@ async function up(s) {
 
 // ---------------------------------------------------------------- 前置检查
 if (!existsSync(path.join(PF, "server.mjs"))) {
-  console.error("找不到 posterforge/server.mjs —— 目录不完整，先跑 node deploy.mjs");
+  console.error("找不到 posterforge/server.mjs：目录不完整，先跑 node deploy.mjs");
   process.exit(1);
 }
 if (!existsSync(path.join(PF, "brain.config.json"))) {

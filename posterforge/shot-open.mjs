@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** shot-open.mjs —— 打开站点并截一张"用户此刻看到的样子"，顺便读回提示语。 */
+/** shot-open.mjs，打开站点并截一张"用户此刻看到的样子"，顺便读回提示语。 */
 import { spawn } from "node:child_process";
 import { requireBrowser } from "./paths.mjs";
 import { mkdir, rm, writeFile } from "node:fs/promises";

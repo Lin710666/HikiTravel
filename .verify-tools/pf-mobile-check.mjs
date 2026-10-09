@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * pf-mobile-check.mjs —— 手机端到底什么样（用硬指标，不靠"看着还行"）
+ * pf-mobile-check.mjs，手机端到底什么样（用硬指标，不靠"看着还行"）
  *
  * 移动端翻车从来不是"看起来怪"，而是三件测得到的事：
- *   1. **横向溢出** —— 页面比屏幕宽，出现左右滚动条，右边内容是切掉的；
- *   2. **浮层出屏** —— 提示框比视口宽 / 被挤到屏幕外，按钮根本点不到；
- *   3. **触控目标太小** —— 关闭按钮 12px 见方，鼠标能点、手指点不中
+ *   1. **横向溢出**，页面比屏幕宽，出现左右滚动条，右边内容是切掉的；
+ *   2. **浮层出屏**，提示框比视口宽 / 被挤到屏幕外，按钮根本点不到；
+ *   3. **触控目标太小**，关闭按钮 12px 见方，鼠标能点、手指点不中
  *      （规范建议 ≥ 44×44 CSS px）。
  *
  * 用法：node pf-mobile-check.mjs [baseUrl]
@@ -22,12 +22,12 @@ const PORT = Number(process.env.CDP_PORT || 9397);
 //
 // 注意取参数的方式：**不能**用 split('=')[1]。
 // 默认值 `--page=/?nomodel=1` 里有两个 '='，split 会把它截成 `/?nomodel`，
-// 于是 ?nomodel=1 变成 ?nomodel、读出来是空字符串，强制预览静默失效 ——
+// 于是 ?nomodel=1 变成 ?nomodel、读出来是空字符串，强制预览静默失效，
 // 表现是"探测到的元素尺寸全是 0×0"，看着像页面坏了，其实是脚本把参数吃了。
 const PAGE_ARG = process.argv.find((a) => a.startsWith("--page=")) || "--page=/?nomodel=1";
 const PAGE = BASE + PAGE_ARG.slice(PAGE_ARG.indexOf("=") + 1);
 // 有的页面根本没有那个提示框（比如门户）。对不存在的元素报"太小"，是脚本自己的噪音，
-// 不是页面的问题 —— 那会把一次全绿的结果报成失败，比不测更坏。
+// 不是页面的问题，那会把一次全绿的结果报成失败，比不测更坏。
 const EXPECT_NOTICE = !PAGE.includes("hub.html") && !PAGE.includes("wenlv");
 const PROFILE = mkdtempSync(path.join(tmpdir(), "pf-mobile-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -109,7 +109,7 @@ async function main() {
   await send("Page.enable");
   await send("Runtime.enable");
   // 打出来，别猜：探测"元素尺寸 0×0"时，第一件要分清的是
-  // "页面不该有它" 还是 "脚本压根没访问对地址"。
+  // "页面不该有它" 还是 "脚本完全没访问对地址"。
   console.log(`  实际访问：${PAGE}`);
   // 用 ?nomodel=1 保证提示框一定在（这样换台机器、哪怕本机已有模型也能测这一段）
   await send("Page.navigate", { url: PAGE });
@@ -156,6 +156,6 @@ main()
     try { rmSync(PROFILE, { recursive: true, force: true }); } catch { }
     console.log(`\n汇总：${bad === 0 ? "全部尺寸都通过" : bad + " 个尺寸有问题"}`);
     // 有失败必须让调用方看得见：原来这里永远 exit 0，
-    // 结果回归脚本靠 exit code 判断，把"5 个尺寸都失败"报成了 PASS —— 比不跑更坏。
+    // 结果回归脚本靠 exit code 判断，把"5 个尺寸都失败"报成了 PASS，比不跑更坏。
     process.exit(bad === 0 ? 0 : 1);
   });

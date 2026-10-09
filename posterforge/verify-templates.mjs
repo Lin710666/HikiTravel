@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * verify-templates.mjs —— 模板库的接口级验证。
+ * verify-templates.mjs，模板库的接口级验证。
  *
  * 用 Node 发请求而不是 PowerShell：Windows PowerShell 5.1 用 -Body 发中文时
- * 不按 UTF-8 编码，服务端收到的是 `?` —— 会让人误判成"服务端不支持中文"。
+ * 不按 UTF-8 编码，服务端收到的是 `?`，会让人误判成"服务端不支持中文"。
  * 实测踩过这个坑：广告法预检"没拦住"，其实是被测文本已经变成问号了。
  */
 const BASE = process.argv[2] || "http://127.0.0.1:8800";

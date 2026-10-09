@@ -1,20 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-validate-copybook.py —— 文案手册 spec 静态校验器
+validate-copybook.py：文案手册 spec 静态校验器
 
 为什么必须有它：
     海报有 validate.py 把门，手册却一直裸奔。而手册恰恰是**内容最多、最容易出事**的物料：
     多页文档里藏一个"全市最低价"，没人会逐页去挑。这类错误会静默流到客户手里。
 
 查五类问题（都不需要渲染）：
-    1. 结构     —— 必填字段、版块类型、类型专属必填字段
-    2. 调色板   —— 用到的色名是否都已定义（缺失会导致"配色错误但看起来正常"）
-    3. 合规     —— 广告法禁用词 / 需资质表述 / 事实来源标注
-    4. 引用     —— 引用的图片是否真的存在
-    5. 跨页一致 —— 同一门店的电话/地址在多页是否一致
+    1. 结构    ：必填字段、版块类型、类型专属必填字段
+    2. 调色板  ：用到的色名是否都已定义（缺失会导致"配色错误但看起来正常"）
+    3. 合规    ：广告法禁用词 / 需资质表述 / 事实来源标注
+    4. 引用    ：引用的图片是否真的存在
+    5. 跨页一致：同一门店的电话/地址在多页是否一致
 
-广告法词表**从 validate.py 导入**，不复制一份 —— 两处维护必然漂移。
+广告法词表**从 validate.py 导入**，不复制一份：两处维护必然漂移。
 
 用法：
     python validate-copybook.py --spec specs/copybook-x.json
@@ -64,7 +64,7 @@ REQUIRED_BY_TYPE: Dict[str, List[str]] = {
     "price": ["price"],
     "contact": ["items"],
     # image 的 src 必填：没有图的"图片版块"没有意义，
-    # 但渲染器会画占位框而不是崩溃 —— 这里只保证 spec 别是空的。
+    # 但渲染器会画占位框而不是崩溃，这里只保证 spec 别是空的。
     "image": ["src"],
 }
 
@@ -126,7 +126,7 @@ def check_structure(spec: Dict[str, Any], rep: Report) -> None:
     else:
         for k in ("client", "title"):
             if not str(meta.get(k, "")).strip():
-                rep.warn("meta.%s" % k, "为空 —— 页眉/封面会留白")
+                rep.warn("meta.%s" % k, "为空：页眉/封面会留白")
 
     theme = spec.get("theme")
     if not isinstance(theme, dict):
@@ -142,7 +142,7 @@ def check_structure(spec: Dict[str, Any], rep: Report) -> None:
         rep.warn("sections", "共 %d 页，手册一般不超过 20 页" % len(sections))
 
     if sections and isinstance(sections[0], dict) and sections[0].get("type") != "cover":
-        rep.warn("sections[1]", "第一个版块不是 cover —— 手册通常以封面开头")
+        rep.warn("sections[1]", "第一个版块不是 cover：手册通常以封面开头")
 
     for i, s in enumerate(sections):
         where = "sections[%d]" % (i + 1)
@@ -194,7 +194,7 @@ def check_palette(spec: Dict[str, Any], rep: Report) -> None:
     """按实际用到的页面类型，检查所需色名是否都定义了。"""
     palette = ((spec.get("theme") or {}).get("palette")) or {}
     if not isinstance(palette, dict) or not palette:
-        rep.error("theme.palette", "不能为空 —— 手册需要色板才能渲染")
+        rep.error("theme.palette", "不能为空：手册需要色板才能渲染")
         return
 
     # 色值本身格式要对
@@ -214,7 +214,7 @@ def check_palette(spec: Dict[str, Any], rep: Report) -> None:
 
     missing = [(c, why) for c, why in need if c not in palette]
     for c, why in missing:
-        rep.error("theme.palette.%s" % c, "缺失 —— %s 会用到，渲染会报色值无法解析" % why)
+        rep.error("theme.palette.%s" % c, "缺失：%s 会用到，渲染会报色值无法解析" % why)
 
     for c in PALETTE_OPTIONAL:
         if c not in palette and c in (
@@ -235,7 +235,7 @@ def check_compliance(spec: Dict[str, Any], rep: Report) -> None:
     for label, txt in texts:
         for w in AD_LAW_BANNED:
             if w in txt:
-                rep.error(label, "命中广告法禁用/高风险词 %r —— 必须改写（原文: %s）" % (w, txt[:50]))
+                rep.error(label, "命中广告法禁用/高风险词 %r：必须改写（原文: %s）" % (w, txt[:50]))
         for w in AD_LAW_NEEDS_PROOF:
             if w in txt:
                 rep.warn(label, "含需资质表述 %r，请人工确认资质后再发布" % (w,))
@@ -255,7 +255,7 @@ def check_compliance(spec: Dict[str, Any], rep: Report) -> None:
         )
 
     if has_price and "有效期" not in joined and "有效" not in joined:
-        rep.warn("sections", "出现价格但未见有效期说明 —— 促销手册必须写明有效期")
+        rep.warn("sections", "出现价格但未见有效期说明：促销手册必须写明有效期")
 
 
 def check_cross_section(spec: Dict[str, Any], rep: Report) -> None:

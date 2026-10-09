@@ -8,7 +8,7 @@
 四条底线（与用户对齐，缺一不可）：
 
 1. **默认关闭**：没配 `SEARCH_API_MODE / SEARCH_API_URL / SEARCH_API_KEY` 就返回空列表，
-   主流程照常跑——绝不让一个外部服务变成生成规划的硬依赖。
+   主流程照常跑，绝不让一个外部服务变成生成规划的硬依赖。
 2. **只发城市名**：查询里只有目的地（如「平潭 必去 攻略」），
    **不带人数、预算、偏好这些画像信息**，这样不破坏"隐私数据不出机"的定位。
 3. **实体必须能在高德找到**：摘要只作为"偏好提示"进提示词；模型据此挑出来的名字
@@ -54,7 +54,7 @@ class WebSearchClient:
         try:
             payload = self._request(text, limit)
             return self._extract(payload, limit)
-        except Exception as exc:  # 网络、超时、JSON 结构不对——一律不阻断生成
+        except Exception as exc:  # 网络、超时、JSON 结构不对，一律不阻断生成
             logger.warning("攻略检索失败（不影响生成）：%s", exc)
             return []
 

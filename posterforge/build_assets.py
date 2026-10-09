@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-site/build_assets.py —— 一次性生成站点所需的模板缩略图与案例图。
+site/build_assets.py：一次性生成站点所需的模板缩略图与案例图。
 
 为什么用脚本批量生成而不是手工做图：
-  1. 站点要展示「热门模板」，模板本身就是 poster-forge 的产物 —— 自洽。
+  1. 站点要展示「热门模板」，模板本身就是 poster-forge 的产物：自洽。
   2. 规格化的东西用代码生成才可维护：改一次主题，全部缩略图跟着变。
   3. 不依赖任何外部素材，纯本地可复现。
 
@@ -25,7 +25,7 @@ SITE_ROOT = HERE                      # 站点根（本文件所在目录）
 REPO_ROOT = os.path.dirname(HERE)     # 仓库根
 
 # 引擎目录：v8.0 合并项目时 `poster-forge/` 改名成了 `renderer/`。
-# 两个名字都认，也支持 PF_FORGE_ROOT 显式指定 —— 写死一个名字的话，
+# 两个名字都认，也支持 PF_FORGE_ROOT 显式指定，写死一个名字的话，
 # 改名之后这里直接 ImportError，而报错信息完全指不到"是目录名变了"。
 FORGE_ROOT = None
 for _cand in (os.environ.get("PF_FORGE_ROOT"),
@@ -122,7 +122,7 @@ def bg_for(tid: str, theme: str) -> dict:
     """
     背景优先级：AI 生成的真实照片 > 纯渐变。
 
-    用照片时不加光斑 —— 光斑是为了给纯色渐变增加体积感，
+    用照片时不加光斑：光斑是为了给纯色渐变增加体积感，
     压在照片上只会显脏。
     """
     slug = BG_SLUGS.get(tid)
@@ -138,7 +138,7 @@ def scrim_layers() -> list:
     """
     照片背景上的可读性蒙版。
 
-    纯照片上压白字会读不清 —— 这是"好看但不可用"的典型失败。
+    纯照片上压白字会读不清：这是"好看但不可用"的典型失败。
     三段式渐变蒙版：顶部轻、中部中、底部重
     （底部信息量最大：价格与联系方式）。
     """
@@ -287,7 +287,7 @@ def main() -> int:
     # 首页的「爆火案例」区块按需求删除后，这些图成了零引用的死资产，
     # 而且它们的内容是编造的播放量/点赞数 + 编造的价格（含 ￥899），
     # 与其留着占地和误导，不如彻底去掉。原案例文案留档在 site/deleted-cases.json。
-    # wide_spec() 一并保留 —— 横版 banner 仍是支持的版式。
+    # wide_spec() 一并保留，横版 banner 仍是支持的版式。
 
     return 0
 

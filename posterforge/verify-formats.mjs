@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * verify-formats.mjs —— 端到端验格式：上传 → 转正/转码 → 渲染。
+ * verify-formats.mjs，端到端验格式：上传 → 转正/转码 → 渲染。
  *
  * 为什么不能只验上传：上传收下了但渲染器打不开，等于把坏文件骗进系统，
  * 用户会在"生成"那一步才炸，而且报错跟他上传的图对不上。
@@ -19,7 +19,7 @@ import { findPython, findComfyPython } from "./paths.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.argv[2] || "http://127.0.0.1:8800";
-// 解释器由 paths.mjs 统一解析 —— 原来这两条都是别人机器上的写死路径
+// 解释器由 paths.mjs 统一解析，原来这两条都是别人机器上的写死路径
 // （`E:\devenv\...` / `E:\ComfyUI_windows_portable\...`），本机连 E 盘都没有。
 const PY = findPython();
 const COMFY_PY = findComfyPython() || PY;
@@ -125,7 +125,7 @@ async function main() {
   brokenHeic.write("heic", 8, "ascii");
   const bh = await upload("坏.heic", brokenHeic);
   check("有 HEIC 头但解不开的文件被拒", bh.ok === false,
-    bh.ok ? "⚠ 被收下了 —— 会在生成阶段才炸" : bh.errors.map((e) => e.reason).join("；").slice(0, 80));
+    bh.ok ? "⚠ 被收下了：会在生成阶段才炸" : bh.errors.map((e) => e.reason).join("；").slice(0, 80));
 
   console.log(`\n${failures === 0 ? "全部通过 ✓" : failures + " 项未通过 ✗"}`);
   process.exit(failures === 0 ? 0 : 1);

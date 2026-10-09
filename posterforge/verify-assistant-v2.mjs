@@ -40,7 +40,7 @@ await send("Emulation.setDeviceMetricsOverride", { width: 1500, height: 980, dev
 await send("Page.navigate", { url: "http://127.0.0.1:8800/" });
 await sleep(4500);
 
-// 助手的 DOM 在 Shadow DOM 里，普通 querySelector 进不去 ——
+// 助手的 DOM 在 Shadow DOM 里，普通 querySelector 进不去，
 // 第一版没穿进去，把"球在不在""面板可见吗"误判成失败。
 await ev(`window.__walk = function(pred){ const w=(n)=>{ if(!n) return null;
   try { if(n.nodeType===1 && pred(n)) return n; } catch(e){}
@@ -116,7 +116,7 @@ const reply = await ev(`(()=>{ const w=(n)=>{ if(!n) return null; if(n.id==='msg
 console.log("     回复尾部:", JSON.stringify(reply.slice(-160)));
 check("有回复内容", reply.length > 10);
 // 注意断言的写法：助手**提到**"说清目的地、天数"是在介绍能力，这是对的；
-// 要抓的是"只会在那儿要参数"那种回复 —— 短、且以索要开头。
+// 要抓的是"只会在那儿要参数"那种回复，短、且以索要开头。
 // 第一版断言直接匹配关键词，把正常的自我介绍判成了失败。
 const onlyAsking = /^(还缺少|请补充|需要提供)/.test(reply.trim()) ||
   (reply.length < 90 && /目的地.*天数.*(人数|预算)/.test(reply));

@@ -1,10 +1,10 @@
 /* ============================================================================
- * ai-ball.js —— 悬浮球 AI 助手（可嵌到任意页面）
+ * ai-ball.js，悬浮球 AI 助手（可嵌到任意页面）
  * ---------------------------------------------------------------------------
  * 为什么要做成独立文件：门户、海报页、旅游规划页三处都要有这颗球，
  * 抄三份必然漂移。这里一份代码，三处共用。
  *
- * 为什么用 Shadow DOM：两个宿主页面配色相反 ——
+ * 为什么用 Shadow DOM：两个宿主页面配色相反，
  * 海报页是深色暖调，旅游规划页是浅色。普通 class 会被宿主的
  * 全局样式（尤其是 body 的 color/background 继承）污染，
  * Shadow DOM 把样式封在组件内，两边看起来一致。
@@ -22,7 +22,7 @@
 
   /* 接口基址由**引入它的 script 标签**告诉它，不靠试错探测。
    *
-   * 为什么：规划接口的位置取决于这个页面是怎么打开的 ——
+   * 为什么：规划接口的位置取决于这个页面是怎么打开的，
    *   · 经反代打开（8800/wenlv/…）→ 接口在 /wenlv/api/…
    *   · 直接打开 HikiTravel 自己的端口（8000/8001）→ 接口在同源 /api/…
    * 早先的写法是先请求 /wenlv/api/health 探一次再回退，功能没问题，
@@ -41,7 +41,7 @@
   })();
   function apiBase() { return Promise.resolve(WENLV); }
 
-  // 示例问题。**不再写死** —— 由服务端结合当天联网素材轮换（见 /api/assistant/prompts）。
+  // 示例问题。**不再写死**，由服务端结合当天联网素材轮换（见 /api/assistant/prompts）。
   // 写死的问题永远是那四句，用户看两天就腻了，也跟当天的热点脱节。
   // 这里留一组兜底，网络拿不到时至少还有东西可点。
   var EXAMPLES = [
@@ -77,7 +77,7 @@
   /* ---------------------------------------------------------------- 主题色板
      定义在**文档层**，不是 shadow 里面。
      原因：这个组件是 shadow DOM（下面那句 attachShadow），外面的
-     html[data-theme="dark"] 选不中它里面的任何元素 —— 但 CSS 自定义属性会
+     html[data-theme="dark"] 选不中它里面的任何元素：但 CSS 自定义属性会
      **自然继承**穿过 shadow 边界。所以把两套色板挂在 document 上、
      shadow 内部全部用 var() 引用：主题一变它自己就跟着变，
      不需要任何 JS 监听，也不用把属性镜像到宿主上。
@@ -101,7 +101,7 @@
       '--ab-glow-1:rgba(168,85,247,.42);--ab-glow-2:rgba(168,85,247,.55);',
       '--ab-glow-3:rgba(255,90,60,.34);--ab-glow-4:rgba(255,90,60,.1)',
       '}',
-      /* 深色：面板转近黑、文字转浅；品牌色跟随站点深色主题换成蓝 ——
+      /* 深色：面板转近黑、文字转浅；品牌色跟随站点深色主题换成蓝，
          门户那边深色也是蓝，同一处界面里出现两种强调色会很乱。 */
       'html[data-theme="dark"]{',
       /* 品牌色不跟着主题换：小旅就是橙的那个球，深色下改蓝反而认不出来。跟主题走的只有面板/文字/边框这些底色。 */
@@ -140,11 +140,11 @@
     '  transition:transform .18s,opacity .18s;',
     '  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}',
     '.ball:hover{transform:scale(1.07)}',
-    // 拖动过程中不要缩放、不要过渡 —— 否则手感是"粘在手指上慢慢挪"
+    // 拖动过程中不要缩放、不要过渡，否则手感是"粘在手指上慢慢挪"
     '.ball.dragging{transform:none!important;cursor:grabbing;transition:none}',
     '.ball.hide{opacity:0;pointer-events:none;transform:scale(.8)}',
     // 球面文字：光一个图标用户认不出是干什么的。
-    // 「AI」大 + 「助手」小，竖排两行 —— 68px 的圆里放得下，且一眼能读出来。
+    // 「AI」大 + 「助手」小，竖排两行，68px 的圆里放得下，且一眼能读出来。
     '.bt{display:flex;flex-direction:column;align-items:center;line-height:1;pointer-events:none}',
     '.bt b{font-size:21px;font-weight:800;color:var(--ab-panel,#fff);letter-spacing:.5px}',
     '.bt i{font-style:normal;font-size:11px;font-weight:700;color:var(--ab-on-brand,rgba(255,255,255,.94));',
@@ -276,7 +276,7 @@
     '      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>',
     '      <circle cx="12" cy="12" r="3.2"/></svg></span>',
     '    <div class="title"><b id="title">AI 助手</b><span id="st">正在连接…</span></div>',
-    // 齿轮只在面板里 —— 收起来时整个面板都不在，所以设置也就看不到了。
+    // 齿轮只在面板里，收起来时整个面板都不在，所以设置也就看不到了。
     // 这是用户明确要求的：设置只在拉出助手之后才可见。
     '    <button class="gear" id="gear" aria-label="助手设置" title="助手设置">',
     '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">',
@@ -324,7 +324,7 @@
      小旅可以拖到任意位置。
 
      两个最容易做坏的地方，这里都处理了：
-       1. **拖完会顺带触发一次 click** —— 不抑制的话就成了"每拖一次弹一次面板"；
+       1. **拖完会顺带触发一次 click**：不抑制的话就成了"每拖一次弹一次面板"；
        2. **抖动阈值**：鼠标/手指抖 2~3 像素是常事，不设阈值会把点击误判成拖动，
           于是"点一下打不开"。
      用 Pointer Events 一套覆盖鼠标与触摸；setPointerCapture 保证手指滑出球外也不丢事件。 */
@@ -363,11 +363,11 @@
   // 但**任何一个页面刷新，就全部回右下角**。
   //
   // 这里踩过一个坑，值得写下来：
-  //   原来用 sessionStorage 存 —— 它**每个标签页各一份**。于是「主页那个标签页从来没刷新过」，
+  //   原来用 sessionStorage 存，它**每个标签页各一份**。于是「主页那个标签页从来没刷新过」，
   //   它记的位置一直是旧的；你在另一个标签页刷新之后回头看主页，球又跑回中间去了，看起来不符合预期。
   //   改用 localStorage 才有一个全站唯一的位置，再用 storage 事件让所有标签页立刻对齐。
   //
-  // 怎么区分「跳页面」和「刷新」：Navigation Timing 的 type ——
+  // 怎么区分「跳页面」和「刷新」：Navigation Timing 的 type，
   //   · 点链接 / 后退 → navigate / back_forward → 恢复位置
   //   · F5 / Ctrl+R  → reload → 清掉（所有标签页一起回右下角）
   var navType = (function () {
@@ -400,7 +400,7 @@
     if (e.key === POS_KEY) syncFromStorage();
   });
 
-  // 从 bfcache 回来（点后退）时，页面是从内存里原样恢复的、JS 变量还是旧的 ——
+  // 从 bfcache 回来（点后退）时，页面是从内存里原样恢复的、JS 变量还是旧的，
   // 加载时的代码管不到这种情况，得在 pageshow 再对一次。
   window.addEventListener("pageshow", function () {
     if (!drag) syncFromStorage();
@@ -506,7 +506,7 @@
 
     // 对话走**本站自己的** /api/assistant/chat（本机 Ollama）。
     //
-    // 原来接的是 <base>/api/chat/stream，也就是 HikiTravel 的接口 ——
+    // 原来接的是 <base>/api/chat/stream，也就是 HikiTravel 的接口，
     // 但那是**旅游规划**接口，不是聊天：说"你好"，它回的是
     // "还缺少这些信息：目的地、游玩天数、出行人数、总预算"。
     // 用户看到的"助手没实现"就是这个。
@@ -577,7 +577,7 @@
 
   /* ------------------------------------------------------------ 虚拟形象
    *
-   * 默认**不加载** —— 运行时（pixi + Cubism core）加起来 760KB，
+   * 默认**不加载**，运行时（pixi + Cubism core）加起来 760KB，
    * 模型 4.7MB，为了一次都用不上的功能让每个页面都背这些不经济。
    * 用户在设置里打开时才去加载（见 applyPrefs）。
    *
@@ -632,7 +632,7 @@
       if (!host || !window.PIXI || !window.PIXI.live2d) return;
       var name = String(model || 'hiyori').replace(/[^a-z0-9_-]/gi, '');
       // 入口文件名**逐个人工核对过**，不能靠猜。
-      // 注意：第一版按"目录名首字母大写"猜，四个里错了三个 ——
+      // 注意：第一版按"目录名首字母大写"猜，四个里错了三个，
       //   hanfu     → 猜 'Hanfu'，实际 'hanfu'（小写）
       //   mudan     → 猜 'Modan'，实际 'tu tuan yuan'（跟目录名无关，还带空格）
       //   cangyixiu → 猜 'Cangyixiu'，实际 'jingying'
@@ -701,7 +701,7 @@
   /* ------------------------------------------------------------ 设置
    *
    * 用户的要求：设置只在**拉出助手之后**才看得到。
-   * 所以它不是页面上一个常驻按钮，而是面板里的一枚齿轮 ——
+   * 所以它不是页面上一个常驻按钮，而是面板里的一枚齿轮，
    * 收起来时整个面板都不在，自然也就看不到设置。
    */
 
@@ -757,7 +757,7 @@
         '<input type="checkbox" id="stAvatar"' + (p.avatar ? ' checked' : '') + ' /></label>' +
       '<div class="st-note">默认关闭。打开后会在面板上方加载 Live2D 形象（占内存，首次约 2 秒）。</div>' +
       // 形象选择。五个模型的入口文件名各不相同（有个还带空格），
-      // 见 _mount 里的 ENTRY —— 那是逐个人工核对过的，不是猜的。
+      // 见 _mount 里的 ENTRY，那是逐个人工核对过的，不是猜的。
       '<div class="st-row st-col"><span>选形象</span>' +
         '<div class="st-models" id="stModels">' +
         [['hiyori', '日和'], ['mao', '猫'], ['hanfu', '汉服'],
@@ -775,7 +775,7 @@
       '<div class="st-foot"><span class="st-ok" id="stOk"></span>' +
         '<button class="st-save" id="stSave">保存</button></div>';
 
-    // 选形象：立刻预览 —— 用户点了要马上看到，不能等"保存"之后
+    // 选形象：立刻预览，用户点了要马上看到，不能等"保存"之后
     var pick = p.avatarModel || 'hiyori';
     box.querySelectorAll('.st-model').forEach(function (b) {
       b.onclick = function () {
@@ -808,7 +808,7 @@
     });
   }
 
-  /** 把面板里的对话整理成接口要的 history（只留最近几轮，别把上下文塞爆） */
+  /** 把面板里的对话整理成接口要的 history（只留最近几轮，不要把上下文塞爆） */
   var convo = [];
   function remember(role, text) {
     if (!text) return;

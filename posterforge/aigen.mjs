@@ -1,5 +1,5 @@
 /**
- * aigen.mjs —— 本地出图客户端（不依赖 ComfyUI）。
+ * aigen.mjs，本地出图客户端（不依赖 ComfyUI）。
  *
  * 和 comfy.mjs 的根本差别：
  *   comfy.mjs 需要一个**常驻的 ComfyUI 服务**（用户得手动点启动器，
@@ -19,7 +19,7 @@ import { mkdir, unlink } from "node:fs/promises";
 import path from "node:path";
 // 解释器与模型目录由 paths.mjs / 环境变量决定，本文件里不写死盘符
 import { findComfyPython, REPO_ROOT } from "./paths.mjs";
-// 用哪个模型不写死 —— 自动检索本机现成的，质量高的优先（规则只在 models.mjs 里）
+// 用哪个模型不写死，自动检索本机现成的，质量高的优先（规则只在 models.mjs 里）
 import { pickBestModel } from "./models.mjs";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
@@ -28,7 +28,7 @@ const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z
  * 跑出图 worker 的解释器：只有装了 CUDA 版 torch 与 diffusers 的那个才行
  * （通常是 ComfyUI 便携版自带的 python_embeded）。
  *
- * 原来这里写死 `E:\ComfyUI_windows_portable\python_embeded\python.exe` ——
+ * 原来这里写死 `E:\ComfyUI_windows_portable\python_embeded\python.exe`，
  * 那是某台机器上的位置，本机连 E 盘都没有，报错却只说"找不到出图用的 Python"，
  * 看不出是"路径写死了"还是"真没装"。
  */
@@ -49,7 +49,7 @@ export const AIGEN_SCRIPT = path.join(HERE, "aigen.py");
 /**
  * 模型目录：显式指定最优先，否则**用自动检索挑出来的那个**。
  *
- * 原来这里默认写死 SDXL-Turbo 的路径 —— 意味着本机就算放了更好的模型
+ * 原来这里默认写死 SDXL-Turbo 的路径，意味着本机就算放了更好的模型
  * （比如 Qwen-Image）也不会被用上，用户得回来改代码。现在谁在机器上就用谁，
  * 挑选规则（质量优先 + 可用优先）在 models.mjs 里，只有一处。
  */
@@ -96,14 +96,14 @@ export class AigenError extends Error {
  * 模型是否就位。
  *
  * 原来这里认死 SDXL-Turbo 那 5 个文件名（`unet/diffusion_pytorch_model.fp16.safetensors`…）。
- * 现在模型是自动检索出来的，可能是任意一个 diffusers 模型 —— 有的只有 fp32、有的权重分片，
+ * 现在模型是自动检索出来的，可能是任意一个 diffusers 模型，有的只有 fp32、有的权重分片，
  * 继续认死文件名就会把**能用的模型误报成"文件不全"**（然后就无谓地下载 16 GB）。
  * 所以改成看"能不能加载"，而不是"文件名对不对"。
  *
  * ── 但别矫枉过正（这个坑刚踩过）──
  * 第一版改成"model_index.json 声明的组件目录全都要在"，结果把 SDXL-Turbo 判成了不可用：
  * 它声明里有 feature_extractor / image_encoder，而这两个对 text2img **不是必需**的
- * （实测缺着也能出图）。一个把好模型判死的检查，比没有检查更糟 —— 它会让站点
+ * （实测缺着也能出图）。一个把好模型判死的检查，比没有检查更糟，它会让站点
  * 以为自己没模型，然后去下一份 16 GB。所以这里分成"必需组件"和"可选组件"两档。
  */
 const OPTIONAL_COMPONENTS = new Set([
@@ -145,7 +145,7 @@ export function checkModel(modelDir = AIGEN_MODEL) {
 /** 环境是否具备出图条件 */
 export function envCheck() {
   const problems = [];
-  // 纯命令名（如 "python"）不在这里判存在性 —— 交给 PATH，
+  // 纯命令名（如 "python"）不在这里判存在性，交给 PATH，
   // 否则会误报"找不到出图用的 Python：python"。
   const isPath = AIGEN_PYTHON.includes(path.sep) || AIGEN_PYTHON.includes("/");
   if (isPath && !existsSync(AIGEN_PYTHON)) {
@@ -205,7 +205,7 @@ function startWorker() {
   const proc = spawn(AIGEN_PYTHON, [AIGEN_SCRIPT, "--serve"], {
     stdio: ["pipe", "pipe", "pipe"],
     // 把检索选中的模型路径传给 Python：不传的话它只认自己的默认路径，
-    // 于是"自动识别到了更好的模型"这一步就白做了 —— JS 认出来了，Python 还在加载老的。
+    // 于是"自动识别到了更好的模型"这一步就白做了，JS 认出来了，Python 还在加载老的。
     env: { ...process.env, PF_AIGEN_MODEL: AIGEN_MODEL },
     windowsHide: true,
   });
@@ -322,7 +322,7 @@ export async function status() {
   return {
     running: env.ok && worker?.ready === true,
     // ready 表示"环境可用"（Python、脚本、模型文件都在位），与 worker 是否热着无关。
-    // 注意别写成 env.ready —— envCheck() 返回的是 {ok, problems, model}，
+    // 注意别写成 env.ready，envCheck() 返回的是 {ok, problems, model}，
     // ready 在 env.model 上。写错会恒为 undefined，于是 worker 空闲回收后
     // 前端那句 if (!data.ready) 会误报"本地出图环境不可用"。
     ready: env.ok,

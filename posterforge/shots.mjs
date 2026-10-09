@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * shots.mjs —— 用 CDP 驱动 Edge 无头截图，验证页面各区块的真实渲染效果。
+ * shots.mjs，用 CDP 驱动 Edge 无头截图，验证页面各区块的真实渲染效果。
  *
  * 为什么不用 --screenshot 一把梭：那样没法滚动、没法等异步数据（模板是从 /api 拉的），
  * 也没法设视口尺寸。CDP 能精确控制，截图才是"用户真正看到的"。
@@ -150,7 +150,7 @@ async function main() {
   });
 
   // 等页面真的"有内容"再开始截图。
-  // 早先用固定 sleep，在新启动的服务器上截到了空网格（tplCards:0）——
+  // 早先用固定 sleep，在新启动的服务器上截到了空网格（tplCards:0），
   // 首次响应慢时 sleep 不够。改成轮询，最多等 20 秒。
   const waitReady = async (timeout = 20000) => {
     const t0 = Date.now();
@@ -215,7 +215,7 @@ async function main() {
   console.log("\n开始截图 ...");
   await cdp.send("Page.navigate", { url: BASE });
 
-  // 渲染完成的判定：等 /api 数据到达并插入 DOM，再截图 —— 否则截到的是空网格
+  // 渲染完成的判定：等 /api 数据到达并插入 DOM，再截图，否则截到的是空网格
   const waitFor = async (expr, timeout = 15000) => {
     const t0 = Date.now();
     while (Date.now() - t0 < timeout) {

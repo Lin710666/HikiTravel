@@ -1,7 +1,7 @@
 /**
- * poster-layout.mjs —— 海报版面的**唯一**几何定义。
+ * poster-layout.mjs，海报版面的**唯一**几何定义。
  *
- * 为什么要单独一个文件：现在有两条路都会生成海报 ——
+ * 为什么要单独一个文件：现在有两条路都会生成海报，
  *   1. 浏览器本地构造（用户没联网/没开模型时的兜底）
  *   2. 服务端由大模型出文案后构造（/api/compose）
  * 两条路必须给出同一套坐标，否则同一个输入会渲出两种版式，改一处忘一处。
@@ -37,16 +37,16 @@ export const POSTER_STRIP = { top: 0.100, left: 0.068, width: 0.864, gap: 0.014 
 /**
  * 同构图内的变体。
  *
- * 为什么需要这一层：只有构图的话，14 套 fullbleed 模板会渲染出**完全相同**的几何 ——
+ * 为什么需要这一层：只有构图的话，14 套 fullbleed 模板会渲染出**完全相同**的几何，
  * 用户验收标准是"任意两套模板的版面几何必须有实质差异"，
  * 同族共享一套几何不满足这个标准。
  *
  * 变体只动三件事，都是看得见的：
- *   shift   在**可用余量**里下移多少（0 = 贴顶，1 = 贴到底线）—— 改变留白节奏
+ *   shift   在**可用余量**里下移多少（0 = 贴顶，1 = 贴到底线）， 改变留白节奏
  *   size    标题字号倍率（改变视觉层级：谁压得住画面）
  *   maxH    标题允许高度倍率（连带影响它最多占几行）
  *
- * shift 是**比例**而不是绝对距离 —— 这点很关键。
+ * shift 是**比例**而不是绝对距离，这点很关键。
  * 我第一版写的是固定 dy（0 / 0.072 / 0.134），结果 15 种组合里有 11 种
  * 副标题压到了价格面板上：文字块往下走，面板却钉在原地。
  * 改成"在余量里按比例下移"之后，下移量由版面自己算出来，不可能越界。
@@ -61,14 +61,14 @@ export const POSTER_VARIANTS = [
  * 海报构图族。
  *
  * 为什么要有这一层：原先 POSTER_LAYOUT 里的 plain/strip/plainNoPrice/stripNoPrice
- * 四个变体**字段名完全相同**，只是 y 坐标微调 —— 也就是同一套骨架换数字。
+ * 四个变体**字段名完全相同**，只是 y 坐标微调，也就是同一套骨架换数字。
  * 用户一眼就看穿了："排版都是同一套，就换个背景加文案"。
  *
  * 真实海报设计的构图是可以分类的（满版/中轴/分割/重心…），
  * 差别在于**对齐方式、图文关系、阅读路径**，而不是坐标偏移。
  * 所以这里把"构图"显式建模出来，让每个版面真的不一样：
  *
- *   align       文字的水平对齐基准（left / center）—— 决定阅读动线
+ *   align       文字的水平对齐基准（left / center）， 决定阅读动线
  *   imgMode     图片与文字的关系：
  *                 full  图铺满，文字压在上面（满版型）
  *                 band  图只占上一条，文字在下方实色区（分割型）
@@ -80,29 +80,29 @@ export const POSTER_COMPOSITIONS = {
   // ① 满版压暗：图铺满 + 遮罩，文字压在左下。现有那套。
   fullbleed: { align: "left", imgMode: "full", stack: "title-first", label: "满版压暗" },
   // ② 中轴对称：图铺满，但所有元素居中，标题压在垂直中轴线上。
-  //    和①的差别不只是"居中"—— 阅读动线从"左对齐扫读"变成"沿中轴向下"。
+  //    和①的差别不只是"居中"， 阅读动线从"左对齐扫读"变成"沿中轴向下"。
   axial: { align: "center", imgMode: "full", stack: "title-first", label: "中轴对称" },
   // ③ 上下分割：图只占上方约一半，下方是实色信息区。
-  //    图与字**不重叠**，所以不需要遮罩 —— 这是结构差异，不是参数差异。
+  //    图与字**不重叠**，所以不需要遮罩，这是结构差异，不是参数差异。
   split: { align: "left", imgMode: "band", stack: "title-first", label: "上下分割" },
   // ⑤ 左右分割：图在**右侧出血**，文字在左侧实色栏。
-  //    和③上下分割是正交的两种切法 —— ③是横切（上下），⑤是竖切（左右）。
+  //    和③上下分割是正交的两种切法，③是横切（上下），⑤是竖切（左右）。
   //    适合竖构图风景照：文字不压图，图也不被文字切碎。
   splitv: { align: "left", imgMode: "side", stack: "title-first", label: "左右分割" },
   // ④ 文字主导：完全不用图，超大标题占据中部。通知/公告类本来就该如此。
   typeled: { align: "center", imgMode: "none", stack: "title-first", label: "文字主导" },
   // ⑥ 重心环绕：图不再是背景、也不是色块，而是**悬在画面中间的一张圆角卡片**，
-  //    文字在它上下两侧环绕。和前面五种的根差别是"图的身份"变了 ——
+  //    文字在它上下两侧环绕。和前面五种的根差别是"图的身份"变了，
   //    从"承载文字的底"变成"被文字环绕的主体"。
   focal: { align: "center", imgMode: "card", stack: "card-mid", label: "重心环绕" },
   // ⑦ 网格信息：图在上，下面是一个 2×2 信息格（时间/价格/电话/地址各占一格）。
   //    和前面六种的根差别是**信息密度**：它们都是"一个标题 + 一段副标题"，
-  //    这种把四个字段摊成表格 —— 适合活动预告、票务、招商这类要比对信息的物料。
+  //    这种把四个字段摊成表格，适合活动预告、票务、招商这类要比对信息的物料。
   grid: { align: "left", imgMode: "band", stack: "cells", label: "网格信息" },
 };
 
 export const POSTER_LAYOUT = {
-  // ── ① 满版压暗（左对齐，图铺满）—— 原有那套 ──────────────
+  // ── ① 满版压暗（左对齐，图铺满）， 原有那套 ──────────────
   plain: {
     stripHeight: 0,
     eyebrow: 0.192, title: 0.234, titleRule: 0.463, subtitle: 0.508,
@@ -136,7 +136,7 @@ export const POSTER_LAYOUT = {
   // ── ② 中轴对称 ────────────────────────────────────────────
   // 图仍然铺满，但全部元素居中对齐、沿垂直中轴向下推进。
   // 与①的实质差别是**阅读动线**：①是左对齐扫读，②是沿中轴下行。
-  // 标题给得比①更大 —— 中轴对称天然适合放一个大标题压住画面。
+  // 标题给得比①更大，中轴对称天然适合放一个大标题压住画面。
   axial: {
     stripHeight: 0,
     composition: "axial",
@@ -147,7 +147,7 @@ export const POSTER_LAYOUT = {
   },
 
   // ── ③ 上下分割 ────────────────────────────────────────────
-  // 图只占上方 44%，**文字完全在图之外**的实色区里 —— 所以不需要遮罩。
+  // 图只占上方 44%，**文字完全在图之外**的实色区里，所以不需要遮罩。
   // 这是结构性差异：① 是"字压在图上"，③ 是"图和字各占一块"。
   split: {
     stripHeight: 0,
@@ -161,7 +161,7 @@ export const POSTER_LAYOUT = {
 
   // ── ⑤ 左右分割 ────────────────────────────────────────────
   // 图在右侧（从 46% 处出血到右边缘），文字全部在左侧 40% 的窄栏里。
-  // 窄栏意味着标题必须更小、行数更多 —— 这是**信息密度**的差异，
+  // 窄栏意味着标题必须更小、行数更多，这是**信息密度**的差异，
   // 不是把③旋转 90 度那么简单。
   splitv: {
     stripHeight: 0,
@@ -175,7 +175,7 @@ export const POSTER_LAYOUT = {
   },
 
   // ── ⑥ 重心环绕 ────────────────────────────────────────────
-  // 卡片占据画面中段（0.20~0.52），标题压在卡片下方 0.56 起 —— 视线路径是
+  // 卡片占据画面中段（0.20~0.52），标题压在卡片下方 0.56 起，视线路径是
   // "先看到图，再读到标题"，和①的"先读标题再看图"是相反的。
   focal: {
     stripHeight: 0,
@@ -203,7 +203,7 @@ export const POSTER_LAYOUT = {
 
   // ── ④ 文字主导 ────────────────────────────────────────────
   // 完全不用图。标题占画面高度的 30%（①只有 20%），居中，四周大量留白。
-  // 通知、公告、招募这类本来就该这么做 —— 它们没有可用的图，硬配图反而假。
+  // 通知、公告、招募这类本来就该这么做，它们没有可用的图，硬配图反而假。
   typeled: {
     stripHeight: 0,
     composition: "typeled",
@@ -322,7 +322,7 @@ function stripLayers(urls, height) {
 /**
  * 打卡卡的版面（构图）。
  *
- * 键名与海报的 POSTER_COMPOSITIONS **刻意对齐** —— 界面上两个模式共用同一排
+ * 键名与海报的 POSTER_COMPOSITIONS **刻意对齐**，界面上两个模式共用同一排
  * 版式按钮，用户在哪个模式点的是同一个词，就不该出现"这个词在打卡卡里没用"
  * 的情况。原来打卡卡的版面只能由照片张数决定，用户点什么都不会变。
  *
@@ -356,7 +356,7 @@ export function checkinPhotoGrid(n, composition) {
   else if (comp.photo === "side") area = { x: 0.516, y: 0.106, w: 0.416, h: 0.780 };
   else if (comp.photo === "card") area = { x: 0.088, y: 0.132, w: 0.824, h: 0.400 };
   // grid 与 split 都用"上方带"，但 grid 的照片带更矮、文字区更大，
-  // 并在两者之间压一道分隔线 —— 否则这两个版式在打卡卡里长得一模一样，
+  // 并在两者之间压一道分隔线，否则这两个版式在打卡卡里长得一模一样，
   // 用户点了会觉得"没生效"。
   else if (comp.photo === "band" && comp.cells) area = { x: 0.068, y: 0.106, w: 0.864, h: 0.404 };
   else                            area = { x: 0.068, y: 0.106, w: 0.864, h: 0.522 };
@@ -406,7 +406,7 @@ export function checkinPhotoGrid(n, composition) {
  * @param content {caption, body, tags, topLabel}
  * @param opts.photoUrls  用户照片（0 张时退回占位素材）
  * @param opts.grid       single | two-col | three-col | quad（由模型选，或按照片数推断）
- * @param opts.mixed      照片主题不搭（模型判定）—— 会在卡上标明"混搭"，不假装是一个故事
+ * @param opts.mixed      照片主题不搭（模型判定）， 会在卡上标明"混搭"，不假装是一个故事
  */
 export function buildCheckinSpecFrom(content, opts = {}) {
   const urls = (opts.photoUrls || []).filter(Boolean).slice(0, 4);
@@ -526,7 +526,7 @@ export function buildCheckinSpecFrom(content, opts = {}) {
  * @param content  要印的字：{brand,title,sub,price,phone,address}
  * @param opts.photoUrls    用户照片的站点相对或绝对 URL（["/uploads/a.jpg", ...]）
  * @param opts.layout       "poster_text" | "poster_photo_bg" | "poster_photo_strip"
- *                          —— 由大模型选，或按照片数量推断
+ *，由大模型选，或按照片数量推断
  * @param opts.tone         0~1，选调色板
  * @param opts.canvas       默认 1080x1440
  */
@@ -538,7 +538,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
   const many = layout === "poster_photo_strip" && urls.length >= 2;
   const useBg = layout === "poster_photo_bg" && urls.length >= 1;
   // AI 底图和用户照片并存时：AI 图铺满当氛围底，照片改走顶部图带做前景，两个都用上。
-  // 图带要占高度，所以这种情况下版面必须落在带 stripHeight 的那两套上 ——
+  // 图带要占高度，所以这种情况下版面必须落在带 stripHeight 的那两套上，
   // plain / plainNoPrice 的 stripHeight 是 0，硬塞照片只会让它被后面的文字盖住。
   const photoBand = !!autoBg && urls.length > 0;
   // 有价格用带价格块的表；没有价格就用尾部上移的那套，避免下半页留个空洞
@@ -551,20 +551,20 @@ export function buildPosterSpecFrom(content, opts = {}) {
     : (many || photoBand)
     ? (hasPrice ? POSTER_LAYOUT.strip : POSTER_LAYOUT.stripNoPrice)
     : (hasPrice ? POSTER_LAYOUT.plain : POSTER_LAYOUT.plainNoPrice);
-  // 构图决定对齐方式、图文关系和留白 —— 不是坐标微调。
+  // 构图决定对齐方式、图文关系和留白，不是坐标微调。
   const comp = POSTER_COMPOSITIONS[L.composition || "fullbleed"];
   const centered = comp.align === "center";
   // 居中构图用 x=0.5 + align:center（渲染器支持），左右各留 8% 版心
   const X = centered ? 0.5 : 0.074;
   // 栏宽要跟着构图画。左右分割时文字栏只有 imgRight 那么宽（0.46），
-  // 还用 0.85 的话字会压到右半边的图上去 —— 分割型的意义就没了。
+  // 还用 0.85 的话字会压到右半边的图上去，分割型的意义就没了。
   const W = L.textW ? L.textW : (centered ? 0.84 : 0.85);
   const al = centered ? { align: "center" } : {};
 
   // 变体：在同构图内再拉开差异（见 POSTER_VARIANTS 的注释）。
   //
   // 下移量是**算出来的**，不是写死的：先求文字块底部到价格面板之间还剩多少余量，
-  // 再按 shift 比例下移。写死距离会越界 —— 第一版 15 种组合里 11 种压到了面板上。
+  // 再按 shift 比例下移。写死距离会越界，第一版 15 种组合里 11 种压到了面板上。
   const V = POSTER_VARIANTS[Math.abs(Number(opts.variant) || 0) % POSTER_VARIANTS.length];
   // 逐套精调：模板可以带 tuning 覆盖变体的默认值。
   //   tuning.y  0~1，在可用余量里下移多少（0=贴顶，1=贴到底线）
@@ -588,7 +588,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
   //   band  图只占上方一条、文字在图外的实色区 → **不需要遮罩**（图字不重叠）
   //   none  不用图 → 纯排版，靠留白和字号建立层级
   //
-  // 有 AI 底图时，底一律让给它（照片这时已经改走顶部图带，见上面的 photoBand）——
+  // 有 AI 底图时，底一律让给它（照片这时已经改走顶部图带，见上面的 photoBand），
   // 否则 AI 图会被照片顶掉，等于白生成一张。
   const bgFromAuto = autoBg
     ? { type: "image", image: autoBg, blobs: [], scrim: POSTER_SCRIM }
@@ -614,13 +614,13 @@ export function buildPosterSpecFrom(content, opts = {}) {
     bandLayers = [
       { type: "image", name: "sidePhoto", src: photo || autoBg,
         box: { box: [ix, 0], size: [1 - ix, 1] }, fit: "cover" },
-      // 图与文之间压一道竖金线 —— 分割型的视觉分隔
+      // 图与文之间压一道竖金线，分割型的视觉分隔
       { type: "shape", name: "sideEdge", shape: "rect",
         box: { box: [ix - 0.004, 0], size: [0.004, 1] }, fill: "gold", opacity: 0.9 },
     ];
   } else if (comp.imgMode === "card" && (photo || autoBg)) {
     // 重心环绕：图是一张悬空圆角卡片，不是背景也不是色块。
-    // 卡片外压一道浅描边 + 投影，让它"浮"起来 —— 否则看着像贴歪了的色块。
+    // 卡片外压一道浅描边 + 投影，让它"浮"起来，否则看着像贴歪了的色块。
     const cw = L.cardW || 0.64, ch = L.cardH || 0.32, ct = L.cardTop || 0.20;
     bg = bgFromAuto || bgGradient;
     bandLayers = [
@@ -630,7 +630,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
       { type: "image", name: "cardPhoto", src: photo || autoBg,
         box: { box: [0.5 - cw / 2, ct], size: [cw, ch] }, fit: "cover", radius: 24 },
       // 不加描边：渲染器的圆角描边要求 shape 有非透明 fill，
-      // 而这里只需要"框住"卡片 —— 透明 fill 会退化成**方角矩形**，
+      // 而这里只需要"框住"卡片，透明 fill 会退化成**方角矩形**，
       // 和圆角图片对不上（实测就是图圆角、框方角）。
       // 投影已经足够让卡片浮起来，描边是多余的。
     ];
@@ -679,7 +679,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
   const t = toneFor(opts.tone);
 
   // 网格信息：把四个字段摊成 2×2 格子。
-  // 这一版**不画单个价格面板** —— 信息密度就是它的构图特征，
+  // 这一版**不画单个价格面板**，信息密度就是它的构图特征，
   // 用格子的形式呈现，和"一个价格面板 + 一行联系方式"是两种信息组织方式。
   if (L.cellsTop) {
     const cw = (W - 0.014) / 2, ch = L.cellH;
@@ -709,7 +709,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
     // 价格面板的右边界要跟着栏宽走。写死 0.926 的话，
     // 左右分割构图下面板会横跨到右侧图片上去（实测截图里就是这样）。
     const pR = centered ? 0.926 : Math.min(0.926, 0.074 + W + 0.012);
-    // 窄栏（左右分割）里标签和价格并排会撞在一起 —— 实测"限○○○ 元起"叠成一团。
+    // 窄栏（左右分割）里标签和价格并排会撞在一起，实测"限○○○ 元起"叠成一团。
     // 栏窄时改成上下堆叠。
     const narrow = W < 0.5;
     layers.push(
@@ -752,7 +752,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
       x: 0.902, y: L.footer, align: "right", font: "sans", size: 15, color: "inkMute" }
   );
 
-  // 联系方式一个字都没给时，尾部不能就留一片空白 —— 那样看着像做坏了。
+  // 联系方式一个字都没给时，尾部不能就留一片空白，那样看着像做坏了。
   // 补一行提示，既填住版心也告诉用户"这里可以放电话"。
   if (!content.phone && !content.address) {
     layers.push({

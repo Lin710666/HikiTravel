@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * drive-multiphoto.mjs —— 验证「多张照片 → 九宫格打卡卡」经真实 UI 链路可用。
+ * drive-multiphoto.mjs，验证「多张照片 → 九宫格打卡卡」经真实 UI 链路可用。
  *
  * 覆盖点：
  *   1. 一次上传 4 张照片（含一张带 EXIF Orientation=6 的，验证归一化）

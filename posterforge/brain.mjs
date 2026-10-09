@@ -1,13 +1,13 @@
 /**
- * brain.mjs —— 让大模型决定"生成什么"。
+ * brain.mjs，让大模型决定"生成什么"。
  *
  * 分工（这是整个改动的核心，注意区分）：
  *   · 大模型负责**内容与调性**：读用户给的图，读懂用户那句要求，写出海报上真正要印的字。
- *   · 渲染器负责**几何与字体**：坐标、字号、行高、避让、缩到放得下 —— 全部确定性。
+ *   · 渲染器负责**几何与字体**：坐标、字号、行高、避让、缩到放得下，全部确定性。
  *
  * 为什么不让模型直接吐坐标：
  * 它是概率模型，坐标会飘（重叠、越界、字号不匹配），而这正是渲染引擎已经解决得更好、
- * 且可复现的部分。同类项目也是这个分工 —— PosterLLaVa 用 MLLM 出布局 JSON 后，
+ * 且可复现的部分。同类项目也是这个分工，PosterLLaVa 用 MLLM 出布局 JSON 后，
  * 仍要交给 SVG 渲染器落地（https://arxiv.org/abs/2406.02884）。
  * 我们这里更进一步：模型连坐标都不出，只出"内容 + 用不用图"，几何由引擎按版面算。
  *
@@ -69,12 +69,12 @@ layout 怎么选：
 1. 绝对不要把用户的要求原样当标题。像"帮我融合这两张图片""请生成一张海报"这类话是**指令**，
    你要照它做，不能把它印上去。
 2. 不要写"限时特惠""火热进行中""欢迎光临""不容错过"这类放之四海皆可的空话。
-3. 不要编造具体事实：价格、电话、地址、销量、优惠幅度、日期 —— 用户给了才能写，没给就填 null。
+3. 不要编造具体事实：价格、电话、地址、销量、优惠幅度、日期：用户给了才能写，没给就填 null。
 4. 可以引用画面描述里的**景物**（海、日落、雪、茶山…）来起标题，但不要把描述整句抄成标题。
 5. 标题里的数字只在用户给了具体数字时才用。`;
 
 // 提示词用"填空格式 + 一个示例"，而不是"第一行/第二行"的说明。
-// 原因：3B 视觉模型对示例的服从度远高于对说明的理解 ——
+// 原因：3B 视觉模型对示例的服从度远高于对说明的理解，
 // 实测它会把"第一行：画面主体 + 氛围"原文抄回来当答案，
 // 换成"主体：/主题："这种标签格式后就老实了（同三张图对比验证过）。
 const VISION_SYSTEM = `看这张照片，用两行中文回答，严格照下面格式，不要序号、不要重复我的话、不要解释：
@@ -126,7 +126,7 @@ const IMAGE_PROMPT_SYSTEM = `你在为一张中文宣传海报写**图像生成�
 prompt 要求：
 1. 用**英文**写，逗号分隔的短语，不要整句、不要用中文。
 2. 描述**画面**：主体、场景、时间、天气、色调、光线、风格。
-3. 构图要给下方留出空白放文字 —— 主体放在上 2/3，末尾固定加上：
+3. 构图要给下方留出空白放文字：主体放在上 2/3，末尾固定加上：
    "no text, no words, no watermark, no logo, clean empty space at the bottom for typography"
 4. **绝对不要出现中文、汉字、招牌文字**（扩散模型画中文会糊成乱码）。
 5. 不要画人物特写（肖像权与观感都麻烦），需要"人"时写 distant silhouette。
@@ -139,7 +139,7 @@ prompt 要求：
  * 让文案模型把"这次要宣传什么"翻译成给扩散模型用的图像提示词。
  *
  * 为什么让模型写而不是拼模板：底图要贴合这次的**具体主题**（西湖 / 火锅 / 雪场），
- * 而且必须刻意避开中文和文字 —— 扩散模型画汉字会糊成乱码，
+ * 而且必须刻意避开中文和文字，扩散模型画汉字会糊成乱码，
  * 把这条写进提示词规则里比事后补救靠谱。
  */
 export async function deriveImagePrompt(cfg, { brief = "", copy = null, scenes = [] } = {}) {
@@ -166,7 +166,7 @@ export async function deriveImagePrompt(cfg, { brief = "", copy = null, scenes =
     });
     const j = JSON.parse(extractJson(raw));
     let prompt = String(j.prompt || "").trim();
-    // 保险：模型偶尔还是塞中文进来。含中文就判失败，由调用方回落 ——
+    // 保险：模型偶尔还是塞中文进来。含中文就判失败，由调用方回落，
     // 硬画中文的结果是一堆乱码笔画，比没有底图更糟。
     if (!prompt || /[\u4e00-\u9fa5]/.test(prompt)) {
       return { ok: false, reason: "模型给的提示词为空或含中文", prompt: "", raw };
@@ -216,7 +216,7 @@ export function loadBrainConfig(siteRoot) {
     maxImageSide: 896,
     // 上下文窗口。必须显式传：模型的 Modelfile 里若没写 num_ctx，
     // Ollama 会退到很保守的默认值（本机实测是 4096），
-    // 读一张大图就撑爆 —— 见 visionImageB64 的说明。
+    // 读一张大图就撑爆，见 visionImageB64 的说明。
     numCtx: 8192,
     visionMaxTokens: 160,
     copyMaxTokens: 500,
@@ -250,7 +250,7 @@ export class BrainError extends Error {
  * 确保本机 Ollama 在跑；没跑就**自己把它拉起来**。
  *
  * 为什么要有这个：原来模型不在时，界面直接退回确定性规则，
- * 提示"要让模型写文案，确认 Ollama 在运行"—— 把责任推给用户。
+ * 提示"要让模型写文案，确认 Ollama 在运行"， 把责任推给用户。
  * 但 Ollama 就装在本机、命令是确定的，没理由让用户自己去开。
  *
  * 拉起方式用 detached + unref：它必须活得比本进程久。
@@ -310,17 +310,17 @@ async function ensureOllama(cfg, { waitMs = 40000 } = {}) {
  *
  * **为什么必须缩**（这不是优化，是能不能跑通的问题）：
  *   Ollama 把图片编码成图像 token，Qwen2.5-VL 每 1 个 token 覆盖 28x28 像素。
- *   用户上传的素材常是截图或相机原图 —— 实测一张 2642x1715 的 PNG
+ *   用户上传的素材常是截图或相机原图，实测一张 2642x1715 的 PNG
  *   约 5779 个图像 token，加起来 4338 个有效 token，而配置里用的
  *   qwen2.5vl:3b 因为 Modelfile 没写 num_ctx，Ollama 给了 4096 的窗口，
  *   请求被直接拒掉：
  *     {"code":400,"message":"request (4338 tokens) exceeds available
  *      context size (4096 tokens)","type":"exceed_context_size_error"}
- *   报错里 n_prompt_tokens 是 0，很容易被误读成"提示词太长" ——
+ *   报错里 n_prompt_tokens 是 0，很容易被误读成"提示词太长"，
  *   其实撑爆窗口的是图，不是字。
  *
  * **只缩给模型看的那一份**：渲染海报用的原图不动。
- * 所以缩图发生在这里，而不是用户上传的时候 —— 上传时就缩会把成品画质一起降下去。
+ * 所以缩图发生在这里，而不是用户上传的时候，上传时就缩会把成品画质一起降下去。
  *
  * 结果按「文件名 + 修改时间 + 长边」缓存到 .visioncache，
  * 同一张图反复分析（调版式、再生成）不会重复起进程。
@@ -340,7 +340,7 @@ async function visionImageB64(cfg, absImagePath) {
   const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "shrink.py");
   const res = await runProcess(cfg.python || "python", [script, absImagePath, String(limit), cacheFile]);
 
-  // 缩图失败不该让整个分析失败 —— 退回原图，至少行为和改动前一致
+  // 缩图失败不该让整个分析失败，退回原图，至少行为和改动前一致
   if (!res.ok || !existsSync(cacheFile)) {
     const why = (res.stderr || res.message || "").trim().split(/\r?\n/).pop() || "未知原因";
     console.warn(`[brain] 缩图失败，改用原图：${why}`);
@@ -375,7 +375,7 @@ function runProcess(cmd, args) {
 
 async function ollamaChat(cfg, { model, messages, format, maxTokens, temperature }) {
   if (!model) throw new BrainError("没有配置模型", { kind: "config" });
-  // 进来先确认模型服务在 —— 不在就自己拉，别等请求失败了再说
+  // 进来先确认模型服务在，不在就自己拉，别等请求失败了再说
   await ensureOllama(cfg).catch(() => {});
   try {
     return await ollamaChatOnce(cfg, { model, messages, format, maxTokens, temperature });
@@ -503,7 +503,7 @@ export function parseVisionText(text) {
     }
   }
 
-  // 两行完全相同 = 模型没答主题，别把同一句当主题用
+  // 两行完全相同 = 模型没答主题，不要把同一句当主题用
   if (lines.length >= 2 && lines[0] === lines[1]) lines = [lines[0]];
 
   return { ok: true, raw: text, scene: lines[0] || "", theme: lines[1] || "" };
@@ -536,7 +536,7 @@ export async function describeImage(cfg, absImagePath) {
  *
  * 为什么单独做这一件事、而不是复用 describeImage：
  * describeImage 回答的是"照片里有什么"（用来写文案）；
- * 这个回答的是"这张图该怎么排"（用来选版面）—— 两个问题不同，
+ * 这个回答的是"这张图该怎么排"（用来选版面）， 两个问题不同，
  * 提示词也不同，混在一起会互相干扰。
  *
  * 为什么要让用户能单独传一张图来分析：用户手上常有一张"我就想要这种感觉"的
@@ -606,11 +606,11 @@ export async function analyzeLayout(cfg, absImagePath) {
 /**
  * AI 助手的通用对话（流式）。
  *
- * 为什么不用 HikiTravel 的 /api/chat：那是**旅游规划**接口，不是聊天 ——
+ * 为什么不用 HikiTravel 的 /api/chat：那是**旅游规划**接口，不是聊天，
  * 你对它说"你好"，它回的是"还缺少这些信息：目的地、游玩天数、预算"。
  * 助手要的是能闲聊、能答疑、能帮改文案的对话，所以拿本机 Ollama 现建一个。
  *
- * 用流式是为了让用户看到字在往外蹦 —— 本地模型首字要 1~3 秒，
+ * 用流式是为了让用户看到字在往外蹦，本地模型首字要 1~3 秒，
  * 不给反馈用户会以为卡死了。
  */
 export async function assistantChat(cfg, messages, { onDelta, signal } = {}) {
@@ -663,7 +663,7 @@ export async function assistantChat(cfg, messages, { onDelta, signal } = {}) {
  *
  * 为什么不让视觉模型一次看多张：实测 qwen2.5vl:3b 一次给两张图时
  * 只描述第一张，第二张完全没看（多次复现）。逐张看更可靠。
- * 而"搭不搭"是个纯文本判断题，交给 7B 文案模型准得多 ——
+ * 而"搭不搭"是个纯文本判断题，交给 7B 文案模型准得多，
  * 实测它能准确说出"色彩主题与汉服文化不相关"。
  * 这一步会让文案更贴图：不搭就不硬编成一个故事。
  */
@@ -769,7 +769,7 @@ function tidy(s) {
  *
  * 为什么必须校验：模型会超字数、会自己造字段、会把价格写成"详询"、会挑一个不存在的 layout。
  * 这些如果直接透到渲染器，轻则排版挤爆，重则渲染失败。
- * 校验失败不静默通过 —— 返回 errors，让调用方决定是重试还是退回兜底。
+ * 校验失败不静默通过，返回 errors，让调用方决定是重试还是退回兜底。
  */
 export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
   const errors = [];
@@ -789,7 +789,7 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
   if (!title) errors.push("缺 title");
   if (title && title.length < 4) errors.push("title 太短");
 
-  // 标题最多两行，且每行有字数上限 —— 超了排版会挤爆或被硬切。
+  // 标题最多两行，且每行有字数上限，超了排版会挤爆或被硬切。
   // 用共用断行器判断"能不能好好断成两行"，顺便把结果回写进 copy，
   // 保证印出来的断行和这里判定的一致。
   let titleLines = [];
@@ -800,7 +800,7 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
     }
   }
 
-  // 标题不能是"要我怎么干活"的话 —— 这条是用户直接投诉过的
+  // 标题不能是"要我怎么干活"的话，这条是用户直接投诉过的
   const REQUESTS = /帮我|请(你|帮)?|麻烦|生成|制作|设计|排版|融合|合成|拼接|配上|做一张|做张|做一份|出一张|给我/;
   if (title && REQUESTS.test(title)) errors.push(`title 里带了指令词，模型没按要求改写：${title}`);
 
@@ -812,7 +812,7 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
   if (j.layout !== undefined && !wanted) {
     errors.push(`layout 不在白名单（收到 ${JSON.stringify(j.layout)}），已按照片数量回落`);
   }
-  // 用户传了多张，模型却选了只显示一张的版式 —— 那第 2 张起就白传了。
+  // 用户传了多张，模型却选了只显示一张的版式，那第 2 张起就白传了。
   // 这是"图片没配上"的直接复现路径，必须挡住：多张一律强制拼图带。
   if (hasPhotos >= 2 && layout && layout !== "poster_photo_strip") {
     errors.push(`用户给了 ${hasPhotos} 张照片，layout=${layout} 只会用上一张，已强制改为 poster_photo_strip`);
@@ -828,10 +828,10 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
   const kind = BRAIN_KINDS.includes(j.kind) ? j.kind : "tourism";
 
   const price = str(j.price, 16);
-  // 价格必须是"钱"的样子，别把"详询""面议"当价格印到一个 ￥xx 的版位上
+  // 价格必须是"钱"的样子，不要把"详询""面议"当价格印到一个 ￥xx 的版位上
   let priceOk = price && /[￥¥$]|\d/.test(price) ? price : null;
   // 更狠的一条：价格里的数字必须**能在用户原话里找到**。
-  // 模型真的会自己编价格 —— 实测给"厦门环岛路海边民宿，含双早"编出了"￥599"。
+  // 模型真的会自己编价格，实测给"厦门环岛路海边民宿，含双早"编出了"￥599"。
   // 海报上的价格是报价承诺，编一个等于给用户埋雷，所以这条判为致命错误并触发重写。
   if (priceOk) {
     const digits = priceOk.replace(/\D/g, "");
@@ -1010,7 +1010,7 @@ export async function composeCopy(cfg, brief, imagePaths = [], opts = {}) {
   );
   const userMsg = parts.join("\n\n");
 
-  // 3) 写文案。校验不过就带着"哪里不合格"再问一次 ——
+  // 3) 写文案。校验不过就带着"哪里不合格"再问一次，
   //    模型偶尔会吐不合规 JSON 或把指令词写进文案，重试一次的成本远低于让用户重填。
   const maxAttempts = opts.retry === false ? 1 : 2;
   let attempt = 0;

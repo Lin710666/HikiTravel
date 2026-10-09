@@ -7,14 +7,14 @@
 Skill 流水线、SQLite 落库都走真实代码路径，只是省掉了起 uvicorn 这一步。
 
 覆盖场景：
-1. GET  /api/health   —— 大模型 / 高德配置状态
-2. POST /api/plan     —— 完整画像，真实走 高德 + Ollama 生成规划
-3. POST /api/chat     —— 一句自然语言，走完整五段流水线
-4. POST /api/plan     —— 缺目的地，应 400 且提示补充
-5. POST /api/plan     —— 缺天数/预算/兴趣/人数，应 400 且逐项列出
-6. GET  /api/plans    —— 历史计划落库情况
-7. POST /api/plan/revise —— 对话式修改（在既有画像上改条件重新生成）
-8. POST /api/map/static  —— 高德真实地图（静态地图代理，含编号标记与每日轨迹）
+1. GET  /api/health  ：大模型 / 高德配置状态
+2. POST /api/plan    ：完整画像，真实走 高德 + Ollama 生成规划
+3. POST /api/chat    ：一句自然语言，走完整五段流水线
+4. POST /api/plan    ：缺目的地，应 400 且提示补充
+5. POST /api/plan    ：缺天数/预算/兴趣/人数，应 400 且逐项列出
+6. GET  /api/plans   ：历史计划落库情况
+7. POST /api/plan/revise：对话式修改（在既有画像上改条件重新生成）
+8. POST /api/map/static ：高德真实地图（静态地图代理，含编号标记与每日轨迹）
 """
 import json
 import sys

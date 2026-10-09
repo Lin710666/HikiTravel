@@ -46,7 +46,7 @@
     else if (mqDark.addListener) mqDark.addListener(onSysChange);   // 老 Safari
   } catch (e) { /* 不支持就算了，不影响主题本身 */ }
 
-  /* 别的标签页切了主题 —— 门户 / 海报生成 / 行程规划 三处联动。
+  /* 别的标签页切了主题，门户 / 海报生成 / 行程规划 三处联动。
      storage 事件只在**其它**标签页写入时触发，正好是我们要的语义。 */
   window.addEventListener("storage", function (ev) {
     if (ev.key !== KEY) return;
@@ -64,9 +64,9 @@
   /* ------------------------------------------------------------------
      本地绘画模型体检
      一段交互都不做假的三个原则：
-       1. 只在"一个可用模型都没有"时出现 —— 有模型时绝不打扰；
+       1. 只在"一个可用模型都没有"时出现：有模型时绝不打扰；
        2. 关掉就记住（localStorage），刷新、下次进来都不再弹；
-       3. 只在体检**成功**且结果为"没有"时才弹 —— 体检本身失败（网络抖动、
+       3. 只在体检**成功**且结果为"没有"时才弹：体检本身失败（网络抖动、
           接口挂了）就什么都不做，别拿一个查不出来的结果去吓人。
      ------------------------------------------------------------------ */
   var MN_OFF = "pf-model-notice-off";
@@ -160,14 +160,14 @@
 })();
 </script>
 <!-- 悬浮球 AI 助手：门户、海报页、旅游规划页三处共用同一份实现。
-     data-api-base 必须写 —— 本页在 8800 上，规划接口在反代的 /wenlv/api/ 下；
+     data-api-base 必须写：本页在 8800 上，规划接口在反代的 /wenlv/api/ 下；
      不写的话组件会按同源 /api/ 找，那是本服务自己的接口（格式不同），会被判成"离线"。
      用 defer 是为了不挡住首屏。 -->
 <script src="/ai-ball.js" data-api-base="/wenlv" defer></script>
 </head>
 <body>
 
-<!-- 深浅色切换：显示的是"点了会变成的那个"——深色时给太阳，浅色时给月亮 -->
+<!-- 深浅色切换：显示的是"点了会变成的那个"，深色时给太阳，浅色时给月亮 -->
 <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换深浅色" title="切换深浅色">
   <svg class="ic-sun" viewBox="0 0 24 24" aria-hidden="true">
     <circle cx="12" cy="12" r="4.2" />
@@ -180,8 +180,8 @@
 
 <!-- 本地绘画模型提示：本机一个可用模型都没有时才出现。
      右上角可以关掉，关掉之后就不再打扰（除非后来真的补上了模型再消失）。
-     注意它不是错误弹窗 —— 海报排版合成完全不依赖模型，没模型照样出图，
-     只有自动生成 AI 底图这一步需要，所以用不锁屏的浮层，别把人拦在外面。 -->
+     注意它不是错误弹窗：海报排版合成完全不依赖模型，没模型照样出图，
+     只有自动生成 AI 底图这一步需要，所以用不锁屏的浮层，不要把人拦在外面。 -->
 <div class="model-notice" id="modelNotice" role="dialog" aria-live="polite" aria-labelledby="mnTitle" hidden>
   <button class="mn-close" id="mnClose" type="button" aria-label="关闭提示" title="关闭">×</button>
   <div class="mn-head">
@@ -252,7 +252,7 @@
             <p class="hint" id="tplHint">点一套模板 → 内容会填进输入框，你直接改数字和店名就能出图。</p>
           </div>
 
-          <!-- 历史记录：回看生成过的图。记录和图分开存 ——
+          <!-- 历史记录：回看生成过的图。记录和图分开存，
                图会按数量/天数清理，但"我做过什么"不该跟着消失。 -->
           <div class="tpl-picker his-picker" id="hisPanel" hidden>
             <div class="tpl-search">
@@ -263,7 +263,7 @@
             <p class="hint">记录只存"什么时候做了什么"，图片文件另有保留策略。清空列表不会删图。</p>
           </div>
 
-          <!-- 参考图分析已改为生成区里的一个按钮（见下面的 anaInline）——
+          <!-- 参考图分析已改为生成区里的一个按钮（见下面的 anaInline），
                它不该是一个独立模式，而是辅助生成的手段。 -->
 
           <!-- 文字输入：与上传的图片一起决定产出内容 -->
@@ -317,7 +317,7 @@
           <div class="chips" id="compChips"></div>
 
           <!-- 参考图分析：辅助生成的手段，不是独立模式。
-               用户手上常有一张"我就想要这种感觉"的参考图，它未必是要用的素材 ——
+               用户手上常有一张"我就想要这种感觉"的参考图，它未必是要用的素材，
                所以走独立上传通道，不占海报素材位。 -->
           <div class="ana-inline" id="anaInline">
             <button class="mini-chip" id="anaBtn"
@@ -333,15 +333,15 @@
 
           <div class="toggles" id="toggles">
             <!-- AI 背景开关已删除：原来是让用户手动勾"要不要用模型生成底图"。
-                 现在改成自动判定 —— 本机有生图模型就一定用（有照片时 AI 图当氛围底、
+                 现在改成自动判定：本机有生图模型就一定用（有照片时 AI 图当氛围底、
                  照片走顶部图带当前景，两个都用上），没有模型才退回纯引擎排版。
                  用户不需要知道也不需要选择，所以这个开关没有存在的意义。 -->
             <!-- 绘图引擎：这里原来是个 <select>，摆着两个选项
-                 （PosterForge-1.0 / Qwen-Image-2.1），但**没有任何代码读它** ——
+                 （PosterForge-1.0 / Qwen-Image-2.1），但**没有任何代码读它**，
                  前端没绑事件，后端也不收这个参数，选了什么都不会改变出图结果。
                  也就是说 "PosterForge-1.0" 这个模型根本不存在，
                  它是块"看起来能选、其实什么都没有"的假控件，删掉。
-                 后来实测又发现：写 "Qwen-Image-2.1（本地）" 也是错的 ——
+                 后来实测又发现：写 "Qwen-Image-2.1（本地）" 也是错的，
                  那是此前那台机器的部署（skills/image-layer 里有完整记录），
                  本机没装 ComfyUI、也没那份权重。真正在跑的是 **SDXL-Turbo**
                  （本地 diffusers，4 步出图）。文档写的是别人机器，界面不能照抄文档。 -->
@@ -368,7 +368,7 @@
 
   <!-- 「热门模板」整块已移除。
        它和新加的「套用模板」选择器功能重复，而且**每次打开首页都要拉 41 张缩略图**
-       （实测 41 个请求、1.4MB、首屏解码 ~63MB 位图）—— 这是页面卡的主因。
+       （实测 41 个请求、1.4MB、首屏解码 ~63MB 位图）， 这是页面卡的主因。
        模板现在只在点开「套用模板」时才加载。 -->
 
   <!-- ============================================ 每日灵感（联网） -->
@@ -377,7 +377,7 @@
       <div class="band-head">
         <div>
           <h2>每日灵感</h2>
-          <div class="sub" id="feedSub">联网获取的实拍图 —— 做版式与配色参考，每天更新</div>
+          <div class="sub" id="feedSub">联网获取的实拍图：做版式与配色参考，每天更新</div>
         </div>
         <div class="tools">
           <span class="feed-age" id="feedAge"></span>
@@ -394,7 +394,7 @@
     <div class="wrap">
       <div class="foot-in">
         <div class="note">
-          <b style="color:var(--ink-2)">PosterForge</b> —— 宣传海报与打卡模板生成平台。<br />
+          <b style="color:var(--ink-2)">PosterForge</b>：宣传海报与打卡模板生成平台。<br />
           渲染引擎基于 <code>poster-forge</code>：文字、价格、二维码走确定性合成，
           AI 只负责背景与图像层。物料可复现、可追溯、可回滚。
         </div>

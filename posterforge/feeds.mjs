@@ -1,19 +1,19 @@
 /**
- * feeds.mjs —— 联网素材适配器
+ * feeds.mjs，联网素材适配器
  *
  * 设计立场：**不假装能拿到可商用的免费素材。**
  *
  * 实测过的现状（2026-09，本机网络）：
- *   ✅ Bing 每日壁纸   —— 无需 key，每天更新，1920×1080 实拍，带中文标题与版权署名
- *   ✅ Lorem Picsum    —— 无需 key，随机摄影图（泛用，不聚焦文旅）
- *   ❌ Pexels / Unsplash —— 需要 API Key
- *   ❌ Bilibili 搜索   —— 需要 WBI 签名，无签名返回 412，不适合做稳定数据源
- *   ❌ Wikimedia       —— 本机 SSL 握手失败
+ *   ✅ Bing 每日壁纸，无需 key，每天更新，1920×1080 实拍，带中文标题与版权署名
+ *   ✅ Lorem Picsum，无需 key，随机摄影图（泛用，不聚焦文旅）
+ *   ❌ Pexels / Unsplash，需要 API Key
+ *   ❌ Bilibili 搜索，需要 WBI 签名，无签名返回 412，不适合做稳定数据源
+ *   ❌ Wikimedia，本机 SSL 握手失败
  *
  * 所以分两种源：
- *   • inspiration（灵感/参考）—— Bing、Picsum。**带版权署名展示**，只作灵感，
+ *   • inspiration（灵感/参考）， Bing、Picsum。**带版权署名展示**，只作灵感，
  *     不能当成可商用素材分发。UI 与接口都会明确标注。
- *   • assets（可商用素材）—— 需要用户自己配 Pexels/Unsplash 的 key。
+ *   • assets（可商用素材）， 需要用户自己配 Pexels/Unsplash 的 key。
  *     配了就用，没配就跳过并在状态里说明原因。
  *
  * 结果缓存在 .cache/feed.json，断网时仍能展示上次内容（离线可用）。
@@ -31,7 +31,7 @@ const UA =
  * 把远程图片换成服务端代理地址。
  * 为什么要代理而不是直接用远程 URL：
  *   1. 浏览器直连第三方图床可能被跨域/防盗链拦掉（Bing 的 404 就是这么暴露的）
- *   2. 代理可以做本地磁盘缓存 —— 断网也能看，且不重复下载
+ *   2. 代理可以做本地磁盘缓存，断网也能看，且不重复下载
  *   3. 统一在这里加 UA/Referer，避免个别源挑请求头
  */
 function proxyUrl(remote) {
@@ -78,7 +78,7 @@ async function sourceBing({ count = 8, mkt = "zh-CN" } = {}) {
       date: it.startdate || "",
       // 注意：Bing 的 th?id= 端点**只认特定尺寸**，_800x450 会返回 404。
       // 实测 1920x1080 可用，所以缩略图也用这个尺寸，由前端 CSS 缩放显示。
-      // 走服务端 /api/img 代理，带本地缓存 —— 断网也能看，且不重复下载。
+      // 走服务端 /api/img 代理，带本地缓存，断网也能看，且不重复下载。
       thumb: proxyUrl(`https://www.bing.com${it.urlbase}_1920x1080.jpg`),
       full: proxyUrl(`https://www.bing.com${it.urlbase}_1920x1080.jpg`),
       remote: `https://www.bing.com${it.urlbase}_1920x1080.jpg`,
@@ -210,7 +210,7 @@ export function createFeedCache(cacheFile) {
 /**
  * 拉取所有启用的源。
  * 关键行为：**单个源失败不影响其它源**，最后一个成功的组合会被写进缓存。
- * 首页永远有东西可看 —— 这是"优雅降级"的核心。
+ * 首页永远有东西可看，这是"优雅降级"的核心。
  */
 export async function fetchFeeds({
   cache,

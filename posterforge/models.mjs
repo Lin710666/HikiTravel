@@ -1,15 +1,15 @@
 /**
- * models.mjs —— 本地画图模型的「自动发现 → 自动拉起 → 按需供给」。
+ * models.mjs，本地画图模型的「自动发现 → 自动拉起 → 按需供给」。
  *
  * 要解决的事：用户不该为了"能出图"去手工翻目录、改路径、记文件名。
  * 所以这里做三件事，顺序就是它们的使用顺序：
- *   1. discoverModels()  —— 把本机上现成的画图模型全找出来
- *   2. pickBestModel()   —— 挑一个"此刻真的能用"的，质量高的优先
- *   3. provisionPlan()   —— 一个都没有时，说清楚"缺什么、要下多少、下完能不能跑"
+ *   1. discoverModels()，把本机上现成的画图模型全找出来
+ *   2. pickBestModel()，挑一个"此刻真的能用"的，质量高的优先
+ *   3. provisionPlan()，一个都没有时，说清楚"缺什么、要下多少、下完能不能跑"
  *
  * ── 为什么非要区分两种布局（这是整个文件里最要紧的一点）──
  *   · diffusers：目录里有 model_index.json。aigen 的 Python worker 能直接
- *     from_pretrained 加载 —— 找到就能跑。
+ *     from_pretrained 加载，找到就能跑。
  *   · ComfyUI  ：权重按类别摊在 diffusion_models / text_encoders / vae 里。
  *     只有 ComfyUI 认得这种摆法；**没有 ComfyUI 的话，它就是一堆用不了的 safetensors**。
  *   不区分会得到一个很坏的结果：兴冲冲告诉用户"找到 Qwen 了"，然后加载失败。
@@ -30,7 +30,7 @@ import { REPO_ROOT, SITE_ROOT, findComfyRoot, findComfyPython, findPython } from
 const ENDPOINT = process.env.PF_HF_ENDPOINT || "https://hf-mirror.com";
 
 /**
- * 一个都没有时下这个 —— 与项目文档（skills/image-layer）里记的是同一套，
+ * 一个都没有时下这个，与项目文档（skills/image-layer）里记的是同一套，
  * 只是这里把"从哪下"也补上了。int8 量化版是为 8 GB 显存准备的。
  */
 export const QWEN_TARGETS = [
@@ -60,7 +60,7 @@ const LAYOUTS = [
   },
 ];
 
-/** 体积/质量评分：名字里带什么，就大概值多少 —— 用来决定"多个模型时用哪个"。 */
+/** 体积/质量评分：名字里带什么，就大概值多少，用来决定"多个模型时用哪个"。 */
 const QUALITY = [
   { re: /qwen[-_ .]?image/i, score: 100, family: "Qwen-Image" },
   { re: /flux/i, score: 90, family: "FLUX" },
@@ -110,7 +110,7 @@ function searchRoots() {
   return [...new Set(roots)].filter((r) => existsSync(r));
 }
 
-// 扫描要读盘，而 /api/health 会被高频调用（压测里 1 秒几百次）——
+// 扫描要读盘，而 /api/health 会被高频调用（压测里 1 秒几百次），
 // 不缓存的话"看一眼状态"就会变成磁盘 IO 本身成了接口耗时。
 let scanCache = { at: 0, data: null };
 const SCAN_TTL_MS = 30000;
@@ -120,7 +120,7 @@ export function invalidateModelCache() { scanCache = { at: 0, data: null }; }
 
 /**
  * 把本机上现成的画图模型全找出来。
- * 返回的每一项都带 usable —— 那是"现在能不能真的跑起来"，不是"文件在不在"。
+ * 返回的每一项都带 usable，那是"现在能不能真的跑起来"，不是"文件在不在"。
  */
 export function discoverModels({ fresh = false } = {}) {
   if (!fresh && scanCache.data && Date.now() - scanCache.at < SCAN_TTL_MS) return scanCache.data;
@@ -208,7 +208,7 @@ export function modelStatus() {
 /**
  * 一个都没有时：说清楚接下来该干什么，而不是闷头下 16 GB。
  *
- * 这里最关键的一条判断是 runtime —— 如果本机连 ComfyUI 都没有，
+ * 这里最关键的一条判断是 runtime，如果本机连 ComfyUI 都没有，
  * 那么 ComfyUI 格式的 Qwen 权重下完**照样跑不起来**，那就不该假装"自动下载"能解决问题，
  * 而是如实报告"先得有 ComfyUI"。这正是上一层只判断"文件在不在"会埋的雷。
  */
@@ -318,7 +318,7 @@ export function startProvision({ log = () => { } } = {}) {
 
 /* ================================================================ ComfyUI 引擎
    ComfyUI 布局的模型（diffusion_models + text_encoders + vae）只有 ComfyUI 认，
-   而 ComfyUI 是个**要手动点启动器**的常驻服务 —— 不应要求用户手动操作。
+   而 ComfyUI 是个**要手动点启动器**的常驻服务：不应要求用户手动操作。
    下面两段把它补齐：有就拉起来，没有就用国内镜像装。
    ============================================================================ */
 
@@ -426,7 +426,7 @@ function runCmd(cmd, args, opts = {}) {
 /**
  * 用国内镜像把 ComfyUI 装到 <仓库>/ComfyUI。
  *
- * 这是个重操作（克隆 + 装依赖，几分钟），所以**不自动跑** ——
+ * 这是个重操作（克隆 + 装依赖，几分钟），所以**不自动跑**，
  * 由 /api/models 显式触发。装完不会自动启动，交给 ensureComfyRunning。
  */
 export async function installComfyUI({ log = () => {} } = {}) {
@@ -447,7 +447,7 @@ export async function installComfyUI({ log = () => {} } = {}) {
   log(`已从「${cloned}」克隆完成`);
 
   // 独立 venv + 复用系统包：ComfyUI 的 requirements 里有 torch，
-  // 直接装进系统环境会把本机那份 2.13+cu126 覆盖掉 —— 那是别的东西在用的。
+  // 直接装进系统环境会把本机那份 2.13+cu126 覆盖掉，那是别的东西在用的。
   const py = process.env.PF_PYTHON || findPython();
   const venv = path.join(dest, ".venv");
   log("建独立 venv（--system-site-packages，复用本机 torch）…");
@@ -463,7 +463,7 @@ export async function installComfyUI({ log = () => {} } = {}) {
   return {
     ok, dest, source: cloned, venv: vpy, python: vpy,
     message: ok
-      ? "ComfyUI 装好了。它还没启动 —— 出图时会被自动拉起（见 ensureComfyRunning）。"
+      ? "ComfyUI 装好了。它还没启动：出图时会被自动拉起（见 ensureComfyRunning）。"
       : "克隆成功但依赖没装全，可能需要手动看一眼 requirements 的报错。",
   };
 }

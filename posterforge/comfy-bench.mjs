@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * comfy-bench.mjs —— 实测 ComfyUI 能不能按 Qwen-Image-2.1 出图，以及要多久。
+ * comfy-bench.mjs，实测 ComfyUI 能不能按 Qwen-Image-2.1 出图，以及要多久。
  *
  * 为什么要实测：启动脚本里写的是 MiniMax-H3，磁盘上放的是 Qwen-Image-2.1，
  * 两套说法对不上；而且这是 8 GB 显存的 RTX 5060，能不能跑、跑多快只能试。

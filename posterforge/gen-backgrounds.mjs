@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * gen-backgrounds.mjs —— 用 Qwen-Image-2.1 给模板生成真实照片背景
+ * gen-backgrounds.mjs，用 Qwen-Image-2.1 给模板生成真实照片背景
  *
  * 为什么需要：原来的 8 张模板是纯色渐变 + 文字，没有真实照片，
  * 看起来空、假。给每个模板配一张实拍感背景，观感提升最明显。
@@ -8,8 +8,8 @@
  * 关键设计：
  *   • 尺寸用 **3:4 竖版（832×1120）**，与海报 1080×1440 同比例。
  *     之前生成 1024×1024 方图再裁成竖版，会丢掉构图与"文字留白区"，
- *     导致提示词里辛苦设计的下半部留白白做。
- *   • 提示词统一要求"下半部留白 + 无文字" —— 文字一律由引擎叠加，
+ *     导致提示词里辛苦设计的下半部留平白做。
+ *   • 提示词统一要求"下半部留白 + 无文字"，文字一律由引擎叠加，
  *     扩散模型画不准中文（这是整个项目的核心立场）。
  *   • 逐张生成、每张落盘、失败不中断，可重复运行（已有则跳过）。
  *
@@ -36,7 +36,7 @@ const HEIGHT = 1120;
 /**
  * 把 ComfyUI 返回的图片统一转成真正的 JPEG。
  * 实测 ComfyUI 的 SaveImage 输出是 PNG（带 RGBA），
- * 如果直接按 .jpg 存，文件内容与扩展名不符 —— 浏览器能靠嗅探显示，
+ * 如果直接按 .jpg 存，文件内容与扩展名不符，浏览器能靠嗅探显示，
  * 但"用扩展名判断格式"的工具（含本项目的图片校验）会认为文件损坏。
  */
 async function saveAsJpeg(buffer, file) {
@@ -70,7 +70,7 @@ const NEGATIVE = "文字, 水印, logo, 中文, 英文, 人物特写, 杂乱, �
 /**
  * 每个模板一张背景。
  * 提示词写法：场景 + 光线 + 构图 + "下半部留白" + "无文字"。
- * 最后两项不是客套 —— 留白是为了压文字，无文字是因为模型写不对中文。
+ * 最后两项不是客套，留白是为了压文字，无文字是因为模型写不对中文。
  */
 const BACKGROUNDS = [
   {
@@ -160,7 +160,7 @@ async function main() {
     const file = path.join(OUT_DIR, `${b.slug}.jpg`);
 
     if (existsSync(file) && !force) {
-      console.log(`[${i + 1}/${todo.length}] ${b.slug} —— 已存在，跳过（--force 可重做）`);
+      console.log(`[${i + 1}/${todo.length}] ${b.slug}：已存在，跳过（--force 可重做）`);
       results.push({ slug: b.slug, ok: true, skipped: true });
       continue;
     }

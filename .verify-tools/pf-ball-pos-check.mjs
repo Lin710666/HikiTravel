@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pf-ball-pos-check.mjs —— 验小旅的位置策略：
+ * pf-ball-pos-check.mjs，验小旅的位置策略：
  *   「本次会话内跨页面保持，刷新就回右下角」
  *
  * 这两件事在浏览器里长得几乎一样，只有 Navigation Timing 能分开：
@@ -91,7 +91,7 @@ async function main() {
 
   // 判断"是不是在右下角"不能要求坐标精确相等：position:fixed 的 right:24px 相对的是
   // **不含滚动条**的布局视口，页面有没有滚动条会让同一个角落差出 15px 左右。
-  // 这里只要落在那片的右下区域就算对 —— 而拖过去的位置 (386,266) 离得远，不会误判。
+  // 这里只要落在那片的右下区域就算对，而拖过去的位置 (386,266) 离得远，不会误判。
   const isCorner = (s) => s.x > s.vw * 0.6 && s.y > s.vh * 0.6;
 
   // ---- 1. 在主页拖动，位置应当被写进 sessionStorage ----

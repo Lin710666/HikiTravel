@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * shot-effects.mjs —— 把两种功能各出一张真图，并排看效果对不对。
+ * shot-effects.mjs，把两种功能各出一张真图，并排看效果对不对。
  * 光看断言不够：价格块没了以后版面会不会空一块、照片带位置对不对，得看图。
  */
 import { spawn } from "node:child_process";

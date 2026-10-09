@@ -3,7 +3,7 @@
  * verify-composition-e2e.mjs -- 构图从前端一路走到 spec 的端到端验证
  *
  * 为什么要单独验：单元层面「模板带 composition」「构函数认 composition」都通过了，
- * 但中间还隔着 /api/compose 这一层 —— 少一个字段的转发，整条就断，
+ * 但中间还隔着 /api/compose 这一层，少一个字段的转发，整条就断，
  * 而单元测试照样全绿（这正是上一轮 41 套模板共用一套骨架却没被发现的原因）。
  */
 const BASE = process.argv[2] || "http://127.0.0.1:8800";
@@ -11,7 +11,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, note = "") => { console.log(`  ${ok ? "[OK]" : "[X] "} ${n}${note ? "  " + note : ""}`); ok ? pass++ : fail++; };
 
 // 同一份版面几何模块，从本文件旁边加载。
-// 原来写死了 `file:///E:/deepseck/site/public/poster-layout.mjs` ——
+// 原来写死了 `file:///E:/deepseck/site/public/poster-layout.mjs`，
 // 换台机器就 import 失败，而失败信息长得像"模块被删了"，不是"路径写死了"。
 const { buildPosterSpecFrom } = await import("./public/poster-layout.mjs");
 

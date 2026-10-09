@@ -17,7 +17,7 @@ const { spawn } = await import("node:child_process");
 const path = await import("node:path");
 const fs = await import("node:fs");
 const { fileURLToPath } = await import("node:url");
-// 路径一律从本文件位置推出来 —— 原来这里写死了
+// 路径一律从本文件位置推出来，原来这里写死了
 // `E:\ComfyUI_windows_portable\...` 和 `E:\deepseck\site\.work\...`，
 // 都是别人机器上的目录（本机连 E 盘都没有），报错还看不出是路径问题。
 const HERE = path.dirname(fileURLToPath(import.meta.url));

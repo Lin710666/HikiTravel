@@ -673,7 +673,7 @@ def main():
     )
 
     # 10.7) 体检误报：用户写"长江澳"，行程里用的是景点库正式名"平潭国际旅游岛·长江澳"，
-    #       模型据此说"必去景点没排进去"——这类与事实矛盾的结论必须丢掉。
+    #       模型据此说"必去景点没排进去"，这类与事实矛盾的结论必须丢掉。
     from app.models.plan import CheckIssue
     from app.skills.check_skill import CheckSkill
 

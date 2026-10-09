@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * drive-test.mjs —— 用 CDP 真正"操作"页面，验证交互链路可用。
+ * drive-test.mjs，用 CDP 真正"操作"页面，验证交互链路可用。
  *
  * 为什么需要它：静态截图只能证明"渲染出来了"，
  * 证明不了"点上传真的会上传"、"点生成真的会出图"。
@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 引擎目录按仓库相对位置解析：原来这里写死 `..\poster-forge\`，
-// 而合并项目时目录改名成了 renderer/ —— 那条路径从来没再指对过。
+// 而合并项目时目录改名成了 renderer/，那条路径从来没再指对过。
 const FORGE_ROOT = findForgeRoot();
 const BASE = process.argv[2] || "http://127.0.0.1:8787";
 const WITH_AI_BG = process.argv.includes("--with-ai-bg");
@@ -125,7 +125,7 @@ async function main() {
   console.log("\n[A] 通过 UI 上传图片 ...");
   const imgB64 = (await readFile(path.join(FORGE_ROOT, "assets", "sample-photo.png"))).toString("base64");
 
-  // 在页面里把 base64 还原成 File 塞进 input，并派发 change 事件 —— 等价于用户选文件
+  // 在页面里把 base64 还原成 File 塞进 input，并派发 change 事件，等价于用户选文件
   await cdp.evalJs(`(async () => {
     const b64 = ${JSON.stringify(imgB64)};
     const bin = atob(b64);
@@ -141,7 +141,7 @@ async function main() {
   })()`);
 
   // 等上传完成。
-  // 注意：不要只读 chip 文案 —— renderFileList 更新 DOM 的瞬间可能读到
+  // 注意：不要只读 chip 文案，renderFileList 更新 DOM 的瞬间可能读到
   // "⏳" 与 "已上传 0/1" 并存的中间态，导致竞态性假失败（真发生过，白查了一轮）。
   // 改为读 window.posterforge.state（应用状态，不是 DOM 中间态），
   // 并要求连续两次快照一致才判定，避开抖动。
@@ -312,7 +312,7 @@ async function main() {
       })()`));
       if (i % 30 === 0) console.log(`    ${i}s  ${resD.btn}`);
       // AI 底图现在是自动的（有模型就用），结果里不再带「AI 背景」字样，
-      // 所以只按"出图了 / 报错了"判定完成 —— 原来靠那四个字判定，开关一删就永远等不到。
+      // 所以只按"出图了 / 报错了"判定完成，原来靠那四个字判定，开关一删就永远等不到。
       if (resD.err || resD.src) break;
     }
     console.log("  结果:", resD.err ? "✗ " + resD.err : "✓ " + resD.meta);

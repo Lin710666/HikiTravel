@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pf-stress.mjs —— PosterForge 的功能冒烟 + 压力测试
+ * pf-stress.mjs，PosterForge 的功能冒烟 + 压力测试
  *
  * 为什么不复用现成的 stress-test.mjs：
  *   那批脚本是给旅游规划后端写的（打 8001 的接口），瓶颈在完全不同的地方。
@@ -8,10 +8,10 @@
  *   拿只读接口去压它，测出来的只是"HTTP 层没坏"，等于没测。
  *
  * 四段，由浅入深，每段都必须真的成功拿到结果（不看代码猜）：
- *   1. 冒烟   —— 核心接口逐个打一遍："能不能用"
- *   2. 只读压 —— 混合并发：吞吐 / 错误率 / 分位延迟
- *   3. 文案压 —— 并发调 /api/compose（走本地 LLM），这是最容易被同时点爆的一段
- *   4. 出图压 —— 并发真渲染 PNG：真实用户体感最差的地方
+ *   1. 冒烟，核心接口逐个打一遍："能不能用"
+ *   2. 只读压，混合并发：吞吐 / 错误率 / 分位延迟
+ *   3. 文案压，并发调 /api/compose（走本地 LLM），这是最容易被同时点爆的一段
+ *   4. 出图压，并发真渲染 PNG：真实用户体感最差的地方
  *
  * 用法：
  *   node pf-stress.mjs                     # 默认 http://127.0.0.1:8800
@@ -113,7 +113,7 @@ const brief = "帮西湖边一家做杭帮菜的餐馆写一张国庆假期的�
 
 // ---------------------------------------------------------------- 1. 冒烟
 async function smoke() {
-  console.log("\n[1/4] 功能冒烟 —— 核心接口逐个打一遍");
+  console.log("\n[1/4] 功能冒烟：核心接口逐个打一遍");
   const st = new Stats("smoke");
   const checks = [
     ["静态首页", "/", 200],
@@ -136,7 +136,7 @@ async function smoke() {
       console.log(`  ✗ ${label.padEnd(24)} ${e.message}`);
     }
   }
-  // 上传：用户进来做的第一件事就是传照片。只"收下了"不算通过 ——
+  // 上传：用户进来做的第一件事就是传照片。只"收下了"不算通过，
   // 必须能按返回的地址再取回来，否则就是"上传成功但渲染时找不到文件"那类经典问题。
   try {
     const img = readFileSync(path.join(HERE, "..", "renderer", "assets", "sample-photo.png")).toString("base64");
@@ -164,7 +164,7 @@ async function smoke() {
     const hasToggle = html.includes('id="themeToggle"');
     const hasLight = html.includes('data-theme="light"') || html.includes("pf-theme");
     // 只认"控件本身"（<select id="modelSel"> 或那个 option 的 value）。
-    // 别拿模型名字符串去判断 —— 删掉它之后注释里还会提到它，会把自己误判成没删干净。
+    // 别拿模型名字符串去判断，删掉它之后注释里还会提到它，会把自己误判成没删干净。
     const deadModel = html.includes('id="modelSel"') || html.includes('value="poster-forge-int8"');
     const hasNote = html.includes("model-note");
     console.log(`  ${hasToggle ? "✓" : "✗"} 主题切换按钮已注入`);
@@ -185,7 +185,7 @@ async function smoke() {
 
 // ---------------------------------------------------------------- 2. 只读压
 async function readLoad() {
-  console.log("\n[2/4] 只读并发 —— 12 并发压 10 秒（混合静态资源与接口）");
+  console.log("\n[2/4] 只读并发：12 并发压 10 秒（混合静态资源与接口）");
   const paths = ["/", "/api/health", "/api/templates", "/style.css", "/app.js"];
   const st = await sustained("read-mix", 12, 10, (w, n) => call(paths[n % paths.length]));
   return st.report();
@@ -193,7 +193,7 @@ async function readLoad() {
 
 // ---------------------------------------------------------------- 3. 文案压
 async function composeLoad() {
-  console.log("\n[3/4] 文案并发 —— 4 并发 × 6 次 /api/compose（真的走本地 LLM 写文案）");
+  console.log("\n[3/4] 文案并发：4 并发 × 6 次 /api/compose（真的走本地 LLM 写文案）");
   const st = new Stats("compose");
   const rounds = 2, per = 4;
   for (let r = 0; r < rounds; r++) {
@@ -208,7 +208,7 @@ async function composeLoad() {
 
 // ---------------------------------------------------------------- 4. 出图压
 async function renderLoad() {
-  console.log("\n[4/4] 出图并发 —— 2 并发 × 2 轮真渲染（Python + Pillow，最慢的一段）");
+  console.log("\n[4/4] 出图并发：2 并发 × 2 轮真渲染（Python + Pillow，最慢的一段）");
   const st = new Stats("render");
   for (let r = 0; r < 2; r++) {
     const res = await burst(2, () =>
@@ -237,7 +237,7 @@ async function renderLoad() {
       results.push(await readLoad());
       results.push(await composeLoad());
       if (FULL) results.push(await renderLoad());
-      else console.log("\n[4/4] 出图并发 —— 已跳过（--full 打开）");
+      else console.log("\n[4/4] 出图并发：已跳过（--full 打开）");
     }
   } catch (e) {
     console.log(`\n压测中断：${e.message}`);
@@ -255,7 +255,7 @@ async function renderLoad() {
     console.log("\n存在失败的段：");
     for (const f of failed) console.log(`  ${f.name}: ${f.errors.slice(0, 3).join(" | ")}`);
   } else {
-    console.log("\n全部通过 —— 没有一次失败请求。");
+    console.log("\n全部通过：没有一次失败请求。");
   }
   process.exit(failed.length ? 1 : 0);
 })();

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * pf-theme-check.mjs —— 真浏览器里验"太阳/月亮切换"到底通不通
+ * pf-theme-check.mjs，真浏览器里验"太阳/月亮切换"到底通不通
  *
- * 为什么不能只看代码：主题这件事最容易出现的假通过是 ——
+ * 为什么不能只看代码：主题这件事最容易出现的假通过是，
  *   · 按钮画出来了，但点下去没反应（事件没绑上）
  *   · 点了立刻变，但刷新就弹回原样（没写 localStorage）
  *   · 刷新时闪一下黑底（初始化脚本放到了 body 末尾）
@@ -86,7 +86,7 @@ async function main() {
   const iconOk = (!icon.sun && !icon.moon) ? true : (t0 === "dark" ? (icon.sun && !icon.moon) : (icon.moon && !icon.sun));
   check("图标与当前主题一致（深色给太阳 / 浅色给月亮）", iconOk, `sun=${icon.sun} moon=${icon.moon}`);
 
-  // 点一下 —— 这一步是整个需求的核心
+  // 点一下，这一步是整个需求的核心
   await evalJs("document.querySelector('#themeToggle, button.iconbtn').click()");
   await sleep(400);
   const t1 = await evalJs("document.documentElement.getAttribute('data-theme')");

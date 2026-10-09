@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pf-theme-sync-check.mjs —— 验三个页面的深浅色到底有没有联动。
+ * pf-theme-sync-check.mjs，验三个页面的深浅色到底有没有联动。
  *
  * 要验的是这句话："主页跟系统，行程规划和海报生成跟主页。"
  * 拆成可测的三步（同一个浏览器 profile，所以 localStorage 是共享的，等同真实用户）：

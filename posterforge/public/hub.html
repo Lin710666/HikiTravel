@@ -7,7 +7,7 @@
 <link rel="icon" href="/favicon.ico" />
 <script>
 /* 主题：默认跟随系统偏好，用户点过太阳/月亮就以他的选择为准（记在 localStorage）。
-   键名与海报页一致（pf-theme）—— 两个页面的深浅色是联动的，不用各切一次。
+   键名与海报页一致（pf-theme）， 两个页面的深浅色是联动的，不用各切一次。
    这段必须放在 <head> 里同步执行：挪到 body 末尾的话，深色偏好的用户会先看到
    一帧刺眼的白底再跳成深色。 */
 (function () {
@@ -42,7 +42,7 @@
     else if (mqDark.addListener) mqDark.addListener(onSysChange);   // 老 Safari
   } catch (e) { /* 不支持就算了，不影响主题本身 */ }
 
-  /* 别的标签页切了主题 —— 门户 / 海报生成 / 行程规划 三处联动。
+  /* 别的标签页切了主题，门户 / 海报生成 / 行程规划 三处联动。
      storage 事件只在**其它**标签页写入时触发，正好是我们要的语义。 */
   window.addEventListener("storage", function (ev) {
     if (ev.key !== KEY) return;
@@ -83,7 +83,7 @@
   --radius: 16px;
 
   /* 下面这些原先是散在样式里的字面量（#fff / #e6e9ee / rgba(255,255,255,.86)…）。
-     抽成变量是为了深色模式能整体换掉 —— 只改 --bg/--ink 那种"底子变量"是不够的，
+     抽成变量是为了深色模式能整体换掉：只改 --bg/--ink 那种"底子变量"是不够的，
      白卡片、浅色骨架块、白色导航底到了深色背景上会直接糊成一片亮斑。
      这里的取值与原字面量一致，浅色观感零变化。 */
   --card: #ffffff;              /* 卡片/输入框底色 */
@@ -162,7 +162,7 @@ body {
 .btn-ghost { background: transparent; color: var(--ink); }
 .btn-ghost:hover { color: var(--brand); }
 /* 「规划行程」原来是 btn-ghost（纯文字，太弱）。现在和「生成海报」用同一个
-   btn-primary —— 两个入口等重，都是红色实心按钮。
+   btn-primary：两个入口等重，都是红色实心按钮。
    （中途试过深色做层级区分，用户不要，就要红的。） */
 
 /* ---------------------------------------------------------------- 两张功能卡 */
@@ -226,7 +226,7 @@ body {
 }
 /* ============================================================================
    深色模式
-   —— 右上角太阳 / 月亮切换。键名与海报页共用（pf-theme），
+  ：右上角太阳 / 月亮切换。键名与海报页共用（pf-theme），
    所以在门户切了深色，进海报页也是深色，反过来也一样。
 
    深色下品牌色换成蓝色：原先的 #ff5a3c 的橙放在暗底上过于跳，
@@ -307,7 +307,7 @@ html[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
     <div class="nav-sp"></div>
     <a class="link" href="/">海报生成</a>
     <a class="link" href="/wenlv/">旅游规划</a>
-    <!-- 深浅色切换：显示的是"点了会变成的那个"——浅色给月亮、深色给太阳 -->
+    <!-- 深浅色切换：显示的是"点了会变成的那个"，浅色给月亮、深色给太阳 -->
     <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换深浅色" title="切换深浅色">
       <svg class="ic-sun" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="4.2" />
@@ -318,7 +318,7 @@ html[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
       </svg>
     </button>
     <!-- 这里原来有个「开始使用」按钮，已删除。
-         它跳到 hero 下方的卡片区，而那一段本来就在首屏里 ——
+         它跳到 hero 下方的卡片区，而那一段本来就在首屏里，
          点了页面几乎不动，用户反馈"这个按键没用"。
          现在导航里两个链接（海报生成 / 旅游规划）就是入口，不需要重复的按钮。 -->
   </div>

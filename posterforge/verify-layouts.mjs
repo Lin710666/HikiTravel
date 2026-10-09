@@ -3,7 +3,7 @@
  * verify-layouts.mjs -- 版面差异验收
  *
  * 为什么必须有这个文件：上一轮我把 8 套模板扩到 41 套，就宣称"多样性做好了"。
- * 实际上 41 套渲染出来的版面骨架**完全一样** —— 同一组字段名、同一个对齐、
+ * 实际上 41 套渲染出来的版面骨架**完全一样**，同一组字段名、同一个对齐、
  * 同一个阅读顺序，只是文字和背景不同。用户一眼就看穿了。
  *
  * 所以把"版面必须真的有差异"变成机器可查的断言：
@@ -21,7 +21,7 @@ const check = (n, ok, note = "") => { console.log(`  ${ok ? "[OK]" : "[X] "} ${n
 
 const m = await import("file:///" + path.join(__dirname, "public", "poster-layout.mjs").replace(/\\/g, "/"));
 
-/** 从 spec 里抽出版面指纹 —— 只看"结构"，不看文字 */
+/** 从 spec 里抽出版面指纹，只看"结构"，不看文字 */
 function signature(spec) {
   const L = spec.layers;
   const title = L.find((l) => l.name === "title") || {};
@@ -81,7 +81,7 @@ for (const [comp, set] of [...byComp].sort()) {
 console.log("\n[2] 不能只有一种版面（上一轮的实际状态）");
 check("模板间存在多种版面签名", uniqueSigs.size >= 8, `${uniqueSigs.size} 种`);
 // 有变体之后，签名数必然**多于**构图数（每个构图至少 2 个变体）。
-// 原先断言的是两者相等 —— 那是没有变体时的标准。
+// 原先断言的是两者相等，那是没有变体时的标准。
 check("签名数多于构图数（变体在起作用）", uniqueSigs.size > byComp.size,
   `构图 ${byComp.size} 个 → 签名 ${uniqueSigs.size} 种`);
 check("每套模板的版面签名都唯一（用户定的验收标准）",
@@ -90,7 +90,7 @@ check("每套模板的版面签名都唯一（用户定的验收标准）",
 console.log("\n[3] 同一构图内部也要有差异（变体机制）");
 for (const [comp, set] of [...byComp].sort()) {
   const list = tpls.filter((t) => t.composition === comp);
-  // 原先这里断言的是"必须一致"—— 那是只有构图、没有变体时的标准。
+  // 原先这里断言的是"必须一致"， 那是只有构图、没有变体时的标准。
   // 用户要的是"任意两套模板的版面几何必须有实质差异"，
   // 所以现在反过来：同构图内也必须有多种签名。
   const need = Math.min(2, list.length);
@@ -99,7 +99,7 @@ for (const [comp, set] of [...byComp].sort()) {
 }
 
 console.log("\n[4] 关键结构差异必须真实存在");
-// 结构差异要比**构图基线**（不带变体精调），不能比某一套模板 ——
+// 结构差异要比**构图基线**（不带变体精调），不能比某一套模板，
 // 每套都被 tuning 调过之后，"第一套"的字号不再代表这个构图。
 const parse = (s) => Object.fromEntries(s.split("|").map((kv) => kv.split("=")));
 const baseSig = (comp) => signature(m.buildPosterSpecFrom(content, {

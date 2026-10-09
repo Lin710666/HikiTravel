@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-copybook.py —— 多页 PDF 文案手册渲染器
+copybook.py：多页 PDF 文案手册渲染器
 
 存在的理由：海报是"一张图"，文案手册是"一份文档"。
 两者共用同一套设计语言（色板、字体、版式节奏），但文档多了三个海报没有的东西：
@@ -32,10 +32,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw
 
-# 复用海报引擎的调色板与背景能力 —— 单一实现来源，避免两处漂移
+# 复用海报引擎的调色板与背景能力，单一实现来源，避免两处漂移
 #
 # v8.0 合并项目时 `poster-forge/` 改名成了 `renderer/`。
-# 这里**两个名字都认**，并支持 PF_FORGE_ROOT 显式指定 ——
+# 这里**两个名字都认**，并支持 PF_FORGE_ROOT 显式指定，
 # 写死目录名的话，改名之后手册会静默地找不到引擎
 # （实测：合并后 /api/health 报 渲染器=False）。
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,7 +52,7 @@ if _FORGE and _FORGE not in sys.path:
 from bg import make_background, resolve_color, BGError  # noqa: E402
 
 # 字体表与海报引擎保持一致。
-# 目录从系统环境变量推出来，不写死 C:\Windows —— Windows 装在别的盘也对；
+# 目录从系统环境变量推出来，不写死 C:\Windows，Windows 装在别的盘也对；
 # 想用随项目分发的字体就设 PF_FONT_DIR。
 _FONT_DIR = os.environ.get("PF_FONT_DIR") or os.path.join(
     os.environ.get("WINDIR") or os.environ.get("SystemRoot") or r"C:\Windows",
@@ -156,7 +156,7 @@ class Copybook:
         self.palette: Dict[str, str] = self.theme.get("palette") or {}
         self.meta = spec.get("meta") or {}
         if not self.palette:
-            raise CopybookError("theme.palette 不能为空 —— 手册需要色板才能渲染")
+            raise CopybookError("theme.palette 不能为空：手册需要色板才能渲染")
 
         self.pages: List[Image.Image] = []
         self.base_dir = _HERE
@@ -201,13 +201,13 @@ class Copybook:
         新建一页。
 
         性能要点：同一文档里所有浅色页的底色完全相同。而生成一张 A4@300DPI 的
-        渐变背景要做大尺寸 rotate + 高斯模糊，单页就要数秒 —— 6 页文档里 3 页是
+        渐变背景要做大尺寸 rotate + 高斯模糊，单页就要数秒：6 页文档里 3 页是
         浅色页，逐页重建等于白算两遍。所以按类型缓存基底，命中直接 copy()
         （copy 比重新生成便宜两个数量级）。
 
-          cover   —— 满幅渐变封面
-          content —— 浅色内容页（阅读舒适）
-          accent  —— 深色强调页（数据/价格）
+          cover  ：满幅渐变封面
+          content：浅色内容页（阅读舒适）
+          accent ：深色强调页（数据/价格）
         """
         cache = getattr(self, "_bg_cache", None)
         if cache is None:
@@ -439,7 +439,7 @@ class Copybook:
         """整页图片版块：一张实拍图 + 可选标题与说明。
 
         为什么手册需要这一种：原先 VALID_SECTIONS 里只有
-        cover/text/bullets/table/price/contact —— **没有任何位置能放图**。
+        cover/text/bullets/table/price/contact：**没有任何位置能放图**。
         用户在手册模式里传了照片，照片却无处可去，只留下一条
         "这张图会作为海报底图"的提示在骗人。
 
@@ -482,7 +482,7 @@ class Copybook:
             dr.rectangle([self.M, y, self.M + box_w, y + box_h], outline=self.color("dividerOnPaper", "#00000022"), width=2)
             y += box_h
         else:
-            # 图缺失时不留白洞 —— 画一个占位框并说明，比空白页诚实
+            # 图缺失时不留白洞，画一个占位框并说明，比空白页诚实
             dr.rectangle([self.M, y, self.M + box_w, y + max(1, box_h)],
                          outline=self.color("dividerOnPaper", "#00000022"), width=2)
             f_e = load_font("sans", int(0.095 * self.DPI))

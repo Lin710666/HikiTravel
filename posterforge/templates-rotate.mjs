@@ -1,5 +1,5 @@
 /**
- * templates-rotate.mjs —— 模板的「联网轮换」。
+ * templates-rotate.mjs，模板的「联网轮换」。
  *
  * 目标：让模板区每天看起来不一样，而且是**有依据的**不一样，
  * 不是随机洗牌。
@@ -19,7 +19,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
-// 解释器由 paths.mjs 统一解析 —— 原来写死某台机器的 devenv 路径，
+// 解释器由 paths.mjs 统一解析，原来写死某台机器的 devenv 路径，
 // 别人 clone 下来调色提取必然失败，还会让人以为"是脚本坏了"。
 import { findPython } from "./paths.mjs";
 

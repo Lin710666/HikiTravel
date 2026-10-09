@@ -54,7 +54,7 @@ const BALL = `(() => {
   const r = b.getBoundingClientRect();
   const cs = getComputedStyle(b);
   // 用 clientWidth/clientHeight（不含滚动条）而不是 innerWidth/innerHeight。
-  // 页面有滚动条时 innerWidth 会多出约 15px，把 right 算成 41 —— 位置其实是对的，
+  // 页面有滚动条时 innerWidth 会多出约 15px，把 right 算成 41，位置其实是对的，
   // 是量法把滚动条算进去了。（海报页/门户有滚动条，规划页是定高应用没有。）
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;

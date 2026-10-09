@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * drive-copybook-error.mjs —— 验证手册校验失败的 UI 展示路径。
+ * drive-copybook-error.mjs，验证手册校验失败的 UI 展示路径。
  *
  * 为什么单独测这个：API 返回 errors 是一回事，
  * 前端有没有把它们显示给用户是另一回事。校验器的价值取决于
  * "用户真的看得到问题"，否则它只是日志里的一行。
  *
  * 做法：在页面里临时把 buildCopybookSpec 打桩成埋错版本，
- * 点生成，读回错误区文本 —— 走的是完全真实的前端展示逻辑。
+ * 点生成，读回错误区文本，走的是完全真实的前端展示逻辑。
  */
 
 import { spawn } from "node:child_process";

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * pf-ball-multitab-check.mjs —— 验小旅的位置在**多标签页之间**是不是一致的。
+ * pf-ball-multitab-check.mjs：验小旅的位置在**多标签页之间**是不是一致的。
  *
- * 为什么必须开两个真标签页：主人的原始现象就是跨标签页的 ——
+ * 为什么必须开两个真标签页：最初的现象就是跨标签页的，
  * 「主页挪到中间 → 另一个标签页刷新 → 回主页，球又去中间了」。
  * 根因是 sessionStorage 每个标签页各存一份：没刷新过的那个标签页始终记着旧位置。
  * 换成 localStorage（全站唯一）+ storage 事件（通知其它标签页）才修得掉。
- * 而 storage 事件**是浏览器派发的，脚本伪造不了** —— 所以只能真开两个页面来验。
+ * 而 storage 事件**是浏览器派发的，脚本伪造不了**，所以只能真开两个页面来验。
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -112,7 +112,7 @@ async function main() {
     `A(${dragged.x},${dragged.y}) → B(${b1.x},${b1.y})`);
   check("位置已写进公共存储（两个标签页共用一份）", !!b1.saved, `saved=${b1.saved}`);
 
-  // 在 B 刷新 —— 应当把位置清掉，并且 A 也要跟着回右下角
+  // 在 B 刷新，应当把位置清掉，并且 A 也要跟着回右下角
   await send("Page.reload", {}, B);
   await sleep(4200);
   const b2 = await evalIn(B, BALL);

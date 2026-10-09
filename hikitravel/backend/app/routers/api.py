@@ -138,7 +138,7 @@ def _error_event(exc: Exception) -> Dict[str, Any]:
 
     已知领域异常：用异常自带的、本来就是写给用户看的中文提示；
     未预期异常：只回一句通用提示 + 问题编号，原始内容（可能带请求地址 / 配置）
-    只进日志、不发给前端——与 main.py 的全局兜底同一口径。
+    只进日志、不发给前端，与 main.py 的全局兜底同一口径。
     """
     if isinstance(exc, LLMUnavailableError):
         return {"type": "error", "kind": "network", "message": str(exc)}
@@ -314,7 +314,7 @@ def map_config() -> MapConfig:
 
     安全说明（重要）：JS API 的 Key 按设计**必然出现在浏览器里**，
     安全密钥同理，藏不住也没必要藏。真正的防滥用手段是在高德控制台
-    给该 Key 配「安全域名白名单」——只允许我们自己的域名调用。
+    给该 Key 配「安全域名白名单」，只允许我们自己的域名调用。
     不配白名单的话，任何人抄走 Key 都能刷额度，这是藏密钥挡不住的。
     """
     enabled = bool(settings.amap_js_key and settings.amap_security_code)
@@ -335,7 +335,7 @@ def autocomplete_places(q: str, city: str = "", limit: int = 8) -> List[PlaceTip
     硬编码的列表迟早过期；而且用户的目的地粒度常常不是行政区
     （平潭岛 / 洱海 / 中山陵景区），固定城市列表覆盖不到。
 
-    每条候选都带 adcode——用户点选后前端会把 adcode 一起提交，
+    每条候选都带 adcode，用户点选后前端会把 adcode 一起提交，
     后端直接按主键解析，连「平潭县 / 平潭镇」这种同名歧义都不存在了。
     """
     try:
@@ -400,7 +400,7 @@ def search_attractions(q: str, city: str = "", limit: int = 10) -> List[Attracti
 
     为什么不能复用上面的 /places/autocomplete（高德 inputtips）：
     那个接口不认类型。实测同一个词「长江澳」返回的 6 条里，
-    有一条是「自然地名 · 海湾海峡」——它的坐标是海湾的几何中心，
+    有一条是「自然地名 · 海湾海峡」，它的坐标是海湾的几何中心，
     标在地图上会落在海里；还有 3 条是停车场。
 
     这里改用 /place/text 并限定「景点类」分类码，返回的都是风景名胜/公园/场馆，

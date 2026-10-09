@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * server.mjs —— poster-forge 站点服务器
+ * server.mjs，poster-forge 站点服务器
  *
  * 设计原则：
  *   1. 零运行时依赖：只用 Node 内置模块（node:http / fs / path / child_process）。
@@ -46,7 +46,7 @@ import {
 // 版面几何：服务端与浏览器共用同一份，避免两条路渲出两种版式
 import { buildPosterSpecFrom, buildCheckinSpecFrom, POSTER_TONES, POSTER_COMPOSITIONS } from "./public/poster-layout.mjs";
 // 路径解析的唯一来源：python / ComfyUI / ollama / 浏览器在哪，全交给 paths.mjs。
-// 本文件里不再出现任何写死的盘符 —— 换机器、换盘符都不用改代码。
+// 本文件里不再出现任何写死的盘符，换机器、换盘符都不用改代码。
 import { findPython, findComfyPython, findForgeRoot, findComfyRoot } from "./paths.mjs";
 // 模型自举：自动检索本机现成的画图模型 → 有就用 → 一个都没有时才谈下载
 import { modelStatus, provisionPlan, startProvision, provisionProgress, invalidateModelCache,
@@ -59,11 +59,11 @@ const REPO_ROOT = path.dirname(SITE_ROOT);
 //
 // v8.0 把项目合并时，原来平级的 `poster-forge/` 改名成了 `renderer/`。
 // 这里**两个名字都认**：先找 renderer，没有再退回 poster-forge。
-// 为什么不用单一名字：改名只改了目录，代码里写死的路径不会自己跟着变 ——
+// 为什么不用单一名字：改名只改了目录，代码里写死的路径不会自己跟着变，
 // 实测合并后 `/api/health` 报 `渲染器=False`，接口 200 但出图全废。
 // 兼容两种名字，无论目录叫哪个都能跑。
 // 也支持用 PF_FORGE_ROOT 环境变量显式指定（引擎装在别处时用）。
-// 具体探测收在 paths.mjs —— 全项目只有那一处判断引擎在哪。
+// 具体探测收在 paths.mjs，全项目只有那一处判断引擎在哪。
 // 之前同样的逻辑在 server.mjs / copybook.py / 启动脚本里各写了一遍，
 // 改目录名时漏改一处就变成"接口 200 但出图全废"。
 const FORGE_ROOT = findForgeRoot();
@@ -96,7 +96,7 @@ function loadHistory() {
  */
 const ASSISTANT_FILE = path.join(SITE_ROOT, "assistant.json");
 const ASSISTANT_DEFAULTS = {
-  avatar: false,        // 虚拟形象**默认关闭** —— 它是重资源，不该拖慢默认使用
+  avatar: false,        // 虚拟形象**默认关闭**，它是重资源，不该拖慢默认使用
   avatarModel: "hiyori",
   nickname: "小旅",
   style: "",            // 表达风格：简短 / 详细 / 幽默 …
@@ -116,13 +116,13 @@ function saveAssistantPrefs(patch) {
   for (const k of Object.keys(ASSISTANT_DEFAULTS)) {
     if (k in patch) next[k] = patch[k];
   }
-  // 只收白名单字段，长度也夹一下 —— 这些值会被拼进系统提示词
+  // 只收白名单字段，长度也夹一下，这些值会被拼进系统提示词
   next.avatar = !!next.avatar;
   next.nickname = String(next.nickname || "").slice(0, 20);
   next.style = String(next.style || "").slice(0, 40);
   next.persona = String(next.persona || "").slice(0, 400);
   // 可选的虚拟形象。**必须和 public/avatar/models/ 下的目录一一对应。**
-  // 注意：原来写的是 ["hiyori","haru","mao"] —— haru 根本不存在，
+  // 注意：原来写的是 ["hiyori","haru","mao"]，haru 根本不存在，
   // 而 hanfu / mudan / cangyixiu 会被这里**静默拒绝**、退回 hiyori：
   // 用户选了"汉服"、保存、再看变成"日和"，且没有任何报错。
   // 白名单和实际资源不一致时，静默回退比报错更难查。
@@ -132,7 +132,7 @@ function saveAssistantPrefs(patch) {
   return next;
 }
 
-/** 记一条出图历史。失败不影响出图本身 —— 记录是附带的，不该拖累主流程。 */function recordHistory(entry) {
+/** 记一条出图历史。失败不影响出图本身，记录是附带的，不该拖累主流程。 */function recordHistory(entry) {
   try {
     const items = loadHistory();
     items.unshift({ id: "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), ...entry });
@@ -154,7 +154,7 @@ const ALLOWED_IMAGE_EXT = { "image/png": ".png", "image/jpeg": ".jpg", "image/we
 const PYTHON = findPython();
 
 /* ---------------------------------------------------------------- 显存与模型预热 */
-/** 剩余显存（GB）。查不到返回 null —— 没装 nvidia-smi 的机器不该因为体检失败就崩。 */
+/** 剩余显存（GB）。查不到返回 null，没装 nvidia-smi 的机器不该因为体检失败就崩。 */
 let vramCache = { at: 0, value: null };
 async function vramFreeGB() {
   if (Date.now() - vramCache.at < 5000) return vramCache.value;
@@ -182,7 +182,7 @@ function warmUpBrainLater(delayMs = 2500) {
     try {
       const cfg = loadBrainConfig(SITE_ROOT);
       if (!cfg.enabled || !cfg.copy) return;
-      // 直接打 Ollama：哪怕只让它回一个 token —— 目的是把权重读进卡里，
+      // 直接打 Ollama：哪怕只让它回一个 token，目的是把权重读进卡里，
       // 并让 keep_alive 生效（模型待着，而不是用完就卸）。
       await fetch(String(cfg.endpoint || "").replace(/\/$/, "") + "/api/generate", {
         method: "POST",
@@ -224,9 +224,9 @@ const MIME = {
 // ---------------------------------------------------------------- 图片归一化
 //
 // 手机竖拍的照片存成横向 + 一个 EXIF Orientation 标签。三处都需要正确方向：
-//   1. 浏览器 <img> 预览 —— 多数浏览器会自动应用 EXIF，但不能依赖
-//   2. 渲染器 —— 它按像素读，不做校正就横着进版式
-//   3. 隐私 —— EXIF 里常含 GPS 定位
+//   1. 浏览器 <img> 预览，多数浏览器会自动应用 EXIF，但不能依赖
+//   2. 渲染器，它按像素读，不做校正就横着进版式
+//   3. 隐私，EXIF 里常含 GPS 定位
 // 所以落盘时就用 PIL 转正并**去掉 EXIF**，后续所有环节都拿到干净的图。
 const NORMALIZE_HELPER = `
 import io, os, sys, json
@@ -240,7 +240,7 @@ def finish(im, orient, via):
     """转正 + 去 EXIF + 按真实格式另存。
 
     坑（真踩过）：早先这里按**文件后缀**选保存格式（.png 存 PNG，其它存 JPEG），
-    于是 WebP/BMP/TIFF/GIF 一律被当成 JPEG 保存 —— 文件没报错，内容却已经不是原图了。
+    于是 WebP/BMP/TIFF/GIF 一律被当成 JPEG 保存：文件没报错，内容却已经不是原图了。
     现在按 PIL 识别到的真实格式存。
     """
     fixed = ImageOps.exif_transpose(im)
@@ -272,7 +272,7 @@ try:
         orient = None
     finish(im, orient, "PIL")
 except Exception as pil_err:
-    # PIL 打不开 —— 目前实测只有 HEIC/HEIF 会走到这里。
+    # PIL 打不开，目前实测只有 HEIC/HEIF 会走到这里。
     # 用 PyAV（FFmpeg 的 HEVC 解码器）解出第一帧，转成 JPEG 落盘，
     # 这样渲染器那条 PIL-only 的路径也能吃下 iPhone 照片。
     try:
@@ -312,7 +312,7 @@ print(json.dumps(report))
 // 而便携版那个 python 里 av / cv2 / PIL 都是现成的，直接借来用。
 //
 // 位置由 paths.mjs 探测（PF_COMFY_ROOT / PF_HEIC_PYTHON 可显式指定）。
-// 找不到就是 null —— 只影响 HEIC 这一条降级路径，不影响正常出图。
+// 找不到就是 null，只影响 HEIC 这一条降级路径，不影响正常出图。
 const COMFY_PYTHON = findComfyPython();
 
 async function normalizeOrientation(absPath) {
@@ -348,13 +348,13 @@ async function normalizeOrientation(absPath) {
     const st = await stat(outPath);
     return { ...info, file: outPath, bytes: st.size };
   } catch {
-    // 归一化失败不应阻断上传 —— 原图仍然可用，渲染器还有自己的兜底校正
+    // 归一化失败不应阻断上传，原图仍然可用，渲染器还有自己的兜底校正
     return null;
   }
 }
 
 // ---------------------------------------------------------------- 工具
-// 图片魔数校验：不看客户端声明的 MIME，只看真字节 —— 声明是可以伪造的。
+// 图片魔数校验：不看客户端声明的 MIME，只看真字节，声明是可以伪造的。
 //
 // 这里认的格式，必须同时满足两条，否则宁可拒绝：
 //   1. 能靠**固定魔数**认出来（避免误判，比如 TGA 没有魔数就不收）
@@ -428,7 +428,7 @@ function run(cmd, args, opts = {}) {
         // spec 里的路径是相对站点的（如 "uploads/xxx.png"）。
         PF_IMAGE_ROOT: PUBLIC_DIR,
         // 关键：python.exe 输出到**管道**时默认用系统 ANSI 编码（中文 Windows 上是 GBK），
-        // 而 Node 按 UTF-8 读 —— 结果是校验器的中文报错全变成乱码。
+        // 而 Node 按 UTF-8 读，结果是校验器的中文报错全变成乱码。
         // 终端里手跑不会暴露这个问题，只有作为子进程被读输出时才会。
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
@@ -456,7 +456,7 @@ async function serveStatic(res, absPath) {
     // HTML 里给助手组件带上**版本号**。
     //
     // 为什么非做不可：`no-cache` 只对"新收到的响应"生效。用户浏览器里
-    // 可能还存着改之前用 max-age=3600 缓存的那份，没过期就**不会去问服务器** ——
+    // 可能还存着改之前用 max-age=3600 缓存的那份，没过期就**不会去问服务器**，
     // 拿不到新的缓存头，也拿不到新文件。表现就是"海报页和门户还是旧版，
     // 只有旅游规划页是新的"。
     // 换 URL 是唯一能绕过它的办法：地址变了，浏览器就当新资源。
@@ -475,7 +475,7 @@ async function serveStatic(res, absPath) {
     // 注意（两处）：
     //  1) 给 ai-ball.js 设 max-age=3600，我改了组件，用户刷新看到的还是旧版；
     //  2) 重渲了 41 张缩略图（配上实拍图，好让七种构图看得出区别），
-    //     但缩略图 URL 没变、还带 3600 缓存 —— 用户看到的仍是旧的纯渐变图，
+    //     但缩略图 URL 没变、还带 3600 缓存，用户看到的仍是旧的纯渐变图，
     //     反馈"两个功能页都没改变"。
     // 结论：**会被迭代覆盖的静态资源，一律不许长缓存。**
     // 缩略图虽然多，但都是几十 KB，回源校验（304）比"改了看不见"便宜得多。
@@ -504,7 +504,7 @@ const CATEGORIES = [
 ];
 
 // 模板库从 templates.json 读（而不是硬编码）。
-// 为什么要外置：模板现在不只用于展示卡片，还要能「套用」——
+// 为什么要外置：模板现在不只用于展示卡片，还要能「套用」，
 // 需要 brief（可直接编辑的示例内容）、tone（调性）、layout（版式）这些字段，
 // 而且后续要按用户反馈调整排序权重，硬编码在源码里改不动。
 const TEMPLATES_FILE = path.join(SITE_ROOT, "templates.json");
@@ -539,7 +539,7 @@ function loadTemplates() {
       tone: typeof t.tone === "number" ? t.tone : null,
       layout: t.layout || null,
       // 构图：决定这套模板套出来是什么版面（对齐/图文关系/标题占比）。
-      // 不加进这个白名单的话前端拿不到，41 套模板会退回同一套骨架 —— 那正是要修的问题。
+      // 不加进这个白名单的话前端拿不到，41 套模板会退回同一套骨架，那正是要修的问题。
       composition: t.composition || null,
       // 变体：同一构图内的字号与留白差异。不带上它的话，
       // 同构图的十几套模板又会渲染成一模一样的几何。
@@ -549,7 +549,7 @@ function loadTemplates() {
         ? { y: Number(t.tuning.y) || 0, s: Number(t.tuning.s) || 1 } : null,
       thumb: t.thumb || (t.source === "user" ? "" : `thumbs/${t.id}.jpg`),
       // 列表用小图（240×320）。大图 540×720 一并解码 41 张要占 ~63MB 位图内存，
-      // 而列表里只显示 48~220px 宽 —— 多出来的像素全白解码，是页面卡的主因。
+      // 而列表里只显示 48~220px 宽，多出来的像素全白解码，是页面卡的主因。
       // 预览弹层仍用大图（那里真的要看清）。
       thumbSmall: t.thumb || (t.source === "user" ? "" : `thumbs/s/${t.id}.jpg`),
       // 采纳次数：用户点了几次「套用」，用于检索排序（见 templates-rank.mjs）
@@ -586,7 +586,7 @@ function loadAdLawBanned() {
 }
 const AD_LAW_BANNED = loadAdLawBanned();
 
-/** 合法的构图名集合 —— 用来挡掉前端传来的野值 */
+/** 合法的构图名集合，用来挡掉前端传来的野值 */
 const RE_COMPOSITIONS = new Set(Object.keys(POSTER_COMPOSITIONS));
 
 /** 本地预检：只查硬禁词（需资质词交给 validate.py 出 warning） */
@@ -601,7 +601,7 @@ function checkAdLaw(text) {
 const TEMPLATE_INDEX_FILE = path.join(SITE_ROOT, ".cache", "templates-embed.json");
 let templateIndex = null;
 let templateIndexBusy = null;
-// 当天的模板轮换结果。**必须放在模块作用域** ——
+// 当天的模板轮换结果。**必须放在模块作用域**，
 // 原先声明在 /api/templates 的 if 块里，/api/templates/rotate 在外面给它赋值，
 // 严格模式下直接 ReferenceError（表现为那个路由恒定 500）。
 let rotation = null;
@@ -639,7 +639,7 @@ const CAPABILITIES = [
   { id: "checkin", name: "打卡模板", desc: "对话 + 照片 → 可发布打卡卡", icon: "checkin" },
   { id: "copybook", name: "文案手册", desc: "一键生成多页互联网宣传手册", icon: "book" },
   { id: "history", name: "历史记录", desc: "回看生成过的图，可重新下载或删掉", icon: "history" },
-  // 「图片分析」**不做独立入口** —— 它是辅助生成的手段，不是一种生成模式。
+  // 「图片分析」**不做独立入口**，它是辅助生成的手段，不是一种生成模式。
   // 独立成一个菜单项会让用户以为"分析完能得到什么成品"，其实它只是帮你选版式。
   // 现在它是生成区里的一个按钮（见 index.html 的 anaBtn），在这几个模式下都能用。
 ];
@@ -672,7 +672,7 @@ async function generate(spec, { timeoutMs = 180000 } = {}) {
   // 不登记就解析成 renderer/uploads/... → 找不到文件 → 渲染失败。
   // 更坑的是它**不带任何错误信息**（服务端拿到 422 但 error/message 都是 null），
   // 表现成"某些构图莫名失败"，查了很久才定位到。
-  // 受影响的不只是 AI 底图 —— 用户上传的照片走同一条路。
+  // 受影响的不只是 AI 底图，用户上传的照片走同一条路。
   const r = await run(
     PYTHON,
     [path.join(FORGE_ROOT, "render.py"), "--spec", specPath, "--out", outPath,
@@ -709,7 +709,7 @@ async function validateCopybook(specPath) {
   const raw = (r.out || "").trim();
   let parsed = null;
   try {
-    // 取最后一行 JSON —— 避免任何前置输出干扰解析
+    // 取最后一行 JSON，避免任何前置输出干扰解析
     const line = raw.split(/\r?\n/).filter(Boolean).pop() || "";
     parsed = JSON.parse(line);
   } catch {
@@ -802,7 +802,7 @@ async function generateCopybook(spec, { timeoutMs = 300000 } = {}) {
 
 // ---------------------------------------------------------------- 目录清理
 //
-// 上传目录与产出目录会无限增长。这不是"以后再说"的问题 ——
+// 上传目录与产出目录会无限增长。这不是"以后再说"的问题，
 // 一次游客批量上传就是几十 MB，跑一周就能误删几个 GB。
 //
 // 策略：按「最多个数」+「最长天数」**双条件**保留，两个都满足才删。
@@ -924,7 +924,7 @@ async function serveProxiedImage(res, remote) {
   const cachePath = path.join(IMG_CACHE_DIR, key);
 
   // Bing 图床支持在 URL 上直接要尺寸（w/h/c 参数），原图 300KB+ 而卡片只显示 ~300px 宽。
-  // 这里统一压到 800px —— 卡片放大看也够，传输量降到约 1/5。
+  // 这里统一压到 800px，卡片放大看也够，传输量降到约 1/5。
   // 其他图源没有这个参数，原样取，不改写（乱加参数可能让对方返回错误图）。
   if (/(^|\.)bing\.com$/.test(u.hostname) && !u.searchParams.has("w")) {
     u.searchParams.set("w", "800");
@@ -1053,7 +1053,7 @@ async function handleApi(req, res, url) {
 
       // 落盘后做一次方向归一化。
       // 为什么不在 JS 里做：浏览器不会把 EXIF 方向信息交给我们（createImageBitmap 已应用它），
-      // 而 Node 侧没有 EXIF 处理能力 —— PIL 的 exif_transpose 是干净解法。
+      // 而 Node 侧没有 EXIF 处理能力，PIL 的 exif_transpose 是干净解法。
       // 好处有三：预览方向正确、渲染器不必再猜、顺带去掉 EXIF 里的定位等隐私信息。
       const norm = await normalizeOrientation(abs);
       // 认得出是图片但解不开（坏 HEIC、截断的 TIFF 等）：删掉落盘文件并拒收。
@@ -1102,7 +1102,7 @@ async function handleApi(req, res, url) {
   // ---- AI 助手：通用对话 + 个性化设置 ----
   //
   // 为什么不转发到 HikiTravel 的 /api/chat：那是**旅游规划**接口。
-  // 助手说"你好"，它回"还缺少这些信息：目的地、游玩天数、预算" —— 驴唇不对马嘴。
+  // 助手说"你好"，它回"还缺少这些信息：目的地、游玩天数、预算"，驴唇不对马嘴。
   // 这里直接用本机 Ollama 做真对话。
   if (p === "/api/assistant/chat" && req.method === "POST") {
     let payload;
@@ -1156,7 +1156,7 @@ async function handleApi(req, res, url) {
     return res.end();
   }
 
-  // 助手面板里的示例问题。**不写死** —— 结合当天联网素材轮换。
+  // 助手面板里的示例问题。**不写死**，结合当天联网素材轮换。
   //
   // 写死的问题永远是那四句，用户看两天就腻，也跟当天的热点脱节。
   // 这里用两路真实数据拼：
@@ -1215,7 +1215,7 @@ async function handleApi(req, res, url) {
   }
 
   // 图片分析：只看版式，不生成海报。
-  // 独立于 /api/compose —— 用户只是想知道"这张图该怎么排"，不该因此出一张图。
+  // 独立于 /api/compose，用户只是想知道"这张图该怎么排"，不该因此出一张图。
   if (p === "/api/analyze-layout" && req.method === "POST") {
     let payload;
     try { payload = JSON.parse(await readBody(req, 2 * 1024 * 1024)); }
@@ -1246,7 +1246,7 @@ async function handleApi(req, res, url) {
   // 构图清单：**只给版式，不给文案**。
   //
   // 为什么改成这样：原来挑模板是 41 套各带一份文案（"烧烤摊夜宵档""火锅店冬季暖场"…），
-  // 用户真正要复用的是**版面结构**，不是别人家的文案 ——
+  // 用户真正要复用的是**版面结构**，不是别人家的文案，
   // 而且 41 套文案模板看下来会觉得"都差不多"，因为它们本来就在重复同一个题材维度。
   // 现在只列七种构图，用户选结构，文案自己填。
   if (p === "/api/compositions" && req.method === "GET") {
@@ -1254,7 +1254,7 @@ async function handleApi(req, res, url) {
     try {
       const raw = await loadTemplates();
       // loadTemplates() 返回的是数组，/api/templates 才包一层 {templates}。
-      // 两种都兼容 —— 猜错结构会让示例图整列变空，而且不报错。
+      // 两种都兼容，猜错结构会让示例图整列变空，而且不报错。
       tpls = Array.isArray(raw) ? raw : (raw && raw.templates) || [];
     } catch { tpls = []; }
     // 每种构图挑一套当示例图（优先有 featured 的，其次第一套）
@@ -1269,7 +1269,7 @@ async function handleApi(req, res, url) {
       label: c.label,
       align: c.align,
       imgMode: c.imgMode,
-      // 说明写"适合什么"，不写"是什么" —— 用户选版式时想的是用途
+      // 说明写"适合什么"，不写"是什么"，用户选版式时想的是用途
       hint: {
         fullbleed: "图铺满整张，文字压在图上。风景、氛围强的照片最出效果。",
         axial: "所有元素居中沿中轴排列。仪式感、正式场合。",
@@ -1306,7 +1306,7 @@ async function handleApi(req, res, url) {
   }
 
   if (p === "/api/history" && req.method === "DELETE") {
-    // 清空记录**不删图** —— 图在 public/generated 里另有保留策略，
+    // 清空记录**不删图**，图在 public/generated 里另有保留策略，
     // 两者分开，免得"清列表"变成"删作品"。
     try {
       writeFileSync(HISTORY_FILE, JSON.stringify({ version: 1, items: [] }, null, 2), "utf8");
@@ -1334,7 +1334,7 @@ async function handleApi(req, res, url) {
  * 没给照片时，自己生成一张底图（并缓存）。
  *
  * 为什么要有缓存：同一句要求反复出图时，18 秒的图像生成没必要每次都跑；
- * 而且同一提示词固定用同一张底图，结果可复现 —— 否则用户每次点生成都换一张，
+ * 而且同一提示词固定用同一张底图，结果可复现，否则用户每次点生成都换一张，
  * 没法比较文案改动带来的差别。
  *
  * 为什么出图前先卸 Ollama 模型：8 GB 显存放不下"视觉+文案模型"和"图像模型"两套。
@@ -1347,7 +1347,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
   await mkdir(BG_CACHE_DIR, { recursive: true });
   // 缓存键用**用户输入**算，不用模型生成的英文提示词。
   // 为什么：同一句话模型每次给的英文提示词会差几个词（"early morning mist" vs
-  // "morning mist"），拿它做键就永远命不中 —— 实测同一句要求连跑两次出了两张不同的底图。
+  // "morning mist"），拿它做键就永远命不中，实测同一句要求连跑两次出了两张不同的底图。
   // 用用户输入做键，同一句要求稳定复用同一张图，结果可复现、也省一次生成。
   const key = createHash("sha1")
     .update(`${cacheKeySeed || imagePrompt}|${size}x${height}|${steps}`)
@@ -1363,7 +1363,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 
   // 注意：**不再卸载 Ollama 模型**。
   // 旧路径（ComfyUI + Qwen-Image）整模型塞满 8GB 显存，必须先把对话模型踢出去；
-  // 新路径用 model cpu offload，出图只占约 1.2GB，两者可以共存 ——
+  // 新路径用 model cpu offload，出图只占约 1.2GB，两者可以共存，
   // 少一次"踢出去再重载"，用户下次提问不用等模型冷启动。
 
   log("开始生成底图（本地 diffusers / SDXL-Turbo）");
@@ -1381,7 +1381,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
   if ((p === "/api/aigen/background" || p === "/api/comfy/background") && req.method === "POST") {
     // 走 ComfyUI 这条路时，先确保那个常驻服务真的在跑。
     // 它默认要人工点启动器（而那个启动器上还印着与实际不符的模型名），
-    // 不应要求用户手动操作 —— 有 ComfyUI 就自己拉起来，没有就如实说要装。
+    // 不应要求用户手动操作，有 ComfyUI 就自己拉起来，没有就如实说要装。
     if (p === "/api/comfy/background") {
       const up = await ensureComfyRunning({ log: (m) => console.log("[comfy] " + m) });
       if (!up.ok) {
@@ -1403,7 +1403,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     //
     // 为什么不是无条件卸载（一开始就是这么写的，结果打脸）：
     // 卸载确实让出图快了一大截（实测 100 秒 → 7 秒），但用户下一步要写文案时，
-    // qwen2.5:7b（4.7 GB）得从磁盘重新加载 —— 直接撞穿 brain.config 里 120 秒的超时，
+    // qwen2.5:7b（4.7 GB）得从磁盘重新加载，直接撞穿 brain.config 里 120 秒的超时，
     // 前端就报"模型未参与，已用本地规则兜底"。修一处慢会引入另一处慢。
     // 8 GB 卡上两者共存其实装得下（LLM 5.4 GB + SDXL 开启 cpu offload 后 1.1 GB），
     // 所以只有剩余显存连扩散模型都放不下时才动它。
@@ -1446,7 +1446,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       await mkdir(UPLOAD_DIR, { recursive: true });
       const rel = path.relative(PUBLIC_DIR, r.out).split(path.sep).join("/");
       const { size: bytes } = await stat(r.out);
-      // 刚才为了腾显存可能把文案模型请走过 —— 出图已经完事，后台把它请回来，
+      // 刚才为了腾显存可能把文案模型请走过，出图已经完事，后台把它请回来，
       // 否则用户下一步写文案要撞一次 4.7 GB 的冷加载（实测会超时）。
       if (evictedLLM) warmUpBrainLater();
       return json(res, 200, {
@@ -1608,7 +1608,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 
     // 缓存过期：**立刻返回旧内容**，同时后台去拉新的。
     //
-    // 这里原来是 `await fetchFeeds(...)` —— 注释写着"后台刷新，本次先返回能拿到的东西"，
+    // 这里原来是 `await fetchFeeds(...)`，注释写着"后台刷新，本次先返回能拿到的东西"，
     // 代码却在同步等网络。抓 Bing 要几秒到几十秒，首屏就是空的；
     // 等用户一刷新，上一次的后台请求已经写进缓存了，所以"刷新才出来"。
     // 现在改成名副其实：有旧内容就先给旧的，新的一边拉一边写缓存，下次访问自然就是新的。
@@ -1819,7 +1819,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       const ranked = await rankTemplates(q, TEMPLATES, idx, { topK });
       // 低置信提示：中心化后，真正匹配的分数通常在 0.2 以上；
       // 全部低于 0.12 基本等于"库里没有这一类"，这时不该装作匹配上了
-      //（实测「公司年会聚餐套餐」最高只有 0.08 —— 因为库里确实没有年会/团建模板）。
+      //（实测「公司年会聚餐套餐」最高只有 0.08，因为库里确实没有年会/团建模板）。
       const top = ranked[0]?.score ?? 0;
       return json(res, 200, {
         ok: true, query: q, model: idx.model,
@@ -1851,7 +1851,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 
   // 采纳反馈：用户点了一次「套用」，记下来用于检索排序。
   // 为什么记这个而不是"训练模型"：8GB 显存跑不了微调，而"哪个模板真被选走"
-  // 是最直接的相关性信号 —— 用它调排序权重，效果等价且今天就能落地。
+  // 是最直接的相关性信号，用它调排序权重，效果等价且今天就能落地。
   if (p === "/api/templates/pick" && req.method === "POST") {
     let payload;
     try { payload = JSON.parse(await readBody(req)); }
@@ -1902,7 +1902,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
   }
 
   /**
-   * /api/compose —— 大模型出内容，引擎出图。
+   * /api/compose，大模型出内容，引擎出图。
    *
    * 请求：{ brief, photos:[站内url], facts:{price,phone,address,brand}, render:true }
    * 响应：{ ok, copy, spec, url, scenes, model, ms }
@@ -1937,7 +1937,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 
     // 请求诊断：把「这次生成到底带了什么」记下来。
     // 为什么需要它：出现过"用户明明传了素材，成品里却没有那张图"的情况，
-    // 而前端状态（state.files）和服务端收到的 photos 是两回事 ——
+    // 而前端状态（state.files）和服务端收到的 photos 是两回事，
     // 没有这行日志就只能靠猜是哪一端丢的。
     console.log(`[compose] photos=${photoUrls.length} autoBg=${payload.autoBg !== false} brief=${brief.length}字 url=${photoUrls.join(",") || "(无)"}`);
 
@@ -1983,17 +1983,17 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
      * 用户的要求原话：「根据用户需要，如果没有你就自己生成，并加上引导，
      * 用户不满意可以根据引导去改」。所以这里：
      *   1. 先让模型把主题翻成图像提示词（英文，且不许含汉字）
-     *   2. 出图（有缓存就复用），失败不阻断 —— 退回纯文字版并说明原因
+     *   2. 出图（有缓存就复用），失败不阻断，退回纯文字版并说明原因
      *   3. 把提示词一并回给前端，让人看见"它画的是什么、想改就改这一行"
      */
     let autoBg = null;
     // 有生图模型就生成 AI 底图，与有没有上传照片**无关**：
     // 有照片时 AI 图铺满当氛围底、照片走顶部图带当前景（见 buildPosterSpecFrom 的 photoBand），
     // 两个都用上，而不是二选一。没有模型时这条路自然走不通，
-    // 底图退回渐变、版式退回纯排版 —— 也就是 Python + Pillow 那条路。
+    // 底图退回渐变、版式退回纯排版，也就是 Python + Pillow 那条路。
     //
     // 打卡卡例外：它的背景是 buildCheckinSpecFrom 里写死的渐变，
-    // 那个函数不接收 autoBgUrl。给它生成底图等于算完直接扔掉 ——
+    // 那个函数不接收 autoBgUrl。给它生成底图等于算完直接丢弃，
     // 实测白花 13~46 秒（一次打卡卡生成总耗时被拖到 115 秒）。
     const wantAutoBg = payload.autoBg !== false && mode !== "checkin";
     if (wantAutoBg) {
@@ -2031,7 +2031,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
         grid: c.grid,
         topLabel: facts.brand || "现场打卡 · " + (facts.brand || "○○（填你的店名）"),
       };
-      // 打卡卡现在也吃 composition —— 界面上两个模式共用同一排版式按钮，
+      // 打卡卡现在也吃 composition，界面上两个模式共用同一排版式按钮，
       // 用户点了没反应就是死控件。原来这里只传 grid，版式被整个丢掉。
       spec = buildCheckinSpecFrom(merged, {
         photoUrls,
@@ -2107,7 +2107,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     }
 
     const result = await generate(spec);
-    // 出图成功才记历史 —— 失败的不进列表，否则用户会看到一堆打不开的记录
+    // 出图成功才记历史，失败的不进列表，否则用户会看到一堆打不开的记录
     if (result.ok && result.url) {
       recordHistory({
         url: result.url,
@@ -2133,7 +2133,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       autoBg,
       validation: result.validation || null,
       error: result.error || null,
-      // generate() 失败时返回的是 {stage, message, code}，不是 {error} ——
+      // generate() 失败时返回的是 {stage, message, code}，不是 {error}，
       // 原来只映射了 error，导致失败原因（渲染器 stderr）**直接被丢掉**：
       // 前端只看到 422 + error:null，完全不知道为什么失败。
       // 表现就是"某些构图莫名失败"，查了很久。
@@ -2176,16 +2176,16 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 // ---------------------------------------------------------------- HikiTravel 反代
 //
 // 为什么要有这一段：HikiTravel（AIRI-2.0 分支）是独立项目，跑在自己的 8000 端口。
-// 门户要"做成一个项目"，就得让浏览器只看到一个源 —— 否则跨域、两个端口、
+// 门户要"做成一个项目"，就得让浏览器只看到一个源，否则跨域、两个端口、
 // 两套地址，用起来还是两个东西。所以在这里把它挂到 /wenlv/ 下。
 //
 // 为什么必须改写内容：AIRI 的页面**全部用绝对路径**引用资源
 // （实测 index.html 23 个引用里 21 个是 /js/... /css/... 这种），
-// 直接挂在子路径下会全部 404 —— <base href> 对绝对路径无效。
+// 直接挂在子路径下会全部 404，<base href> 对绝对路径无效。
 // 所以对文本类响应做前缀改写，把 /api/ /js/ /css/ 这些挂到 /wenlv/ 下。
 // 二进制（模型/图片）原样透传，不改。
 // 默认指向 main-repair（8001）。
-// 之前指过 AIRI-2.0（8000）—— 那个分支自带 public/ 界面；
+// 之前指过 AIRI-2.0（8000）， 那个分支自带 public/ 界面；
 // 现在按需求换成 main-repair（React 前端构建到 frontend/dist，只引用 /assets/）。
 // 两个都在本机，想切回去改这个环境变量即可：PF_WENLV_ORIGIN=http://127.0.0.1:8000
 const WENLV_ORIGIN = process.env.PF_WENLV_ORIGIN || "http://127.0.0.1:8001";
@@ -2230,7 +2230,7 @@ function rewriteWenlvPaths(text, kind) {
 //
 // 门户在 /wenlv/ 上拿到 ECONNREFUSED 时，直接把 8001 拉起来，而不是让用户自己去敲命令。
 // 原来那句提示里还写死了此前那台机器的绝对路径（E:\deepseck\HikiTravel-main-repair\backend），
-// 换台机器就是错的 —— 现在路径全部从本文件位置推出来，谁 clone 下来都对。
+// 换台机器就是错的，现在路径全部从本文件位置推出来，谁 clone 下来都对。
 const PF_DIR = path.dirname(fileURLToPath(import.meta.url));
 const HK_BACKEND = path.resolve(PF_DIR, "..", "hikitravel", "backend");
 const WENLV_PORT = Number(new URL(WENLV_ORIGIN).port || 8001);
@@ -2275,7 +2275,7 @@ function proxyWenlv(req, res, url) {
   //
   // 注意：磁盘上曾有 4 份 ai-ball.js（我们一份 + HikiTravel 三个静态目录各一份）。
   // 我改了组件、加了设置齿轮、换了对话接口，但 /wenlv/ 那边加载的是 main-repair
-  // 里的旧拷贝 —— 用户看到的还是老面板，反馈"设置功能仍然未实装"。
+  // 里的旧拷贝，用户看到的还是老面板，反馈"设置功能仍然未实装"。
   // 代码是对的，送错了文件，争论就没有意义。
   // 所以这里直接截胡：任何 */ai-ball.js 都从本站读。
   if (/\/ai-ball\.js$/.test(sub)) {
@@ -2308,7 +2308,7 @@ function proxyWenlv(req, res, url) {
     const ct = String(up.headers["content-type"] || "");
     // JSON 也要改：接口返回里带的是根路径
     // （实测 /api/models3d 返回 "url": "/models3d/seed-san/Seed-san.vrm"），
-    // 页面拿到后直接去加载 —— 不改的话这些资源在子路径下全是 404。
+    // 页面拿到后直接去加载，不改的话这些资源在子路径下全是 404。
     // manifest 同理，里面写的是 /icons/xxx.png。
     const isText = /text\/html|text\/css|javascript|application\/json|application\/manifest\+json|text\/plain|image\/svg/.test(ct);
 
@@ -2325,21 +2325,21 @@ function proxyWenlv(req, res, url) {
       const kind = /text\/html/.test(ct) ? "html" : /text\/css/.test(ct) ? "css" : "js";
       // ai-ball.js 是**我们自己的**文件，里面的路径已经是最终形态，不能再改写。
       // 注意：它写的是 WENLV + '/api/health'，改写会把 '/api/health' 换成
-      // '/wenlv/api/health'，结果变成 /wenlv/wenlv/api/health —— 404。
+      // '/wenlv/api/health'，结果变成 /wenlv/wenlv/api/health，404。
       const skipRewrite = /\/ai-ball\.js(\?|$)/.test(sub);
       let text = skipRewrite ? body.toString("utf8") : rewriteWenlvPaths(body.toString("utf8"), kind);
 
       // 往上游页面的 HTML 里注入悬浮球助手。
       //
       // 为什么用注入而不是改它的源码：HikiTravel 是独立项目、按约定不修改。
-      // 它的页面全都经过这个代理，所以在响应里插一行 <script> 就够了 ——
+      // 它的页面全都经过这个代理，所以在响应里插一行 <script> 就够了，
       // 它的仓库、它的构建产物都保持原样。
       // 只在 HTML 上注入；JS/CSS/JSON 不碰。
       // 防重复要按**带不带 data-api-base** 判，不能只看文件名。
       // 注意：上游页面的构建产物里已经被直接注入过一个不带属性的
       // HikiTravel 的 HTML 里**自带一份** <script src="/wenlv/ai-ball.js">，
       // 我们又要注入一份。两份都加载，而组件有防重复注入的守卫
-      // （window.__pfAiBall）—— **先加载的那个赢**。
+      // （window.__pfAiBall）， **先加载的那个赢**。
       // 原来先到的是 HikiTravel 静态目录里的旧拷贝，导致我改的组件
       // （设置齿轮、新对话接口）根本没生效，用户看到的一直是老面板。
       // 所以先把它的引用摘掉，只留我们注入的这一份。
@@ -2361,9 +2361,9 @@ function proxyWenlv(req, res, url) {
         let v = "1";
         try { v = Math.round(statSync(path.join(PUBLIC_DIR, "ai-ball.js")).mtimeMs).toString(36); } catch { /* 兜底 */ }
         const tag = `<script src="/ai-ball.js?v=${v}" data-api-base="/wenlv" defer></script>`;
-        // 旅游规划页是独立的 React 应用，它自己没有回门户的入口 ——
+        // 旅游规划页是独立的 React 应用，它自己没有回门户的入口，
         // 进去就出不来，只能改地址栏。这里补一个固定的返回链接。
-        // 旅游规划页是独立的 React 应用，它自己没有回门户的入口 ——
+        // 旅游规划页是独立的 React 应用，它自己没有回门户的入口，
         // 进去就出不来，只能改地址栏。这里补一个固定的返回链接。
         //
         // 为什么要 !important 和最大 z-index：第一版只写了 position:fixed +
@@ -2372,7 +2372,7 @@ function proxyWenlv(req, res, url) {
         //
         // 颜色不再写在行内样式里：原来 background:#ffffff 是硬编码的，
         // 旅游规划页切到深色之后，这个按钮就成了大片深色上的一块刺眼白斑
-        // （用户反馈"返回主页还是白色的"）。改成交给 CSS，按 html[data-theme] 走 ——
+        // （用户反馈"返回主页还是白色的"）。改成交给 CSS，按 html[data-theme] 走，
         // 那个页面自己会把主题写到这个属性上，所以这里不需要任何 JS 或读 localStorage。
         const backCss = `<style id="pf-back-hub-css">` +
           `#pf-back-hub{position:fixed !important;left:14px !important;top:12px !important;` +
@@ -2399,7 +2399,7 @@ function proxyWenlv(req, res, url) {
       // **改写过的 HTML 绝不能让它带缓存头。**
       //
       // 注意：反代原样透传 HikiTravel 的 cache-control，浏览器把 HTML 缓存了，
-      // 结果我后来往注入里加的「返回主页」按钮（id=pf-back-hub）一直无法送达页面 ——
+      // 结果我后来往注入里加的「返回主页」按钮（id=pf-back-hub）一直无法送达页面，
       // 服务端查得到、浏览器 DOM 里没有，实测 found:false。
       // 只要这段代码还在往页面里插东西，这个响应就是动态的，不能缓存。
       if (kind === "html") {
@@ -2425,7 +2425,7 @@ function proxyWenlv(req, res, url) {
       <p style="color:#5c6470">已自动启动，等几秒（首次要加载模型）。要是自动启动没成功，在项目目录执行：</p>
       <pre style="background:#f7f8fa;border:1px solid #e9ebef;padding:14px 16px;border-radius:10px;overflow:auto">cd hikitravel/backend
 .venv/Scripts/python -m uvicorn app.main:app --host 127.0.0.1 --port ${WENLV_PORT}</pre>
-      <p style="color:#5c6470">启动后刷新本页即可。<b>海报生成不受影响</b> —— 返回门户点左边那张卡就能用。</p>
+      <p style="color:#5c6470">启动后刷新本页即可。<b>海报生成不受影响</b>：返回门户点左边那张卡就能用。</p>
       <p style="color:#8b929e;font-size:13px">原始错误：${e.message}</p>
       <p><a href="/hub.html" style="color:#ff5a3c;font-weight:600">← 返回主界面</a></p></body>`);
   });
@@ -2437,7 +2437,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const isApi = url.pathname.startsWith("/api/");
   const t0 = Date.now();
-  // 请求日志：加它是为了排查"请求发出去但服务端不响应"这类问题 ——
+  // 请求日志：加它是为了排查"请求发出去但服务端不响应"这类问题，
   // 没有日志的时候只能靠猜，而猜错过好几次。
   if (isApi) {
     res.on("finish", () => {
@@ -2503,7 +2503,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  渲染器      ${FORGE_ROOT}`);
   console.log(`  渲染器就绪  ${existsSync(path.join(FORGE_ROOT, "render.py")) ? "是" : "否（检查 renderer 目录）"}`);
   {
-    // 启动就把"本机有哪个画图模型、选中了谁"打出来 ——
+    // 启动就把"本机有哪个画图模型、选中了谁"打出来，
     // 免得用户以为在跑 SDXL、其实用的是别的（或反过来：有模型却没被用上）
     const ms = modelStatus();
     const sel = ms.selected;

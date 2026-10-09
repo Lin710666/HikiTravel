@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pf-system-theme-check.mjs —— 验"主页跟着电脑设置"这一条。
+ * pf-system-theme-check.mjs，验"主页跟着电脑设置"这一条。
  *
  * "跟随系统"最容易做假的地方是：它只有**第一次**生效。
  * 因为实现里常常会在挂载时把推导出来的主题写回 localStorage，

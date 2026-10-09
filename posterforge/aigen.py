@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""aigen.py —— 不依赖 ComfyUI 的本地出图。
+"""aigen.py：不依赖 ComfyUI 的本地出图。
 
 为什么另起一个出图器：ComfyUI 那套要用户手动点启动器（而且启动器上印着
 MiniMax-H3 的字样，与实际用的 Qwen-Image 不符），链路里多一个必须常驻的服务。
@@ -12,7 +12,7 @@ MiniMax-H3 的字样，与实际用的 Qwen-Image 不符），链路里多一个
   选它的理由：1~4 步就能出图，在 8GB 卡上几秒完成；而底图上面要压遮罩、
   叠文字，对极致细节的需求不高。
 
-必须用装了 CUDA 版 torch 与 diffusers 的解释器跑 —— 通常是 ComfyUI 便携版自带的那个：
+必须用装了 CUDA 版 torch 与 diffusers 的解释器跑：通常是 ComfyUI 便携版自带的那个：
     python aigen.py --prompt "..." --out x.png
 
 输出：stdout 打印**一行** JSON，便于 Node 侧解析。
@@ -37,7 +37,7 @@ DEFAULT_MODEL = os.environ.get("PF_AIGEN_MODEL") or os.path.join(
 OLLAMA = os.environ.get("PF_OLLAMA", "http://127.0.0.1:11434")
 
 # 引擎名跟着模型走。原来写死 "diffusers/SDXL-Turbo"，换了模型之后
-# 界面和日志还报 SDXL-Turbo —— 会让人以为"没换成功"，排查方向直接跑偏。
+# 界面和日志还报 SDXL-Turbo，会让人以为"没换成功"，排查方向直接跑偏。
 ENGINE = os.environ.get("PF_AIGEN_ENGINE") or ("diffusers/" + os.path.basename(os.path.normpath(DEFAULT_MODEL)))
 
 _pipe = None  # 进程内缓存（为将来做常驻 worker 留的口子）

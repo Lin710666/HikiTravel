@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 浙里文旅 · 海报与行程 v8.0 —— Linux / macOS 一键启动
+# 浙里文旅 · 海报与行程 v8.0，Linux / macOS 一键启动
 #
 # 行为与 Windows 的「启动全部.bat」一致：先部署，再启动 + 保活。
 set -e

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""extract-palette.py —— 从图片里提取"版式灵感"配色元数据。
+"""extract-palette.py：从图片里提取"版式灵感"配色元数据。
 
-只输出**颜色数值**，不复制、不嵌入任何图片内容 ——
+只输出**颜色数值**，不复制、不嵌入任何图片内容，
 这是「联网轮换」的版权边界：拿来的图有版权（Bing/图库），
 但"这张图的色调倾向"是事实数据，不是作品本身。
 
@@ -31,7 +31,7 @@ def extract(path):
     im = im.resize((80, 80), Image.LANCZOS)
     px = list(im.getdata())
 
-    # 按明度排序取三档：暗部 / 中间调 / 亮部 —— 对应"底色→过渡→强调色"
+    # 按明度排序取三档：暗部 / 中间调 / 亮部，对应"底色→过渡→强调色"
     px_sorted = sorted(px, key=lambda p: 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2])
     n = len(px_sorted)
 

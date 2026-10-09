@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-poster-forge / bg.py —— 背景与调色板（重写版，单一职责）
+poster-forge / bg.py：背景与调色板（重写版，单一职责）
 
 存在的理由：原 render.py 里的调色板解析与背景生成在反复改动中变得难以推理
 （同名变量多、分支交叉），出现"主题不生效但图看起来正常"的隐性 bug。
@@ -60,7 +60,7 @@ def parse_hex(value: Any, default: Optional[RGBA] = None) -> Optional[RGBA]:
 def resolve_color(value: Any, palette: Optional[Dict[str, str]] = None) -> Optional[RGBA]:
     """
     解析颜色：既支持 '#RRGGBB' 字面量，也支持调色板变量名。
-    palette 显式传入 —— 不读任何模块级状态，因此不存在"时序导致主题失效"。
+    palette 显式传入：不读任何模块级状态，因此不存在"时序导致主题失效"。
     """
     if value is None:
         return None

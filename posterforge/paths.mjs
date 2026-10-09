@@ -1,19 +1,19 @@
 /**
- * paths.mjs —— 全项目「外部程序在哪」的唯一来源。
+ * paths.mjs，全项目「外部程序在哪」的唯一来源。
  *
  * 为什么要单独抽这一个文件：
- * 项目原来把本机路径写死在十几处 —— `E:\devenv\Scripts\python.exe`、
+ * 项目原来把本机路径写死在十几处，`E:\devenv\Scripts\python.exe`、
  * `E:\ComfyUI_windows_portable\python_embeded`、`E:\deepseck\site`…
  * 换一台机器、换一个盘符就整条链路全废，而且报错信息指向的是**别人电脑上的目录**，
  * 拿到报错的人根本查不出所以然（表现为"接口 200 但出图全废"这种最难查的样子）。
  *
  * 现在所有外部依赖的查找统一按这个顺序，谁 clone 下来都不需要改代码：
- *   1. 显式环境变量 —— 部署的人说了算，最高优先级
- *   2. 项目内的相对位置 —— 跟着仓库走（.venv 之类）
- *   3. 系统环境变量拼出来的常见安装位置 —— 不写死盘符，Windows 装在 D: 也对
- *   4. PATH —— 交给操作系统解析
+ *   1. 显式环境变量，部署的人说了算，最高优先级
+ *   2. 项目内的相对位置，跟着仓库走（.venv 之类）
+ *   3. 系统环境变量拼出来的常见安装位置，不写死盘符，Windows 装在 D: 也对
+ *   4. PATH，交给操作系统解析
  *
- * 注意：这里只负责"找"，找不到就返回 null / 交给 PATH，不抛异常 ——
+ * 注意：这里只负责"找"，找不到就返回 null / 交给 PATH，不抛异常，
  * 调用方各自决定"找不到"是致命错误还是降级。
  */
 import { existsSync } from "node:fs";
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 /** 站点根（本文件所在目录，即 posterforge/）。 */
 export const SITE_ROOT = path.dirname(fileURLToPath(import.meta.url));
-/** 仓库根 —— 与站点同级的 renderer/、hikitravel/ 都在这一层。 */
+/** 仓库根，与站点同级的 renderer/、hikitravel/ 都在这一层。 */
 export const REPO_ROOT = path.dirname(SITE_ROOT);
 
 // ---------------------------------------------------------------- 系统目录
@@ -37,7 +37,7 @@ const LOCALAPPDATA = process.env.LOCALAPPDATA || "";
 
 /**
  * 从候选里挑第一个「存在」的。
- * 纯命令名（不含分隔符）直接返回，交给 PATH 解析 —— 这是有意的：
+ * 纯命令名（不含分隔符）直接返回，交给 PATH 解析，这是有意的：
  * 存在性由运行时决定，这里提前 existsSync 反而会把 PATH 里的命令判死。
  */
 function firstUsable(candidates) {
@@ -94,7 +94,7 @@ export function findForgeRoot() {
 }
 
 // ---------------------------------------------------------------- ComfyUI
-/** ComfyUI 便携版根目录（找不到返回 null）——Qwen 那类权重要靠它才认得。 */
+/** ComfyUI 便携版根目录（找不到返回 null），Qwen 那类权重要靠它才认得。 */
 export function findComfyRoot() {
   const roots = [
     process.env.PF_COMFY_ROOT,
@@ -107,7 +107,7 @@ export function findComfyRoot() {
     path.join(REPO_ROOT, "ComfyUI"),
   ].filter(Boolean);
   for (const r of roots) {
-    // 便携版有 run_nvidia_gpu.bat；源码版有 main.py —— 认任意一个都算找到了
+    // 便携版有 run_nvidia_gpu.bat；源码版有 main.py，认任意一个都算找到了
     if (existsSync(path.join(r, "main.py")) || existsSync(path.join(r, "run_nvidia_gpu.bat"))
       || existsSync(path.join(r, "ComfyUI", "main.py"))) return r;
   }
@@ -115,7 +115,7 @@ export function findComfyRoot() {
 }
 
 /**
- * ComfyUI 便携版自带的解释器 —— 只在 HEIC/HEIF 解不开码时借用
+ * ComfyUI 便携版自带的解释器，只在 HEIC/HEIF 解不开码时借用
  * （便携版里 av / cv2 / PIL 都是现成的）。
  *
  * 位置由 `PF_COMFY_ROOT` 指定；没指定就在系统盘上的常见位置找一遍。
@@ -161,7 +161,7 @@ export function findOllama() {
  * 这些脚本原来各自把 Edge / Chrome 的安装路径抄了一遍并写死 C 盘。
  * 现在统一从这里取：`PF_BROWSER` 优先，然后按系统目录拼常见安装位置。
  *
- * 返回 null 表示一个都没找到 —— 调用方给一句人能看懂的提示，别默默失败。
+ * 返回 null 表示一个都没找到，调用方给一句人能看懂的提示，别默默失败。
  */
 export function findBrowser() {
   return firstUsable([

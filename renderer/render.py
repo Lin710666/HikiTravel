@@ -8,7 +8,7 @@ poster-forge renderer
 
 设计原则（这套东西存在的理由）：
   1. 文字、logo、二维码、价格 永远走本引擎，永远不进扩散模型
-     —— 扩散模型画不准中文，而 B2B 客户对文字准确性是零容忍。
+    ：扩散模型画不准中文，而 B2B 客户对文字准确性是零容忍。
   2. render(spec) 是纯函数：同样的 spec 永远得到同样的图。
      可复现 => 可测试 => 可回滚。模型换代不影响业务代码。
   3. AI 只出现在两个可替换的适配器位置：
@@ -56,7 +56,7 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 图片搜索根。默认只有 poster-forge 自身；
-# 站点会把 public/ 也注册进来 —— 用户上传的照片存在那里，
+# 站点会把 public/ 也注册进来，用户上传的照片存在那里，
 # 而 spec 里的路径是相对站点的（如 "uploads/xxx.png"）。
 # 不做这件事会出现"上传成功但渲染报图片不存在"。
 IMAGE_ROOTS = [HERE]
@@ -86,7 +86,7 @@ def resolve_image_path(src: str) -> str:
 def validate_image_roots() -> None:
     """启动时把 PF_IMAGE_ROOT 指定的目录注册为图片搜索根。
 
-    站点（site/server.mjs）会把它的 public/ 传进来 —— 用户上传的照片存那里，
+    站点（site/server.mjs）会把它的 public/ 传进来：用户上传的照片存那里，
     而 spec 里的路径是相对站点的。用环境变量而不是命令行参数，
     故意避免 argparse 把多余参数吞掉带来的意外。
     """
@@ -131,7 +131,7 @@ DEFAULT_FONT = "sans"
 
 
 class RenderError(Exception):
-    """输入不合法 —— 这是给调用方看的错误，不是崩溃。"""
+    """输入不合法：这是给调用方看的错误，不是崩溃。"""
 
 
 # ---------------------------------------------------------------- 小工具
@@ -215,7 +215,7 @@ def load_font(name: str, size: int) -> "ImageFont.FreeTypeFont":
 
 
 def is_cjk(ch: str) -> bool:
-    """判断是否 CJK/全角字符 —— 决定换行时能否逐字断开。"""
+    """判断是否 CJK/全角字符：决定换行时能否逐字断开。"""
     o = ord(ch)
     return (
         0x2E80 <= o <= 0x9FFF      # CJK 部首 ～ 统一表意文字
@@ -325,7 +325,7 @@ def wrap_text(text: str, font: "ImageFont.FreeTypeFont", max_width: int) -> List
 
 
 def measure(text: str, font: "ImageFont.FreeTypeFont") -> Tuple[int, int]:
-    """(宽, 高) —— 用 getbbox 的真实墨迹范围，避免不同字体的行高差异。"""
+    """(宽, 高)：用 getbbox 的真实墨迹范围，避免不同字体的行高差异。"""
     if not text:
         return (0, font.size)
     box = font.getbbox(text)
@@ -343,7 +343,7 @@ def fit_font_size(
 ) -> Tuple["ImageFont.FreeTypeFont", List[str]]:
     """
     二分找最大可用字号：让文本在给定位数/宽高内恰好放得下。
-    这是"版式自适应"的核心 —— 文案长短不定，标题不能溢出也不能太小。
+    这是"版式自适应"的核心：文案长短不定，标题不能溢出也不能太小。
     """
     lo, hi = min_size, max_size
     best_font = load_font(font_name, min_size)
@@ -375,7 +375,7 @@ def make_background(bg: dict, size: Tuple[int, int], palette: Optional[dict] = N
     bg     : background 配置本身（不是整个 spec！）
     palette: 调色板；不传则从最近的 set_palette 状态取。
 
-    注意：背景图也要走 resolve_image_path —— 否则会出现
+    注意：背景图也要走 resolve_image_path：否则会出现
     "图层里的图片找得到、背景图却找不到"这种两套解析逻辑并存的问题。
     """
     if palette is None:
@@ -465,7 +465,7 @@ def draw_text(canvas: "Image.Image", el: dict) -> None:
     文本图元。要点：
       - 自动折行 + 自动缩字号（fit）
       - 左右对齐、行高倍率
-      - 阴影 / 描边 —— 保证文字压在照片上也读得清
+      - 阴影 / 描边，保证文字压在照片上也读得清
     """
     w, h = canvas.size
     text = el.get("text")
@@ -483,7 +483,7 @@ def draw_text(canvas: "Image.Image", el: dict) -> None:
         return int(base * float(v)) if v is not None and float(v) <= 1 else (int(v) if v is not None else None)
 
     # 宽度上限可以写在元素级，也可以写在 fit 里。
-    # **必须两处都读** —— 早先只读元素级，导致
+    # **必须两处都读**，早先只读元素级，导致
     # `fit: { maxWidth: 0.864 }` 这种写法被完全忽略，
     # 长句不折行、直接溢出被裁掉（实测"风大记得带外套"被切掉）。
     fit = el.get("fit") or {}
@@ -507,7 +507,7 @@ def draw_text(canvas: "Image.Image", el: dict) -> None:
     line_h = int(round(font.size * float(el.get("lineHeight", 1.28))))
 
     # 兜底：万一还有某行超出 maxWidth（非 fit 模式、或极端长词），
-    # 强制到能放下为止。**被裁掉的文字比缩小字号严重得多** ——
+    # 强制到能放下为止。**被裁掉的文字比缩小字号严重得多**，
     # 裁剪是静默丢内容，用户看不到自己写的东西。
     if max_width:
         guard = 0
@@ -665,7 +665,7 @@ def draw_image(canvas: "Image.Image", el: dict) -> None:
         a = tile.getchannel("A").point(lambda v: int(v * opacity))
         tile.putalpha(a)
 
-    # 图片描边（多图网格用它代替统一外框 —— 2 行时外框会切过第二行）
+    # 图片描边（多图网格用它代替统一外框，2 行时外框会切过第二行）
     stroke = resolve_color(el.get("stroke"))
     if stroke is not None:
         sw = float(el.get("strokeWidth", 2))
@@ -721,7 +721,7 @@ def draw_qr(canvas: "Image.Image", el: dict) -> None:
 
 # ---------------------------------------------------------------- 装饰
 def draw_ornaments(canvas: "Image.Image", spec: dict, scale: float) -> None:
-    """四角装饰线 —— 让"政务/高端"版式不显得空。纯几何，可安全缩放到任意尺寸。"""
+    """四角装饰线：让"政务/高端"版式不显得空。纯几何，可安全缩放到任意尺寸。"""
     orn = (spec.get("theme") or {}).get("ornaments")
     if not orn:
         return
@@ -757,7 +757,7 @@ ELEMENT_DRAWERS = {
 def resolve(root: dict, value: Any, depth: int = 0) -> Any:
     """
     递归解析 @layout: 引用。
-    layout 提供「版式骨架」，spec 提供「内容」——两者分离是关键：
+    layout 提供「版式骨架」，spec 提供「内容」，两者分离是关键：
     换版式不用改内容，换内容不用改版式。
     """
     if depth > 8:
@@ -841,7 +841,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--out", help="输出 PNG 路径（默认 out/<spec名>.png）")
     ap.add_argument("--overrides", help="JSON 字符串，覆盖 spec 字段")
     # 图片根目录：spec 里的图片路径（uploads/xxx.jpg、uploads/.bgcache/bg-x.png）
-    # 是**相对站点 public 目录**的，而渲染器默认只认自己所在目录 ——
+    # 是**相对站点 public 目录**的，而渲染器默认只认自己所在目录，
     # 不登记这个根目录，凡是引用图片的规格都会解析失败。
     # 可重复传，先传的优先。
     ap.add_argument("--image-root", action="append", default=[],
@@ -878,7 +878,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     os.makedirs(os.path.dirname(out), exist_ok=True)
     img.save(out, "PNG")
 
-    # 附带落一份最终 spec —— 物料可追溯：这张图是用哪份 spec 渲的
+    # 附带落一份最终 spec，物料可追溯：这张图是用哪份 spec 渲的
     with open(os.path.splitext(out)[0] + ".spec.json", "w", encoding="utf-8") as fh:
         json.dump(spec, fh, ensure_ascii=False, indent=2)
 

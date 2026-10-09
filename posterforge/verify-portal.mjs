@@ -78,7 +78,7 @@ check("一张指向旅游规划 /wenlv/", cards.some((c) => c.h === "/wenlv/"));
 console.log("\n[3] AI 助手：胶囊 → 白色面板");
 check("胶囊可见", await ev("document.querySelector('#aiPill').getClientRects().length > 0"));
 // 面板用的是 opacity:0 + pointer-events:none 隐藏（不是 display:none），
-// 所以 getClientRects() 照样返回矩形 —— 那种量法在这里是错的。
+// 所以 getClientRects() 照样返回矩形，那种量法在这里是错的。
 // 判断"用户看不见"要看 opacity 和能不能点。
 const initHidden = await ev(`(() => {
   const cs = getComputedStyle(document.querySelector('#aiPanel'));

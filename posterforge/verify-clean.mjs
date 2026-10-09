@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * verify-clean.mjs —— 验证「爆火案例 / 工具箱 / STORY 三点钟」三节删除后的真实页面。
+ * verify-clean.mjs，验证「爆火案例 / 工具箱 / STORY 三点钟」三节删除后的真实页面。
  *
  * 为什么单独写一个：shots.mjs 的自检里还断言 #caseGrid 有卡片，
  * 那套断言现在是错的（它验的是已删除的东西）。删除类改动必须验"它们真的没了"，
- * 而且要验"删完之后剩下的东西还能用"——所以这里顺手把模板预览弹层也点一遍。
+ * 而且要验"删完之后剩下的东西还能用"，所以这里顺手把模板预览弹层也点一遍。
  *
  * 用法：node verify-clean.mjs [baseUrl]
  */
@@ -21,7 +21,7 @@ const OUT = path.join(__dirname, ".work");
 const PROFILE = path.join(OUT, "cdp-profile");
 const PORT = Number(process.env.CDP_PORT || 9333);
 
-// 浏览器交给 paths.mjs（PF_BROWSER 可覆盖）—— 原来三条路径写死 C 盘
+// 浏览器交给 paths.mjs（PF_BROWSER 可覆盖）， 原来三条路径写死 C 盘
 const BROWSERS = [requireBrowser()];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

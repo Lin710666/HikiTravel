@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * comfy-test.mjs —— 验证 ComfyUI 客户端与真实 Qwen-Image-2.1 工作流。
+ * comfy-test.mjs，验证 ComfyUI 客户端与真实 Qwen-Image-2.1 工作流。
  *
  * 分级测试，便于定位问题出在哪一层：
  *   1. 探活 + 环境

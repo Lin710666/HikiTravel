@@ -1,5 +1,5 @@
 /**
- * comfy.mjs —— ComfyUI 客户端：提交工作流 → 轮询 → 取回图片
+ * comfy.mjs，ComfyUI 客户端：提交工作流 → 轮询 → 取回图片
  *
  * 设计要点：
  *   1. 用**官方模板的真实拓扑**（节点名、插槽顺序都从
@@ -110,7 +110,7 @@ export async function isUp(host = DEFAULT_HOST) {
   }
 }
 
-/** 检查模型文件是否在 ComfyUI 可见列表里 —— 提前发现"文件没放对位置" */
+/** 检查模型文件是否在 ComfyUI 可见列表里，提前发现"文件没放对位置" */
 export async function checkModels(host = DEFAULT_HOST, models = DEFAULT_MODELS) {
   const info = await jget(`http://${host}/object_info`, 60000);
   const list = (node, field) => info?.[node]?.input?.required?.[field]?.[0] || [];

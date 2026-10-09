@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * shot-adlaw.mjs —— 把广告法预检这块的**三个状态**分别截图存下来给人看。
+ * shot-adlaw.mjs，把广告法预检这块的**三个状态**分别截图存下来给人看。
  * 光看断言日志不够，得看渲染出来的样子：警告条会不会挤坏版式、按钮位置对不对。
  */
 import { spawn } from "node:child_process";

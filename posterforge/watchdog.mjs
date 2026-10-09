@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * watchdog.mjs —— 守门狗：谁停了就把它拉起来。
+ * watchdog.mjs，守门狗：谁停了就把它拉起来。
  *
- * 为什么需要它：这两个服务反复自己死（实测日志末尾是 ^C^C^C^C^C ——
+ * 为什么需要它：这两个服务反复自己死（实测日志末尾是 ^C^C^C^C^C，
  * 被 Ctrl+C 信号打死，不是崩溃；也可能是别的进程收控制台时被连带）。
  * 每次都要人工去拉，用户看到的就是"又打不开了"。
  *
  * 守三样：
  *   8800  海报站点（node server.mjs）
- *   8001  旅游规划（uvicorn app.main:app）—— 门户的 /wenlv/ 反代指向它
- *   11434 Ollama —— 站点也能自己拉，但这里一起守着，首屏就不用等
+ *   8001  旅游规划（uvicorn app.main:app）， 门户的 /wenlv/ 反代指向它
+ *   11434 Ollama，站点也能自己拉，但这里一起守着，首屏就不用等
  *
  * 用法：node watchdog.mjs          （前台跑，Ctrl+C 停）
  *       node watchdog.mjs --once   （只检查一次，不循环；给测试用）
  *
  * 注意：它自己必须**脱离父进程**跑（用 WMI 或 start /b 起），
- * 否则父进程一收工它就跟着没了 —— 那样等于没守。
+ * 否则父进程一收工它就跟着没了，那样等于没守。
  *
  * 和仓库根的 start.mjs 的关系：**职责是重复的**（两者都守 8800/8001/11434）。
  * 整个项目请用根目录的「启动全部.bat」→ start.mjs：它还会先跑部署检查，
@@ -100,7 +100,7 @@ async function isUp(svc, timeoutMs = 2500) {
 
 const once = process.argv.includes("--once");
 const INTERVAL_MS = Number(process.env.PF_WATCH_INTERVAL || 20000);
-// 刚拉起来还没就绪时不要立刻又拉一个 —— 记下"上次尝试时间"，给足启动窗口
+// 刚拉起来还没就绪时不要立刻又拉一个，记下"上次尝试时间"，给足启动窗口
 const RETRY_GRACE_MS = 45000;
 const lastTry = new Map();
 

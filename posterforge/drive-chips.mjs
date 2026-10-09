@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * drive-chips.mjs —— 验证「通用关键词模板 + 图片当底图」这条新链路。
+ * drive-chips.mjs，验证「通用关键词模板 + 图片当底图」这条新链路。
  *
  * 验的是四件事，每一件都必须有实证，不能靠读代码下结论：
  *   1. 六个 chip 填入的文案是**通用的**（不含任何示例店名/编造数据）
  *   2. 点 chip 后输入框真的拿到结构化多行文案，且解析器能取出标题/卖点/价格/电话
  *   3. 上传照片后提示语变成「照片当底图」
  *   4. 生成出来的海报**像素上确实用了那张照片**（不是渐变）
- *      —— 做法：先把同一张图铺满画布，取几个采样点跟生成图比色差，
+ *，做法：先把同一张图铺满画布，取几个采样点跟生成图比色差，
  *         渐变背景的色差会非常大，照片背景会很小。
  */
 
@@ -307,7 +307,7 @@ async function main() {
     const hint2 = await cdp.evalJs("document.querySelector('#promptHint').textContent");
     check("提示语说明多图会拼成图带", /图带/.test(hint2), hint2.slice(0, 60));
 
-    // 版面重叠检查：这次真实踩过 —— 标题压在照片上、价格块被顶出画布。
+    // 版面重叠检查：这次真实踩过，标题压在照片上、价格块被顶出画布。
     // 两件都要盯住：文字与拼图带不重叠，且所有元素留在 0~1 之内。
     const titleL = (spec2.layers || []).find((l) => l.name === "title");
     const stripImg = (spec2.layers || []).find((l) => l.name === "photo");
@@ -365,7 +365,7 @@ async function main() {
 
   // 第 4 节验的是"单张照片铺满底图"，而第一张（带品红指纹的那张）必须留在列表首位。
   // 注意要撤**后面那张**：早先误删了第一张，第 4 节拿第二张当底图，
-  // 指纹自然量不到，白白报了一次假失败。
+  // 指纹自然量不到，平白报了一次假失败。
   console.log("  撤掉后加的那张，只留第一张（第 4 节要验单图铺底）");
   await cdp.evalJs(`(async () => {
     for (let round = 0; round < 12; round++) {
@@ -389,7 +389,7 @@ async function main() {
   );
   check("已回到只剩 1 张照片", leftCount === 1, `剩 ${leftCount} 张`);
   // 留下的必须是带品红指纹的那张。
-  // 注意：不能拿"字节数等于源文件"来判 —— 上传后服务端会重新编码（转正 + 去 EXIF），
+  // 注意：不能拿"字节数等于源文件"来判，上传后服务端会重新编码（转正 + 去 EXIF），
   // 尺寸会变（39 KB → 26 KB）。判据用尺寸比例 + 指纹像素，别用字节数。
   const leftFiles = JSON.parse(await cdp.evalJs(
     "JSON.stringify(window.posterforge.state.files.filter(f => f.uploaded && f.url))"

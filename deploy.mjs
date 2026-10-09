@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * deploy.mjs —— 一键部署：把一个空机器变成能跑的项目。
+ * deploy.mjs，一键部署：把一个空机器变成能跑的项目。
  *
  * 设计取舍：
  *   1. **只依赖 Node 和 Python**，不引入额外包管理器。这个项目本来就只有
  *      一个 Python 依赖（Pillow 等，见 renderer/requirements.txt）和零个 npm 依赖，
  *      为了"一键部署"再去装一堆部署框架是本末倒置。
  *   2. **每步都能单独重跑**。部署失败是常态（网络、权限、端口占用），
- *      所以每步先探测"是不是已经就绪"，就绪就跳过 —— 不用从头再来。
+ *      所以每步先探测"是不是已经就绪"，就绪就跳过，不用从头再来。
  *   3. **不猜路径**。原代码里写死了 `E:\devenv\Scripts\python.exe` 这类本机路径，
  *      换台机器就崩。这里改成：探测 → 探测不到就问用户 → 写进 .env。
  *   4. **不静默失败**。每步失败都打清楚原因和补救办法，而不是抛一句
@@ -33,7 +33,7 @@ const CHECK_ONLY = process.argv.includes("--check");
 const FORCE = process.argv.includes("--force");
 const IS_WIN = process.platform === "win32";
 // Windows 上 npm 实际是 npm.cmd（不是 .exe）。run() 用的是 shell:false，
-// 直接 spawn "npm" 会 ENOENT —— 表现是「npm install 失败：」后面空白、零点几秒就返回。
+// 直接 spawn "npm" 会 ENOENT，表现是「npm install 失败：」后面空白、零点几秒就返回。
 const NPM = IS_WIN ? "npm.cmd" : "npm";
 
 let failed = 0;
@@ -43,9 +43,9 @@ const warn = (m) => console.log(`  \x1b[33m!\x1b[0m ${m}`);
 const bad = (m) => { console.log(`  \x1b[31m✗\x1b[0m ${m}`); failed++; };
 const info = (m) => console.log(`    ${m}`);
 
-/** 跑一条命令，返回 {code, out}。不抛异常 —— 调用方自己判断。 */
+/** 跑一条命令，返回 {code, out}。不抛异常，调用方自己判断。 */
 function run(cmd, args, opts = {}) {
-  // Windows 上 .cmd / .bat（最典型就是 npm.cmd）不能直接 spawn —— Node 会 ENOENT，
+  // Windows 上 .cmd / .bat（最典型就是 npm.cmd）不能直接 spawn，Node 会 ENOENT，
   // 这类命令必须经过 shell。参数都是我们自己写死的（install / run build），无转义风险。
   const needShell = IS_WIN && /\.(cmd|bat)$/i.test(cmd);
   const r = spawnSync(cmd, args, {
@@ -81,12 +81,12 @@ else bad(`Node 版本太低（${process.versions.node}），需要 18 以上`);
 // 为什么不写死路径：原代码写死了 E:\devenv\Scripts\python.exe，
 // 换台机器就是一句"找不到文件"，用户完全不知道为什么。
 //
-// **必须能用 pip 才算数。** 踩过的坑：只检查 `python --version`，
+// **必须能用 pip 才算数。** 实测教训：只检查 `python --version`，
 // 结果挑中一个没有 pip 的解释器，下一步 `-m pip install` 才炸，
 // 报的还是 "E:\python.exe: No module named pip" 这种看不出所以然的错。
 // **第一优先级：brain.config.json 里已经写着的那个。**
 // 它在这台机器上跑通过（站点正用它渲染），比 PATH 里随便挑一个可靠得多。
-// 踩过的坑：只看 PATH，挑中一个没 pip 的解释器，还报出
+// 实测教训：只看 PATH，挑中一个没 pip 的解释器，还报出
 // "E:\python.exe: No module named pip" 这种查不出所以然的错。
 const cfgPy = [];
 try {
@@ -105,7 +105,7 @@ const pyCandidates = [
     : ["python3", "python", "/usr/bin/python3", "/usr/local/bin/python3"]),
 ];
 // **没有 pip 不等于没有 Python。**
-// 这台机器就是反例：Python 好好的、Pillow 也装着，但 `-m pip` 不可用 ——
+// 这台机器就是反例：Python 好好的、Pillow 也装着，但 `-m pip` 不可用，
 // 站点渲染一切正常。所以这里只按**版本**挑，pip 有没有记下来，
 // 等第 3 步真需要装东西时再拿这个信息去提示（见那里的三种办法）。
 const pyNotes = [];
@@ -129,7 +129,7 @@ if (env.python) {
 
 // uv：HikiTravel 用 uv 管依赖。没有的话退回 pip/venv
 if (has("uv")) { env.uv = "uv"; ok("uv（旅游规划后端的依赖管理器）"); }
-else warn("没有 uv —— 旅游规划后端会退回 venv + pip（慢一些，但能用）");
+else warn("没有 uv：旅游规划后端会退回 venv + pip（慢一些，但能用）");
 
 // Ollama：没有也能跑，只是文案会退回确定性规则
 const ollamaBin = IS_WIN
@@ -137,7 +137,7 @@ const ollamaBin = IS_WIN
      ...(process.env.ProgramFiles ? [path.join(process.env.ProgramFiles, "Ollama", "ollama.exe")] : [])].find((p) => existsSync(p))
   : null;
 if (ollamaBin || has("ollama")) { env.ollama = ollamaBin || "ollama"; ok("Ollama（本地模型）"); }
-else warn("没有 Ollama —— 海报仍能生成，但文案会用内置规则而不是模型写（见 DEPLOY.md 第 4 节）");
+else warn("没有 Ollama：海报仍能生成，但文案会用内置规则而不是模型写（见 DEPLOY.md 第 4 节）");
 
 if (CHECK_ONLY) {
   console.log(`\n体检结束${failed ? `，${failed} 项有问题` : "，环境没问题"}`);
@@ -156,13 +156,13 @@ ok("运行目录就绪");
 step("3/6 Python 依赖（渲染引擎）");
 // **先看能力，再看包管理器。**
 //
-// 踩过的坑：原来一上来就查 `-m pip --version`，没有 pip 就判"环境不合格"。
-// 但这台机器的 Python 恰恰没有 pip，而 Pillow 早就装好了、站点渲染正常 ——
+// 实测教训：原来一上来就查 `-m pip --version`，没有 pip 就判"环境不合格"。
+// 但这台机器的 Python 恰恰没有 pip，而 Pillow 早就装好了、站点渲染正常，
 // 脚本却在报错。判断标准应该是"**能不能 import**"，不是"有没有 pip"。
 // 依赖装法有很多种（pip / uv / 系统包 / 便携版自带），不该假设只有一种。
 // **只把 Pillow 当必需，qrcode 当可选。**
-// 踩过的坑：探测要求"PIL 和 qrcode 都在"，结果本机（PIL 有、qrcode 没有）
-// 被判成"缺依赖"，而实际渲染完全正常 —— 二维码只是打卡卡上的可选图元。
+// 实测教训：探测要求"PIL 和 qrcode 都在"，结果本机（PIL 有、qrcode 没有）
+// 被判成"缺依赖"，而实际渲染完全正常，二维码只是打卡卡上的可选图元。
 // 判断必需依赖时把可选项也算进去，会凭空造出一个不存在的故障。
 const probeMods = "import PIL;print(PIL.__version__)";
 const probeQr = "import qrcode;print('+qr')";
@@ -192,7 +192,7 @@ if (m.ok && !FORCE) {
     if (r.code === 0) ok("渲染依赖装好了");
     else bad(`装依赖失败：${r.out.slice(-300)}`);
   }
-  // 装完复检一次 —— 不能只信安装命令的退出码
+  // 装完复检一次，不能只信安装命令的退出码
   if (!m.ok) {
     m = MODULES_OK();
     if (m.ok) ok(`复检通过：Pillow ${m.ver.split(" ")[0]}`);
@@ -207,8 +207,8 @@ const hkBackend = path.join(HK, "backend");
   const venvPy = path.join(venv, IS_WIN ? "Scripts" : "bin", IS_WIN ? "python.exe" : "python");
 
   // 「装好了」的判据不是「目录在」，而是「依赖真能导入」。
-  // 踩过的坑：.venv 目录在、但里面一个包都没装（建了空壳），
-  // deploy 看到目录就报「.venv 已存在」跳过了安装 —— 于是 8001 一启动就
+  // 实测教训：.venv 目录在、但里面一个包都没装（建了空壳），
+  // deploy 看到目录就报「.venv 已存在」跳过了安装，于是 8001 一启动就
   // ModuleNotFoundError: No module named 'uvicorn'，用户在前端只看到「服务没在运行」。
   const depsReady = () => {
     if (!existsSync(venvPy)) return false;
@@ -224,7 +224,7 @@ const hkBackend = path.join(HK, "backend");
     info("venv + pip（没有 uv，会慢一些）…");
     run(env.python || "python", ["-m", "venv", venv], { timeout: 180000 });
     const pip = path.join(venv, IS_WIN ? "Scripts" : "bin", IS_WIN ? "pip.exe" : "pip");
-    // 依赖清单在 pyproject.toml 里 —— 这个项目**没有** requirements.txt，
+    // 依赖清单在 pyproject.toml 里，这个项目**没有** requirements.txt，
     // 原来写 `-r requirements.txt` 必然失败。这里直接把 dependencies 解析出来装，
     // 不走 `pip install .`：那会连带装项目本身、还要联网拉构建后端，更容易失败。
     let deps = [];
@@ -254,7 +254,7 @@ else if (has("npm")) {
     const b = run(NPM, ["run", "build"], { cwd, timeout: 900000 });
     if (b.code === 0) ok("前端构建好了"); else bad(`npm run build 失败：${b.out.slice(-300)}`);
   }
-} else bad("没有 npm —— 装 Node.js 时会自带（https://nodejs.org）");
+} else bad("没有 npm：装 Node.js 时会自带（https://nodejs.org）");
 
 // ---------------------------------------------------------------- 6 配置
 step("6/6 生成配置");
@@ -263,12 +263,12 @@ const example = path.join(PF, "brain.config.example.json");
 if (!existsSync(cfgPath)) {
   let cfg = {};
   if (existsSync(example)) { copyFileSync(example, cfgPath); cfg = JSON.parse(readFileSync(cfgPath, "utf8")); }
-  // 把探测到的 Python 写进去 —— 原代码写死了本机路径，换机器就崩
+  // 把探测到的 Python 写进去，原代码写死了本机路径，换机器就崩
   cfg.python = env.python || "python";
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf8");
   ok("生成了 brain.config.json（已填入探测到的 Python 路径）");
 } else {
-  // 已存在也要校正 python 路径 —— 从别人机器上拷过来的配置多半是错的
+  // 已存在也要校正 python 路径，从别人机器上拷过来的配置多半是错的
   try {
     const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
     if (cfg.python !== env.python && env.python) {
@@ -288,7 +288,7 @@ if (!existsSync(hkEnv)) {
     "# 由 deploy.mjs 生成",
     "# 不设 STATIC_DIR 的话，后端起来也不服务前端页面（打开是 404）",
     `STATIC_DIR=${dist}`,
-    "# 别让系统代理拦本机请求（本机代理会导致 502 / SSL EOF）",
+    "# 避免系统代理拦本机请求（本机代理会导致 502 / SSL EOF）",
     "NO_PROXY=127.0.0.1,localhost",
     "",
   ].join("\n");
@@ -300,7 +300,7 @@ if (!existsSync(hkEnv)) {
 console.log("\n" + "─".repeat(56));
 if (failed) {
   console.log(`\x1b[31m部署没成功，${failed} 步有问题。\x1b[0m`);
-  console.log("上面每步都写了原因。修完再跑一次 `node deploy.mjs` —— 已经就绪的会跳过。");
+  console.log("上面每步都写了原因。修完再跑一次 `node deploy.mjs`：已经就绪的会跳过。");
 } else {
   console.log("\x1b[32m部署完成。\x1b[0m");
   console.log("\n启动：");

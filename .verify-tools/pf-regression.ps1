@@ -1,9 +1,9 @@
 #!/usr/bin/env pwsh
 <#
-  pf-regression.ps1 —— PosterForge 全量回归。
+  pf-regression.ps1：PosterForge 全量回归。
 
   为什么要有这个：验证脚本已经有七八个了，各管一块（主题、联动、移动端、提示框、
-  出图、压测）。改一处东西之后要手工挨个跑、还得记住先跑哪个 —— 迟早会漏。
+  出图、压测）。改一处东西之后要手工挨个跑、还得记住先跑哪个：迟早会漏。
   这里把它们串成一条线，一次跑完，最后给一张 PASS/FAIL 清单。
 
   前置：站点在 8800 上跑着（pwsh -File pf-regression.ps1 不会自己起服务）。
@@ -76,5 +76,5 @@ if (-not ($a.ok -and $b.ok)) { $failed++ }
 Section "汇总"
 $report | ForEach-Object { Write-Host $_ }
 Write-Host ""
-if ($failed -eq 0) { Write-Host "全部通过 —— 没有回归。" -ForegroundColor Green }
+if ($failed -eq 0) { Write-Host "全部通过：没有回归。" -ForegroundColor Green }
 else { Write-Host "$failed 项失败，看上面的 ✗ 和 FAIL。" -ForegroundColor Yellow }

@@ -3,7 +3,7 @@
  * verify-hidden.mjs -- 验「[hidden] 必须真的隐藏」。
  *
  * 为什么单独写这条：drive-template.mjs 里我读的是 element.hidden **属性**，
- * 它返回 true 就判定通过 —— 但元素实际还在页面上显示。
+ * 它返回 true 就判定通过，但元素实际还在页面上显示。
  *
  * 两次踩坑，两次都是"量错了东西"：
  *   1. 读 el.hidden 属性 -> 属性 true，元素却还在显示

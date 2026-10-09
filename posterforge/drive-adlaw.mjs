@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * drive-adlaw.mjs —— 验收广告法预检这条链路。
+ * drive-adlaw.mjs，验收广告法预检这条链路。
  *
  * 起因：通用模板里我写了"最佳机位"，而服务端校验器把"最佳"判为广告法禁用词
- * 直接拒绝出图 —— 用户点了模板、等了一轮，才看到一句"命中广告法禁用/高风险词"。
+ * 直接拒绝出图，用户点了模板、等了一轮，才看到一句"命中广告法禁用/高风险词"。
  * 根因有两个：模板自己带禁词；以及预检只在服务端、要等渲染前才做。
  *
  * 验四件事：
@@ -143,7 +143,7 @@ async function main() {
   /* ---------------- 1. 模板自身干净 ---------------- */
   console.log("\n[1] 六个通用模板不能自带禁词");
   // 选择器必须限定在 #promptTips 里。
-  // 原来只按 .mini-chip 类名选 —— 那是**样式类**，后来「套用模板」面板
+  // 原来只按 .mini-chip 类名选，那是**样式类**，后来「套用模板」面板
   // 新增的保存/筛选按钮也用了它，于是这里一下变成 9 个、断言全错。
   // 找元素要按容器或 data 属性，不能按样式类名。
   const chips = JSON.parse(await cdp.ev(
@@ -176,7 +176,7 @@ async function main() {
   check("提供了一键改写按钮", note.hasFix === true);
 
   // 出图前的本地预检必须拦住，不能白跑一次渲染。
-  // 注意：模型就绪时 doGenerate 会先跑「模型写文案」（15~25 秒），之后才轮到预检 ——
+  // 注意：模型就绪时 doGenerate 会先跑「模型写文案」（15~25 秒），之后才轮到预检，
   // 所以必须轮询等。早先固定 sleep 2.5 秒，读到空报错框，误判成"没给拦截说明"。
   const before = await cdp.ev("document.querySelector('#resultImg').getAttribute('src') || ''");
   await cdp.ev("document.querySelector('#genBtn').click()");
@@ -272,7 +272,7 @@ async function main() {
       errShown: document.querySelector('#resultErr').style.display !== 'none',
       err: document.querySelector('#resultErr').textContent,
     })`).catch(() => "{}"));
-    // 先看有没有出新图 —— 新图优先，报错框可能是上一轮残留
+    // 先看有没有出新图，新图优先，报错框可能是上一轮残留
     if (st.img && st.img !== imgBefore) { genOk = true; break; }
     if (st.errShown && st.err) { errText = st.err; break; }
   }
