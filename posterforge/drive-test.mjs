@@ -289,7 +289,6 @@ async function main() {
       document.querySelector('#resultImg').removeAttribute('src');
       document.querySelector('#resultMeta').textContent = '';
       document.querySelector('#resultErr').style.display = 'none';
-      document.querySelector('#aiBg').checked = true;
       return true;
     })()`);
     await sleep(400);
@@ -312,9 +311,9 @@ async function main() {
         });
       })()`));
       if (i % 30 === 0) console.log(`    ${i}s  ${resD.btn}`);
-      // 只有「海报」的结果才带 AI 背景字样，用它判定真正完成
-      if (resD.err || (resD.src && resD.meta.includes("AI 背景"))) break;
-      if (resD.src && !resD.meta.includes("AI 背景") && i > 30) break;
+      // AI 底图现在是自动的（有模型就用），结果里不再带「AI 背景」字样，
+      // 所以只按"出图了 / 报错了"判定完成 —— 原来靠那四个字判定，开关一删就永远等不到。
+      if (resD.err || resD.src) break;
     }
     console.log("  结果:", resD.err ? "✗ " + resD.err : "✓ " + resD.meta);
     if (resD.src) {

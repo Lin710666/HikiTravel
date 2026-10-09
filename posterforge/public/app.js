@@ -6,7 +6,8 @@
      - 模板与灵感数据从 API 取，不写死在页面里
      - 「生成」走真实链路：POST /api/generate -> Python 渲染器 -> 回真实 PNG
      - 图片上传走真实链路：POST /api/upload -> 落盘 -> 路径写进 spec
-     - 「AI 背景」开关走真实链路：POST /api/aigen/background -> 本地 diffusers / SDXL-Turbo
+     - AI 底图走真实链路：/api/compose 内部按需调本地 diffusers / SDXL-Turbo
+       （本机有生图模型就自动用，有照片时 AI 图当氛围底、照片走顶部图带）
      - 文案手册走真实链路：POST /api/copybook -> 多页 PDF
      - 生成前会先过 validate.py，所以广告法/结构错误会当场报出来
      - 模型不可用时自动退回本地确定性构造，页面不会因为模型没开就废掉
@@ -40,7 +41,6 @@ const state = {
   cap: "poster",
   tone: "auto",
   files: [],        // [{ name, url, bytes, mime, uploaded, uploading }]
-  aiBgUrl: null,
   lastUploadErrors: null,
   generating: false,
   // 大模型上一次决定的内容（文案 + 版式 + 调性）。
@@ -1746,11 +1746,9 @@ function currentContent() {
  * 这里只保留一个包装函数给打卡卡复用。
  */
 function bgConfig(fallbackFrom, fallbackTo, angle, photoUrl) {
-  // AI 背景生成过后换成那张图（AI 只出图像层，文字仍由引擎叠加）
-  if (state.aiBgUrl) {
-    return { type: "image", image: state.aiBgUrl.replace(/^\//, ""), blobs: [] };
-  }
-  // 没有 AI 底图时，用用户上传的照片当底图 —— 要求「图和文字一起出图」的核心
+  // 照片优先当底图 —— 要求「图和文字一起出图」的核心。
+  // （AI 底图不走这里：它由服务端在 spec 的 background 上直接给，
+  //   并且有照片时会调版面让照片走顶部图带、AI 图当氛围底，两个都用上。）
   if (photoUrl) {
     return { type: "image", image: photoUrl.replace(/^\//, ""), blobs: [] };
   }
@@ -1767,13 +1765,9 @@ function localFallbackSpec() {
   const urls = state.files.filter((f) => f.uploaded && f.url).map((f) => f.url);
   const toneId = state.tone && TONES[state.tone] ? state.tone : null;
   const tone = toneId === "restaurant" ? 0.8 : toneId === "bureau" ? 0.2 : 0.5;
-  // AI 背景优先当底图（用户主动开过开关）
-  const photos = state.aiBgUrl ? [state.aiBgUrl, ...urls] : urls;
   return buildPosterSpecFrom(content, {
-    photoUrls: photos,
-    layout: state.aiBgUrl
-      ? "poster_photo_bg"
-      : urls.length >= 2 ? "poster_photo_strip" : urls.length === 1 ? "poster_photo_bg" : "poster_text",
+    photoUrls: urls,
+    layout: urls.length >= 2 ? "poster_photo_strip" : urls.length === 1 ? "poster_photo_bg" : "poster_text",
     tone,
     kind: state.tone || "tourism",
     factsSource: "站点表单输入（用户提供）",
@@ -1954,33 +1948,10 @@ function buildCopybookSpec() {
 }
 
 /* ---------------------------------------------------------------- 生成 */
-async function generateAiBackground() {
-  const { data } = await api("/api/aigen/status");
-  if (!data.running && !data.workerUp) {
-    // 环境就绪但 worker 还没起来是正常的（首次出图会现拉，约 20 秒），
-    // 只有环境本身不行才算错。
-    if (!data.ready) throw new Error(data.message || "本地出图环境不可用");
-  }
-
-  const { data: bg } = await api("/api/aigen/background", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      // 提示词必须是**英文** —— 扩散模型画中文必然出乱码。
-      // 原先这里写的是一句中文描述，那是按 Qwen-Image（中文友好）配的；
-      // 换成 SDXL-Turbo 后中文提示词只会得到一堆无意义的笔画。
-      // 走 /api/compose 自动出图时，提示词由 qwen2.5:7b 按用户原话生成（见 brain.mjs）。
-      prompt:
-        "serene coastal landscape at sunset, warm orange and deep teal gradient sky, "
-        + "soft focus distant scenery, large clean empty area in the lower half, "
-        + "gentle light, cinematic, no text, no words, no logo, no watermark",
-      size: 768, height: 1024, steps: 4, seed: 42,
-    }),
-  });
-  if (!bg.ok) throw new Error(`背景生成失败（${bg.stage}）：${bg.message}`);
-  return bg;
-}
-
+// 这里原来有个 generateAiBackground()：前端单独调 /api/aigen/background 生成一张
+// 固定提示词的底图。现在不用了 —— AI 底图改由服务端在 /api/compose 里按用户原话
+// 生成提示词，而且**有照片也会生成**（AI 图当氛围底、照片走顶部图带）。
+// 前端不再需要知道"有没有 AI 底图"这件事，所以函数和它那个开关一起删了。
 function showResult({ imgUrl, metaText, errText, extraHTML }) {
   const res = $("#result");
   const img = $("#resultImg");
@@ -2173,8 +2144,8 @@ function renderComposeNote(composed, errMsg) {
         `<div class="cn-bg cn-bg-fail">` +
         `<b>没能自动生成底图</b>` +
         `<span class="cn-err">${esc(bg.message || "未知原因")}</span>` +
-        `<span class="cn-dim">这次用渐变底出了纯文字版。想让它自己画图：把输入框上方的「AI 背景」开关打开` +
-        `（本地模型直接出图，不需要启动任何外部服务），或直接上传一张照片。</span>` +
+        `<span class="cn-dim">这次用渐变底出了纯文字版。原因多半是本机没有可用的生图模型 —— ` +
+        `有模型时这一步是自动的，不需要任何开关；也可以直接上传一张照片当底图。</span>` +
         (bg.prompt ? `<div class="cn-prompt">${esc(bg.prompt)}</div>` : "") +
         `</div>`;
     }
@@ -2245,16 +2216,8 @@ async function doGenerate() {
       return;
     }
 
-    // ---- 可选：先生成 AI 背景 ----
-    let aiNote = "";
-    if ($("#aiBg").checked) {
-      btn.textContent = "生成 AI 背景中…（首次需加载 15 GB 权重）";
-      const bg = await generateAiBackground();
-      state.aiBgUrl = bg.url;
-      aiNote = ` · AI 背景 ${(bg.elapsedMs / 1000).toFixed(0)}s`;
-    } else {
-      state.aiBgUrl = null;
-    }
+    // AI 底图不再由前端单独触发：服务端在 /api/compose 里按本机有没有生图模型
+    // 自动决定（有就用，有照片也照用）。前端只负责如实转述本次用了什么。
 
     const isCheckin = state.mode === "checkin" || state.cap === "checkin";
 
@@ -2308,10 +2271,17 @@ async function doGenerate() {
         : !state.brain.up
         ? "模型服务未连接"
         : "未配置文案模型";
-      modelNote = ` · ⚠ 模型未参与（${why}），已用本地规则兜底`;
+      // 没有模型时必须讲清楚"这次出来的到底是什么"：
+      // 文案取自内置模板、底图退回渐变，整张图是本地 Pillow 引擎确定性渲染的，
+      // 没有任何模型参与。只说"模型未参与"，用户看不出和平时有什么区别。
+      modelNote = ` · ⚠ 无可用模型（${why}），本次由本地引擎渲染：模板文案 + 渐变底`;
       // 必须显式覆盖面板：否则上一次模型的结果会留在屏幕上，
       // 让人以为这次也是模型写的（测试就是抓到这个才失败的）。
-      renderComposeNote(null, why + "，本次文案由本地规则生成");
+      renderComposeNote(
+        null,
+        why + "。本次没有模型参与：文案取自内置模板，底图退回渐变色块，"
+          + "整张图由本地 Pillow 引擎确定性排版渲染 —— 能出图，但画面里没有 AI 生成的内容。",
+      );
     }
 
     // ---- 出图 ----
@@ -2351,7 +2321,7 @@ async function doGenerate() {
         metaText:
           `已生成 · ${(data.bytes / 1024).toFixed(0)} KB` +
           (usedPhoto ? " · 使用上传照片" : isCheckin ? " · 未上传照片，使用占位图" : "") +
-          modelNote + aiNote,
+          modelNote,
         extraHTML: `<div style="margin-top:10px"><a class="cta" style="display:inline-block;text-decoration:none;padding:10px 24px"
             href="${data.url}" download>下载图片</a></div>`,
       });
@@ -2379,7 +2349,7 @@ async function health() {
     `<b>${bad ? "⚠ 环境待检查" : "✓ 环境就绪"}</b><br>` +
     `Python ${data.pythonOk ? data.pythonDetail : "不可用"}<br>` +
     `渲染器 ${data.forgeFound ? "✓" : "✗"} · 手册 ${data.copybookFound ? "✓" : "✗"}<br>` +
-    `本地出图 ${data.aigenReady ? "✓ SDXL-Turbo 就绪" : "— 不可用（AI 背景将退回渐变底）"}`;
+    `本地出图 ${data.aigenReady ? "✓ SDXL-Turbo 就绪" : "— 不可用（AI 底图将退回渐变底）"}`;
   box.classList.add("show");
   setTimeout(() => box.classList.remove("show"), 10000);
 }
@@ -2450,7 +2420,6 @@ window.posterforge = {
       files: state.files.map((f) => ({
         name: f.name, url: f.url, bytes: f.bytes, uploaded: !!f.uploaded,
       })),
-      aiBgUrl: state.aiBgUrl,
       brainReady: !!state.brain?.ready,
       composeCopy: state.composeCopy,
       composeScenes: state.composeScenes,

@@ -156,9 +156,6 @@
         });
       return;
     }
-    // 点「AI 背景」时再体检一次：这一刻才是真的要用模型，
-    // 之前关了提示的人也应该在这时被提醒一次。
-    if (t.closest("#aiBg")) setTimeout(checkLocalModel, 0);
   });
 })();
 </script>
@@ -184,7 +181,7 @@
 <!-- 本地绘画模型提示：本机一个可用模型都没有时才出现。
      右上角可以关掉，关掉之后就不再打扰（除非后来真的补上了模型再消失）。
      注意它不是错误弹窗 —— 海报排版合成完全不依赖模型，没模型照样出图，
-     只有「AI 背景」这一项需要，所以用不锁屏的浮层，别把人拦在外面。 -->
+     只有自动生成 AI 底图这一步需要，所以用不锁屏的浮层，别把人拦在外面。 -->
 <div class="model-notice" id="modelNotice" role="dialog" aria-live="polite" aria-labelledby="mnTitle" hidden>
   <button class="mn-close" id="mnClose" type="button" aria-label="关闭提示" title="关闭">×</button>
   <div class="mn-head">
@@ -192,7 +189,7 @@
     <b id="mnTitle">检测到本地没有可用的绘画模型</b>
   </div>
   <p class="mn-text">
-    海报排版合成照常可用，不需要模型；只有「<b>AI 背景</b>」这一项需要本地绘画模型。
+    海报排版合成照常可用，不需要模型；只有自动生成 <b>AI 底图</b>这一步需要本地绘画模型。
     现在可以下载 <b>Qwen-Image-2.1</b>（约 <span id="mnSize">16.1</span> GB），下完即可在本机出图。
   </p>
   <div class="mn-actions">
@@ -335,11 +332,10 @@
           </div>
 
           <div class="toggles" id="toggles">
-            <label class="switch" title="没上传照片时，用本地模型（SDXL-Turbo）直接生成一张底图。不需要启动任何外部服务；首次出图要把模型加载进显存，约 20 秒，之后每张约 6 秒。">
-              <input type="checkbox" id="aiBg" />
-              <span class="track"></span>
-              <span>AI 背景</span>
-            </label>
+            <!-- AI 背景开关已删除：原来是让用户手动勾"要不要用模型生成底图"。
+                 现在改成自动判定 —— 本机有生图模型就一定用（有照片时 AI 图当氛围底、
+                 照片走顶部图带当前景，两个都用上），没有模型才退回纯引擎排版。
+                 用户不需要知道也不需要选择，所以这个开关没有存在的意义。 -->
             <!-- 绘图引擎：这里原来是个 <select>，摆着两个选项
                  （PosterForge-1.0 / Qwen-Image-2.1），但**没有任何代码读它** ——
                  前端没绑事件，后端也不收这个参数，选了什么都不会改变出图结果。

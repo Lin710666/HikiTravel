@@ -532,10 +532,15 @@ export function buildCheckinSpecFrom(content, opts = {}) {
  */
 export function buildPosterSpecFrom(content, opts = {}) {
   const urls = (opts.photoUrls || []).filter(Boolean);
+  const autoBg = opts.autoBgUrl ? String(opts.autoBgUrl).replace(/^\//, "") : null;
   const layout = opts.layout ||
     (urls.length >= 2 ? "poster_photo_strip" : urls.length === 1 ? "poster_photo_bg" : "poster_text");
   const many = layout === "poster_photo_strip" && urls.length >= 2;
   const useBg = layout === "poster_photo_bg" && urls.length >= 1;
+  // AI 底图和用户照片并存时：AI 图铺满当氛围底，照片改走顶部图带做前景，两个都用上。
+  // 图带要占高度，所以这种情况下版面必须落在带 stripHeight 的那两套上 ——
+  // plain / plainNoPrice 的 stripHeight 是 0，硬塞照片只会让它被后面的文字盖住。
+  const photoBand = !!autoBg && urls.length > 0;
   // 有价格用带价格块的表；没有价格就用尾部上移的那套，避免下半页留个空洞
   const hasPrice = !!(content.price && String(content.price).trim());
   // 版面选择：显式指定构图时优先用它，否则按图片数量回退到原有两套。
@@ -543,7 +548,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
   const wantComp = opts.composition && POSTER_LAYOUT[opts.composition] ? opts.composition : null;
   const L = wantComp
     ? POSTER_LAYOUT[wantComp]
-    : many
+    : (many || photoBand)
     ? (hasPrice ? POSTER_LAYOUT.strip : POSTER_LAYOUT.stripNoPrice)
     : (hasPrice ? POSTER_LAYOUT.plain : POSTER_LAYOUT.plainNoPrice);
   // 构图决定对齐方式、图文关系和留白 —— 不是坐标微调。
@@ -576,18 +581,25 @@ export function buildPosterSpecFrom(content, opts = {}) {
   const slack = Math.max(0, (tailTop - 0.028) - blockBottom);
   const dy = slack * vShift;
 
-  const autoBg = opts.autoBgUrl ? String(opts.autoBgUrl).replace(/^\//, "") : null;
   const photo = urls.length ? String(urls[0]).replace(/^\//, "") : null;
 
   // 图片与文字的关系分三种，这是「构图」而不是「参数」：
   //   full  图铺满、文字压在图上 → 需要遮罩保证可读
   //   band  图只占上方一条、文字在图外的实色区 → **不需要遮罩**（图字不重叠）
   //   none  不用图 → 纯排版，靠留白和字号建立层级
+  //
+  // 有 AI 底图时，底一律让给它（照片这时已经改走顶部图带，见上面的 photoBand）——
+  // 否则 AI 图会被照片顶掉，等于白生成一张。
+  const bgFromAuto = autoBg
+    ? { type: "image", image: autoBg, blobs: [], scrim: POSTER_SCRIM }
+    : null;
+  const bgGradient = { type: "gradient", from: "bgFrom", to: "bgTo", angle: 130 };
+
   let bg, bandLayers = [];
   if (comp.imgMode === "band" && (photo || autoBg)) {
     const bh = L.bandHeight || 0.44;
-    // 文字区底面：实色，保证图与字彻底分离
-    bg = { type: "gradient", from: "bgFrom", to: "bgTo", angle: 130 };
+    // 文字区底面：有 AI 底图就让它铺满，否则用实色渐变保证图与字分离
+    bg = bgFromAuto || bgGradient;
     bandLayers = [
       { type: "image", name: "bandPhoto", src: photo || autoBg,
         box: { box: [0, 0], size: [1, bh] }, fit: "cover" },
@@ -598,7 +610,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
   } else if (comp.imgMode === "side" && (photo || autoBg)) {
     // 左右分割：图在右侧出血，文字在左侧窄栏。图和字同样不重叠，不需要遮罩。
     const ix = L.imgRight || 0.46;
-    bg = { type: "gradient", from: "bgFrom", to: "bgTo", angle: 130 };
+    bg = bgFromAuto || bgGradient;
     bandLayers = [
       { type: "image", name: "sidePhoto", src: photo || autoBg,
         box: { box: [ix, 0], size: [1 - ix, 1] }, fit: "cover" },
@@ -610,7 +622,7 @@ export function buildPosterSpecFrom(content, opts = {}) {
     // 重心环绕：图是一张悬空圆角卡片，不是背景也不是色块。
     // 卡片外压一道浅描边 + 投影，让它"浮"起来 —— 否则看着像贴歪了的色块。
     const cw = L.cardW || 0.64, ch = L.cardH || 0.32, ct = L.cardTop || 0.20;
-    bg = { type: "gradient", from: "bgFrom", to: "bgTo", angle: 130 };
+    bg = bgFromAuto || bgGradient;
     bandLayers = [
       { type: "shape", name: "cardShadow", shape: "rect",
         box: [0.5 - cw / 2 + 0.012, ct + 0.014, 0.5 + cw / 2 + 0.012, ct + ch + 0.014],
@@ -623,18 +635,20 @@ export function buildPosterSpecFrom(content, opts = {}) {
       // 投影已经足够让卡片浮起来，描边是多余的。
     ];
   } else if (comp.imgMode === "none") {
-    bg = { type: "gradient", from: "bgFrom", to: "bgTo", angle: 130 };
+    bg = bgGradient;
   } else {
-    // 满版：照片 > AI 底图 > 渐变，凡是用图都带逐行遮罩
-    bg = useBg && photo
-      ? { type: "image", image: photo, blobs: [], scrim: POSTER_SCRIM }
-      : autoBg
-      ? { type: "image", image: autoBg, blobs: [], scrim: POSTER_SCRIM }
-      : { type: "gradient", from: "bgFrom", to: "bgTo", angle: 130 };
+    // 满版：AI 底图 > 照片 > 渐变。有 AI 底图时照片已经走顶部图带了，
+    // 所以这里不会出现"AI 图被照片顶掉、白生成一张"的情况。
+    bg = bgFromAuto
+      || (useBg && photo
+        ? { type: "image", image: photo, blobs: [], scrim: POSTER_SCRIM }
+        : bgGradient);
   }
 
-  // 满版以外的构图不需要顶部图带拼图；拼图带只在原有 strip 模式里保留
-  const stripL = comp.imgMode === "full" && many ? stripLayers(urls, L.stripHeight) : [];
+  // 顶部图带：原有多图模式，以及「AI 底图 + 用户照片」并存时（照片走图带当前景）
+  const stripL = comp.imgMode === "full" && (many || photoBand)
+    ? stripLayers(urls, L.stripHeight)
+    : [];
 
   const layers = [
     ...bandLayers,

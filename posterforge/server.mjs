@@ -1987,7 +1987,11 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
      *   3. 把提示词一并回给前端，让人看见"它画的是什么、想改就改这一行"
      */
     let autoBg = null;
-    const wantAutoBg = photoUrls.length === 0 && payload.autoBg !== false;
+    // 有生图模型就生成 AI 底图，与有没有上传照片**无关**：
+    // 有照片时 AI 图铺满当氛围底、照片走顶部图带当前景（见 buildPosterSpecFrom 的 photoBand），
+    // 两个都用上，而不是二选一。没有模型时这条路自然走不通，
+    // 底图退回渐变、版式退回纯排版 —— 也就是 Python + Pillow 那条路。
+    const wantAutoBg = payload.autoBg !== false;
     if (wantAutoBg) {
       const ip = await deriveImagePrompt(cfg, { brief, copy: c, scenes: out.scenes });
       if (!ip.ok) {
