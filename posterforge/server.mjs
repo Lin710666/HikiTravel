@@ -1991,7 +1991,11 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     // 有照片时 AI 图铺满当氛围底、照片走顶部图带当前景（见 buildPosterSpecFrom 的 photoBand），
     // 两个都用上，而不是二选一。没有模型时这条路自然走不通，
     // 底图退回渐变、版式退回纯排版 —— 也就是 Python + Pillow 那条路。
-    const wantAutoBg = payload.autoBg !== false;
+    //
+    // 打卡卡例外：它的背景是 buildCheckinSpecFrom 里写死的渐变，
+    // 那个函数不接收 autoBgUrl。给它生成底图等于算完直接扔掉 ——
+    // 实测白花 13~46 秒（一次打卡卡生成总耗时被拖到 115 秒）。
+    const wantAutoBg = payload.autoBg !== false && mode !== "checkin";
     if (wantAutoBg) {
       const ip = await deriveImagePrompt(cfg, { brief, copy: c, scenes: out.scenes });
       if (!ip.ok) {

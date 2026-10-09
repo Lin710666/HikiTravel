@@ -2230,7 +2230,13 @@ async function doGenerate() {
         const composed = await composeWithModel({
           mode: isCheckin ? "checkin" : "poster",
           onProgress: (ms) => {
-            btn.textContent = `模型创作中… ${Math.round(ms / 1000)}s（读图 + 写文案）`;
+            // 进度里必须写清"后面还有出底图"这一步。
+            // 原来只写「读图 + 写文案」，用户盯着这句以为马上就好，
+            // 实际后面还要跑一遍扩散模型（首次 13~46 秒），于是就成了"怎么这么久"。
+            const sec = Math.round(ms / 1000);
+            btn.textContent = isCheckin
+              ? `模型创作中… ${sec}s（读图 + 写打卡文案）`
+              : `模型创作中… ${sec}s（读图 + 写文案，之后还要生成 AI 底图）`;
           },
         });
         state.composeSpec = composed.spec;
