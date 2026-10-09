@@ -287,6 +287,195 @@ html[data-theme="light"] { color-scheme: light; }
 .theme-toggle .ic-sun { display: none; }
 html[data-theme="dark"] .theme-toggle .ic-sun { display: block; }
 html[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
+
+/* ── 设置齿轮：与深浅色按钮同一套尺寸与观感 ─────────────────── */
+.gear-btn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.gear-btn:hover { color: var(--ink); border-color: var(--card-hover-line); }
+.gear-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.gear-btn svg { width: 20px; height: 20px; }
+
+/* ── 设置面板 ─────────────────────────────────────────────────
+   结构与尺寸照搬 DeepSeek Harness 网页端的设置窗口（实测其计算样式）：
+     遮罩 rgba(0,0,0,.5) + blur(2px)
+     面板 800x800 · 圆角 32px · 左栏 188px · 右栏 612px
+     卡片 圆角 16px · 1px 描边 · padding 12px 14px
+   颜色分两套：默认浅底，html[data-theme="dark"] 下用 DSH 那套深色。 */
+.settings[hidden] { display: none; }
+.settings {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.settings-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+.settings-panel {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  width: 800px;
+  height: 800px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border-radius: 32px;
+  background: #ffffff;
+  color: #0f1115;
+  font-size: 14px;
+  box-shadow: rgba(0, 0, 0, 0.12) 0 0 0 0.5px,
+              rgba(0, 0, 0, 0.04) 0 3px 8px,
+              rgba(0, 0, 0, 0.05) 0 0 20px;
+}
+html[data-theme="dark"] .settings-panel {
+  background: #2c2c2e;
+  color: #f9fafb;
+  box-shadow: rgba(255, 255, 255, 0.2) 0 0 0 0.5px,
+              rgba(0, 0, 0, 0.04) 0 3px 8px,
+              rgba(0, 0, 0, 0.05) 0 0 20px;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 188px;
+  flex: none;
+  padding: 22px 12px 0;
+}
+.settings-nav-title { padding: 0 12px; font-size: 16px; font-weight: 500; line-height: 24px; }
+.settings-nav-list { display: flex; flex-direction: column; gap: 4px; }
+.settings-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px;
+  border: 0; border-radius: 10px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.settings-nav-item.on { background: rgba(0, 0, 0, 0.07); color: var(--ink); }
+html[data-theme="dark"] .settings-nav-item { color: #cfd3d6; }
+html[data-theme="dark"] .settings-nav-item.on { background: rgba(255, 255, 255, 0.10); color: #f9fafb; }
+.settings-nav-item svg { width: 16px; height: 16px; flex: none; }
+
+.settings-content { display: flex; flex-direction: column; min-width: 0; width: 612px; flex: 1; }
+.settings-header {
+  display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between;
+  gap: 8px; padding: 20px 14px 8px 10px;
+}
+.settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; height: 28px; }
+.settings-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex: none; padding: 0;
+  border: 0; border-radius: 28px;
+  background: transparent; color: inherit;
+  font: inherit; cursor: pointer;
+}
+.settings-close:hover { background: rgba(0, 0, 0, 0.06); }
+html[data-theme="dark"] .settings-close:hover { background: rgba(255, 255, 255, 0.10); }
+
+.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px 8px; }
+.settings-footer { flex: none; padding: 8px 24px 22px; }
+.settings-note { margin: 0 0 14px; color: var(--ink-2); font-size: 14px; line-height: 22px; }
+html[data-theme="dark"] .settings-note { color: #adb2b8; }
+
+.settings-group { margin-bottom: 20px; }
+.settings-group > h4 { margin: 0 0 8px; color: var(--ink-2); font-size: 12px; font-weight: 500; letter-spacing: .04em; }
+html[data-theme="dark"] .settings-group > h4 { color: #cfd3d6; }
+.settings-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px 14px; margin-bottom: 8px;
+  border: 1px solid var(--line); border-radius: 16px;
+  list-style: none;
+}
+/* hidden 属性会被内联/类里的 display 压掉，所以这里显式兜住。
+   setRemoteGroup 靠 hidden 显隐，漏了这条就会一直摊在外面。 */
+.settings-card > li[hidden] { display: none; }
+.settings-remote { display: flex; flex-direction: column; gap: 12px; }
+.settings-remote[hidden] { display: none; }
+html[data-theme="dark"] .settings-card { border-color: rgba(255, 255, 255, 0.2); }
+.settings-card-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.settings-card-name { font-size: 14px; font-weight: 500; }
+.settings-card-tail { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.settings-field { display: flex; flex-direction: column; gap: 6px; }
+.settings-field > label { color: var(--ink-2); font-size: 12px; }
+.settings-field select,
+.settings-field input {
+  width: 100%; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg-soft); color: var(--ink);
+  font: inherit; font-size: 14px;
+}
+.settings-field select:focus,
+.settings-field input:focus { outline: none; border-color: var(--brand); }
+.settings-field .settings-hint { color: var(--ink-2); font-size: 12px; opacity: .85; }
+/* 提示行里的小按钮：看着像链接，但仍然是 button（键盘可达、有 focus 环） */
+.settings-linkish {
+  margin-left: 6px; padding: 0;
+  border: 0; background: none;
+  color: #5686fe; font: inherit; font-size: 12px;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.settings-linkish:hover { color: #4176e6; }
+.settings-linkish[disabled] { color: var(--ink-2); opacity: .6; cursor: default; text-decoration: none; }
+html[data-theme="dark"] .settings-field select,
+html[data-theme="dark"] .settings-field input {
+  background: #1c1c1e; color: #f9fafb; border-color: rgba(255, 255, 255, 0.16);
+}
+html[data-theme="dark"] .settings-field > label,
+html[data-theme="dark"] .settings-field .settings-hint { color: #adb2b8; }
+
+.settings-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
+.settings-switch input { width: 16px; height: 16px; accent-color: #5686fe; }
+
+.settings-btn {
+  height: 28px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: inherit;
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.settings-btn:hover { background: rgba(0, 0, 0, 0.05); }
+html[data-theme="dark"] .settings-btn { border-color: rgba(255, 255, 255, 0.16); }
+html[data-theme="dark"] .settings-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.settings-btn.primary { background: #5686fe; border-color: #5686fe; color: #fff; }
+.settings-btn.primary:hover { background: #4176e6; }
+.settings-btn[disabled] { opacity: .5; cursor: default; }
+.settings-foot { display: flex; gap: 8px; margin-top: 4px; }
+.settings-msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+.settings-msg.ok { color: #1a9e63; }
+.settings-msg.err { color: #d64545; }
+html[data-theme="dark"] .settings-msg { color: #adb2b8; }
+html[data-theme="dark"] .settings-msg.ok { color: #6ee7a8; }
+html[data-theme="dark"] .settings-msg.err { color: #ff9b9b; }
+
+@media (max-width: 860px) {
+  .settings-panel { flex-direction: column; width: calc(100vw - 24px); height: calc(100vh - 60px); border-radius: 22px; }
+  .settings-nav { width: 100%; flex-direction: row; gap: 8px; padding: 14px 14px 0; overflow-x: auto; }
+  .settings-nav-title { display: none; }
+  .settings-nav-list { flex-direction: row; gap: 6px; }
+  .settings-content { width: 100%; }
+  .settings-body { padding: 0 16px 8px; }
+  .settings-footer { padding: 8px 16px 16px; }
+  .settings-foot { flex-wrap: wrap; }
+}
 </style>
 </head>
 <body>
@@ -307,6 +496,15 @@ html[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
     <div class="nav-sp"></div>
     <a class="link" href="/">海报生成</a>
     <a class="link" href="/wenlv/">旅游规划</a>
+    <!-- 模型设置：界面照搬 DeepSeek Harness 网页端的设置窗口。
+         图标必须是带齿的轮廓：不要用“圆心 + 放射线”那种画法，
+         那和旁边深浅色按钮的太阳长得一样，用户会认错。 -->
+    <button class="gear-btn" id="settingsBtn" type="button" aria-label="模型设置" title="模型设置">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    </button>
     <!-- 深浅色切换：显示的是"点了会变成的那个"，浅色给月亮、深色给太阳 -->
     <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换深浅色" title="切换深浅色">
       <svg class="ic-sun" viewBox="0 0 24 24" aria-hidden="true">
@@ -386,8 +584,128 @@ html[data-theme="dark"] .theme-toggle .ic-moon { display: none; }
   </a>
 </section>
 
+<!-- 模型设置：结构与尺寸照搬 DeepSeek Harness 网页端的设置窗口。
+     数据一律走 /api/settings，弹窗本身不碰配置文件；逻辑在 /settings.js。 -->
+<div class="settings" id="settingsModal" hidden>
+  <div class="settings-mask" data-close></div>
+  <div class="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <nav class="settings-nav">
+      <div class="settings-nav-title">设置</div>
+      <div class="settings-nav-list">
+        <button class="settings-nav-item on" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+          </svg>
+          模型
+        </button>
+      </div>
+    </nav>
+
+    <div class="settings-content">
+      <div class="settings-header">
+        <h3 style="margin:0;font-size:16px;font-weight:500;line-height:24px;">模型</h3>
+        <div class="settings-actions">
+          <button class="settings-close" id="setClose" type="button" data-close aria-label="关闭">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-body">
+        <p class="settings-note">
+          对话、读图与出图分别用哪个模型。默认全部走本机 Ollama 与本机绘图模型，不联网、不花钱；
+          想让外部接口代劳时再切过去。
+        </p>
+
+        <div class="settings-group">
+          <h4>大脑</h4>
+
+          <ul class="settings-card" style="list-style:none;margin:0 0 8px;padding:12px 14px;">
+            <li class="settings-field">
+              <label for="setProvider">服务来源</label>
+              <select id="setProvider">
+                <option value="ollama">本机 Ollama（默认，离线免费）</option>
+                <option value="openai">外部接口（OpenAI 兼容）</option>
+              </select>
+            </li>
+
+            <li id="setRemoteGroup" class="settings-remote" hidden>
+              <div class="settings-field">
+                <label for="setBaseUrl">接口地址</label>
+                <input id="setBaseUrl" type="text" placeholder="https://HOST/v1" autocomplete="off" spellcheck="false">
+                <span class="settings-hint">
+                  填到 /v1 为止，后面由程序自己接 /chat/completions。
+                  <button class="settings-linkish" id="setPreset" type="button">填入 DeepSeek 官方参数</button>
+                </span>
+              </div>
+              <div class="settings-field">
+                <label for="setApiKey">密钥</label>
+                <input id="setApiKey" type="password" placeholder="留空表示不修改" autocomplete="off">
+                <span class="settings-hint">
+                  <span id="setKeyHint">还没有保存过密钥。</span>
+                  <button class="settings-linkish" id="setClearKey" type="button" hidden>清除已保存的密钥</button>
+                </span>
+              </div>
+              <div class="settings-field">
+                <label for="setRemoteModel">外部模型</label>
+                <input id="setRemoteModel" type="text" placeholder="例如 deepseek-flash" autocomplete="off" spellcheck="false">
+                <span class="settings-hint" id="setRemoteModelHint"></span>
+              </div>
+              <label class="settings-switch" for="setVisionFromLlm">
+                <input id="setVisionFromLlm" type="checkbox">
+                这个模型自带视觉，读图也用它
+              </label>
+            </li>
+
+            <li class="settings-field">
+              <label for="setCopy">对话模型（本机）</label>
+              <select id="setCopy"></select>
+            </li>
+            <li class="settings-field">
+              <label for="setVision">读图模型（本机）</label>
+              <select id="setVision"></select>
+              <span class="settings-hint" id="setVisionHint"></span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="settings-group">
+          <h4>出图</h4>
+          <ul class="settings-card" style="list-style:none;margin:0 0 8px;padding:12px 14px;">
+            <li class="settings-field">
+              <label for="setDrawing">绘图模型</label>
+              <select id="setDrawing"></select>
+              <span class="settings-hint" id="setDrawingHint"></span>
+            </li>
+          </ul>
+          <p class="settings-note" style="margin:0;">
+            列出的是本机已下载的模型。换模型后会重启出图进程，下次出图生效。
+          </p>
+        </div>
+      </div>
+
+      <!-- 按钮和提示放在滚动区**外面**：展开"外部接口"后内容会超出一屏，
+           留在里面的话"保存"会被顶到折叠线以下，得先滚一段才找得到。 -->
+      <div class="settings-footer">
+        <div class="settings-foot">
+          <button class="settings-btn primary" id="setSave" type="button">保存</button>
+          <button class="settings-btn" id="setReload" type="button">重新读取</button>
+          <button class="settings-btn" id="setOpenFile" type="button">复制配置路径</button>
+        </div>
+        <div class="settings-msg" id="setMsg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 悬浮球 AI 助手：与海报页、旅游规划页共用 /ai-ball.js 这一份实现。
      data-api-base 指到反代的 /wenlv/api/（本页在 8800 上，同源 /api/ 是本服务自己的接口）。 -->
+<script src="/settings.js" defer></script>
 <script src="/ai-ball.js" data-api-base="/wenlv" defer></script>
 
 

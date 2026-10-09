@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .. import store
-from ..config import settings
+from ..config import effective_llm, settings
 from ..llm.warmup import warmer
 from ..models.plan import TravelPlan
 from ..models.preference import UserPreference
@@ -462,10 +462,18 @@ def _text_field(value: Any) -> str:
 
 @router.get("/health")
 def health() -> Dict[str, Any]:
-    """健康检查：返回 Ollama / 高德密钥配置状态，以及启动预热进度。"""
+    """健康检查：返回模型服务 / 高德密钥配置状态，以及启动预热进度。"""
+    eff = effective_llm()
+    # llm_available 是新名字；ollama_available 保留，免得已经接了这个字段的前端开天窗。
+    # 走外部接口时这个值说的是外部服务，不再是本机 Ollama。
+    llm_ok = orchestrator.planner.llm.available()
     return {
         "status": "ok",
-        "ollama_available": orchestrator.planner.llm.available(),
+        "llm_available": llm_ok,
+        "ollama_available": llm_ok,
+        "llm_provider": eff.provider,
+        "llm_source": eff.source,
+        "llm_model": eff.model,
         "amap_configured": bool(orchestrator.retrieve.amap.key),
         # 启动预热（模型加载 + 提示词缓存）的进度：预热跑完前，第一次生成会明显更慢
         "ollama_warm": warmer.status(),

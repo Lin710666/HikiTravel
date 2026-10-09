@@ -19,7 +19,7 @@
  */
 
 import { readFile, stat, mkdir } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -165,7 +165,7 @@ export async function deriveImagePrompt(cfg, { brief = "", copy = null, scenes =
   }
   parts.push("【请作答】输出那个 JSON，prompt 必须是英文且不含任何文字/汉字。");
   try {
-    const raw = await ollamaChat(cfg, {
+    const raw = await llmChat(cfg, {
       model: cfg.copy,
       messages: [
         { role: "system", content: IMAGE_PROMPT_SYSTEM },
@@ -214,14 +214,47 @@ export async function unloadModels(cfg, models = []) {
   return out;
 }
 
+/**
+ * 本机 Ollama **此刻真的占着显存**的模型名。
+ *
+ * 为什么不直接用 cfg.copy / cfg.vision：接了外部接口之后这两个是外部模型的名字
+ * （比如取名叫 deepseek-v4.1-flash），拿它们去卸本机 Ollama 是卸不掉的，
+ * 接口不报错、但显存一点没还，接着跑 SDXL 就会退回"越跑越慢"那个老毛病
+ * （8G 卡上实测 55s → 97s → 400s 超时）。所以这时得反过来问 Ollama 自己。
+ */
+export async function residentLocalModels(cfg) {
+  try {
+    const r = await fetch(`${cfg.endpoint}/api/ps`, {
+      signal: AbortSignal.timeout(3000), cache: "no-store",
+    });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j.models || []).map((m) => m.name).filter(Boolean);
+  } catch {
+    return [];   // 问不到就当没有，卸不掉也不会因此出错
+  }
+}
+
 /* ------------------------------------------------------------------ 配置 */
 export function loadBrainConfig(siteRoot) {
   const file = path.join(siteRoot, "brain.config.json");
   const cfg = {
     enabled: true,
+    // provider 决定"文案/对话模型"在哪跑：
+    //   ollama  本机 Ollama（默认，离线、不用 key）
+    //   openai  外部 API（兼容 OpenAI 的 /chat/completions，需要 baseUrl + apiKey + 模型名）
+    provider: "ollama",
     endpoint: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
+    baseUrl: "",
+    apiKey: "",
     vision: "qwen2.5vl:3b",
+    // visionFromLlm：读图直接交给 LLM 自带的视觉能力，而不是本机的 Ollama 视觉模型。
+    // 只有在 provider=openai 且那个模型确实支持图片输入时才有意义
+    // （比如自带视觉的旗舰模型）。为 false 时仍走本机 Ollama 读图。
+    visionFromLlm: false,
     copy: "qwen2.5:7b",
+    // drawingModel：绘图（AI 底图）用哪个本机模型。留空表示用发现逻辑挑最合适的那个。
+    drawingModel: "",
     timeoutMs: 120000,
     maxImageSide: 896,
     // 上下文窗口。必须显式传：模型的 Modelfile 里若没写 num_ctx，
@@ -244,6 +277,60 @@ export function loadBrainConfig(siteRoot) {
     // 配置坏了就用默认值，不要让整站起不来
   }
   return cfg;
+}
+
+/** 键名白名单，保存时照着它筛，避免把任意键写进配置文件 */
+export const BRAIN_CONFIG_KEYS = [
+  "enabled", "provider", "endpoint", "baseUrl", "apiKey",
+  "vision", "visionFromLlm", "copy", "drawingModel",
+  "timeoutMs", "maxImageSide", "numCtx", "visionMaxTokens",
+  "copyMaxTokens", "temperature", "keepAlive",
+];
+
+/** 数值字段的合法区间，越界一律夹回来（配置写错不该让站点崩） */
+const NUM_RANGE = {
+  timeoutMs: [10000, 900000],
+  maxImageSide: [256, 2048],
+  numCtx: [2048, 131072],
+  visionMaxTokens: [32, 4096],
+  copyMaxTokens: [32, 8192],
+  temperature: [0, 2],
+};
+
+/**
+ * 保存设置：只接受白名单内的键，数值夹到安全区间，其余原样。
+ * 写之前先把已有的 brain.config.json 读出来合并，整份写回。
+ *
+ * 注意合并的是**整个旧文件**，不是只留 _ 开头的说明键：
+ * python（deploy.mjs 探测出来写进去的）以及将来加的任何键都在白名单之外，
+ * 按"只留 _ 键"过滤就会把它们抹掉：渲染引擎的 Python 路径一丢，出图直接废。
+ * 白名单管的是"这一笔能改什么"，不是"文件里能留什么"，这两件事别混。
+ */
+export function saveBrainConfig(siteRoot, patch = {}) {
+  const file = path.join(siteRoot, "brain.config.json");
+  let raw = {};
+  try {
+    if (existsSync(file)) raw = JSON.parse(readFileSync(file, "utf8")) || {};
+  } catch { raw = {}; }
+
+  const applied = {};
+  for (const k of BRAIN_CONFIG_KEYS) {
+    if (patch[k] === undefined) continue;
+    let v = patch[k];
+    if (k === "visionFromLlm" || k === "enabled") v = !!v;
+    else if (NUM_RANGE[k]) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) continue;
+      const [lo, hi] = NUM_RANGE[k];
+      v = Math.max(lo, Math.min(hi, n));
+    } else if (typeof v === "string") {
+      v = v.trim().slice(0, 300);
+    }
+    raw[k] = v;
+    applied[k] = v;
+  }
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n", "utf8");
+  return applied;
 }
 
 /* ------------------------------------------------------------------ 调用 */
@@ -442,6 +529,222 @@ async function ollamaChatOnce(cfg, { model, messages, format, maxTokens, tempera
   }
 }
 
+/**
+ * 外部 API：兼容 OpenAI 的 /chat/completions。
+ *
+ * 为什么要有这条路：本机 Ollama 只能跑小模型，读图是"先用 qwen2.5vl 看一眼、
+ * 再把文字描述交给 qwen2.5 写"的两段式。换成自带视觉的模型时，
+ * 图片和文字本来就能一次喂进去，两段式反而绕远、还会丢掉画面细节。
+ * 这条路径让它一步到位。
+ */
+/**
+ * DeepSeek 的思考模式开关。
+ *
+ * 官方文档写明：思考模式**默认是开的**，而它「不支持 temperature，传了不报错但也没作用」。
+ * 我们好几处是故意压低温求稳定的：读图 0.2、判"这组照片搭不搭" 0.2、
+ * 构图分析 0.1，被无声忽略正好砸在这些地方，输出会变得不稳且查不出原因。
+ * 另外思考发生在 content 之前，流式对话会先静默十几秒，助手面板看起来就像卡死。
+ *
+ * 所以默认关掉它。**只对 DeepSeek 的地址发这个字段**：
+ * 别的 OpenAI 兼容网关大多不认识 thinking，发了会直接回 400。
+ */
+export function thinkingParam(baseUrl) {
+  return /(^|\.)deepseek\.com/i.test(String(baseUrl || "")) ? { thinking: { type: "disabled" } } : {};
+}
+
+async function openaiChatOnce(cfg, { model, messages, format, maxTokens, temperature }) {
+  const base = String(cfg.baseUrl || "").trim().replace(/\/+$/, "");
+  if (!base) throw new BrainError("没有配置外部接口地址", { kind: "config" });
+  if (!cfg.apiKey) throw new BrainError("没有配置外部接口密钥", { kind: "config" });
+  if (!model) throw new BrainError("没有配置模型名", { kind: "config" });
+
+  // 消息格式转换：images 是 Ollama 专有字段，
+  // OpenAI 兼容接口要求把图片写进 content 数组里的 image_url（data URL）。
+  const conv = messages.map((m) => {
+    if (!Array.isArray(m.images) || !m.images.length) return { role: m.role, content: m.content };
+    const parts = [{ type: "text", text: m.content || "" }];
+    for (const b64 of m.images) {
+      if (b64) parts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } });
+    }
+    return { role: m.role, content: parts };
+  });
+
+  const body = {
+    model,
+    messages: conv,
+    stream: false,
+    temperature: temperature ?? cfg.temperature,
+    max_tokens: maxTokens,
+    // 关掉 DeepSeek 的思考模式，否则上面这个 temperature 会被静默忽略
+    ...thinkingParam(base),
+  };
+  // 要 JSON 时用官方字段，而不是把"请输出 JSON"塞进提示词
+  if (format === "json") body.response_format = { type: "json_object" };
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), cfg.timeoutMs);
+  try {
+    const r = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
+      signal: ctl.signal,
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => "");
+      throw new BrainError(`接口返回 ${r.status}：${text.slice(0, 200)}`, { kind: "http" });
+    }
+    const j = await r.json();
+    if (j.error) {
+      const msg = j.error.message || j.error;
+      throw new BrainError(String(msg).slice(0, 300), { kind: "model" });
+    }
+    const msg = j.choices?.[0]?.message || {};
+    const text = String(msg.content || "").trim();
+    // DeepSeek 的 JSON 模式官方就承认"偶尔会返回空内容"。空串如果直接抛出去，
+    // 上层看到的是一句莫名的"JSON 解析失败"，根本查不到是接口自己空了。
+    // 这里说清楚，并带上 finish_reason：是 length 就说明被 max_tokens 截断了。
+    if (!text) {
+      const rc = typeof msg.reasoning_content === "string" ? msg.reasoning_content.length : 0;
+      throw new BrainError(
+        `接口返回了空内容（finish_reason=${j.choices?.[0]?.finish_reason ?? "?"}` +
+        `${rc ? `，另有 ${rc} 字思考内容` : ""}）`,
+        { kind: "model" },
+      );
+    }
+    return text;
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new BrainError(`接口超时（${Math.round(cfg.timeoutMs / 1000)}s）`, { kind: "timeout" });
+    }
+    if (e instanceof BrainError) throw e;
+    throw new BrainError(`连不上外部接口（${base}）：${e.message}`, { kind: "offline" });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 统一的对话入口：按 provider 分发到本机 Ollama 或外部接口。
+ * 写文案、生成图像提示词这些上层逻辑一律调它，不直接碰 ollamaChat。
+ */
+function llmChat(cfg, opts) {
+  if (cfg.provider === "openai") return openaiChatOnce(cfg, opts);
+  return ollamaChat(cfg, opts);
+}
+
+/**
+ * 外部接口的**流式**调用，给助手对话用。
+ *
+ * 为什么不能复用 openaiChatOnce：那个是 stream:false 的整包返回，
+ * 而助手面板是靠 SSE 让字一个个蹦出来的；拿整包塞回去等于点了发送先卡十几秒。
+ *
+ * 两边的事件形状不一样，这里只负责把 OpenAI 的增量抽出来：
+ *   Ollama   每行一个 JSON：{"message":{"content":"字"}}
+ *   OpenAI   SSE 分帧：data: {"choices":[{"delta":{"content":"字"}}]} … data: [DONE]
+ * 注意 SSE 的分帧靠空行，一条 data 也可能被 TCP 切成两半，
+ * 所以必须自己攒缓冲区按 "\n\n" 切，不能按 read() 的边界当一帧。
+ */
+async function openaiChatStream(cfg, { model, messages, maxTokens, temperature, onDelta, signal }) {
+  const base = String(cfg.baseUrl || "").trim().replace(/\/+$/, "");
+  if (!base) throw new BrainError("没有配置外部接口地址", { kind: "config" });
+  if (!cfg.apiKey) throw new BrainError("没有配置外部接口密钥", { kind: "config" });
+  if (!model) throw new BrainError("没有配置模型名", { kind: "config" });
+
+  const conv = messages.map((m) => {
+    if (!Array.isArray(m.images) || !m.images.length) return { role: m.role, content: m.content };
+    const parts = [{ type: "text", text: m.content || "" }];
+    for (const b64 of m.images) {
+      if (b64) parts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } });
+    }
+    return { role: m.role, content: parts };
+  });
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), cfg.timeoutMs || 120000);
+  if (signal) signal.addEventListener("abort", () => ctl.abort(), { once: true });
+  try {
+    const r = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${cfg.apiKey}`,
+        accept: "text/event-stream",
+      },
+      signal: ctl.signal,
+      body: JSON.stringify({
+        model, messages: conv, stream: true,
+        temperature: temperature ?? 0.7,
+        max_tokens: maxTokens || 500,
+        ...thinkingParam(base),
+      }),
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => "");
+      throw new BrainError(`接口返回 ${r.status}：${text.slice(0, 200)}`, { kind: "http" });
+    }
+
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", full = "", reasoningLen = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const frames = buf.split("\n\n");
+      buf = frames.pop();                       // 最后一段可能是半帧，留到下一轮
+      for (const frame of frames) {
+        for (const line of frame.split("\n")) {
+          const t = line.trim();
+          if (!t.startsWith("data:")) continue;
+          const raw = t.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          let j; try { j = JSON.parse(raw); } catch { continue; }
+          if (j.error) throw new BrainError(String(j.error.message || j.error).slice(0, 200), { kind: "model" });
+          const d = j.choices?.[0]?.delta || {};
+          // 思考模式开着时，推理过程会先以 delta.reasoning_content 流回来。
+          // 那段不该当正文显示给用户（所以丢弃），但也不能被默默吞掉：
+          // 正文始终为空而推理非空，说明这轮只出了思考没出答案，得给一句能查的话。
+          if (typeof d.reasoning_content === "string") reasoningLen += d.reasoning_content.length;
+          const piece = d.content || "";
+          if (piece) { full += piece; if (onDelta) onDelta(piece); }
+        }
+      }
+    }
+    if (!full && reasoningLen) {
+      throw new BrainError(`模型只回了思考过程、没有正文（reasoning_content ${reasoningLen} 字）`, { kind: "model" });
+    }
+    return full.trim();
+  } catch (e) {
+    if (e.name === "AbortError") throw new BrainError("对话超时或被取消", { kind: "timeout" });
+    if (e instanceof BrainError) throw e;
+    throw new BrainError(`连不上外部接口（${base}）：${e.message}`, { kind: "offline" });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 读图该走哪条路。
+ *   llm      选中了外部模型、且它自带视觉，图片直接喂给它
+ *   ollama   其余情况一律走本机 Ollama 的视觉模型
+ * 也就是说"文案走外部、读图走本地"是可以共存的，不需要两边都换。
+ */
+export function visionRoute(cfg) {
+  return cfg.provider === "openai" && cfg.visionFromLlm ? "llm" : "ollama";
+}
+
+/** 读图专用入口：可能落到本机 Ollama，即使写文案走的是外部接口 */
+function visionChat(cfg, opts) {
+  if (visionRoute(cfg) === "llm") {
+    // 走 LLM 自带视觉时，模型要用那个外部模型本身。
+    // 调用方传进来的 model 是本机视觉模型名（cfg.vision），
+    // 直接拿去问外部接口会报"模型不存在"。
+    return llmChat(cfg, { ...opts, model: cfg.copy });
+  }
+  return ollamaChat(cfg, opts);
+}
+
 /** Ollama 是否在跑，以及有哪些模型 */
 export async function brainStatus(cfg) {
   const out = { up: false, endpoint: cfg.endpoint, models: [], hasVision: false, hasCopy: false };
@@ -449,7 +752,10 @@ export async function brainStatus(cfg) {
     const r = await fetch(`${cfg.endpoint}/api/tags`, { signal: AbortSignal.timeout(4000) });
     const j = await r.json();
     out.up = true;
-    out.models = (j.models || []).map((m) => m.name);
+    // Ollama 的 /api/tags 会**真的**把同一个 tag 列两遍（本机实测：
+    // qwen2.5vl:3b 出现两次），直接透传的话设置面板的下拉里就是一串重影。
+    // 只按名字去重，不改顺序：顺序是 Ollama 给的，通常最近用的在前。
+    out.models = [...new Set((j.models || []).map((m) => m.name).filter(Boolean))];
     out.hasVision = !!cfg.vision && out.models.some((n) => n === cfg.vision || n.startsWith(cfg.vision));
     out.hasCopy = !!cfg.copy && out.models.some((n) => n === cfg.copy || n.startsWith(cfg.copy));
   } catch {
@@ -521,11 +827,12 @@ export function parseVisionText(text) {
 
 /** 让视觉模型看一张照片 */
 export async function describeImage(cfg, absImagePath) {
-  if (!cfg.vision) return { ok: false, reason: "未配置视觉模型" };
+  // 走 LLM 自带视觉时不需要本机视觉模型，所以这个守卫只在走本地时生效
+  if (visionRoute(cfg) === "ollama" && !cfg.vision) return { ok: false, reason: "未配置视觉模型" };
   if (!existsSync(absImagePath)) return { ok: false, reason: "图片不存在" };
   try {
     const b64 = await visionImageB64(cfg, absImagePath);
-    const text = await ollamaChat(cfg, {
+    const text = await visionChat(cfg, {
       model: cfg.vision,
       messages: [
         { role: "system", content: VISION_SYSTEM },
@@ -570,11 +877,13 @@ const LAYOUT_ANALYSIS_SYSTEM = `你是海报版式顾问。看这张参考图，
 理由: <一句话，20 字以内，说清这张图的什么特征让你这么判断>`;
 
 export async function analyzeLayout(cfg, absImagePath) {
-  if (!cfg.vision) return { ok: false, reason: "未配置视觉模型（brain.config.json 的 vision）" };
+  if (visionRoute(cfg) === "ollama" && !cfg.vision) {
+    return { ok: false, reason: "未配置视觉模型（brain.config.json 的 vision）" };
+  }
   if (!absImagePath || !existsSync(absImagePath)) return { ok: false, reason: "图片不存在" };
   try {
     const b64 = await visionImageB64(cfg, absImagePath);
-    const text = await ollamaChat(cfg, {
+    const text = await visionChat(cfg, {
       model: cfg.vision,
       messages: [
         { role: "system", content: LAYOUT_ANALYSIS_SYSTEM },
@@ -625,6 +934,12 @@ export async function analyzeLayout(cfg, absImagePath) {
  */
 export async function assistantChat(cfg, messages, { onDelta, signal } = {}) {
   if (!cfg.copy) throw new BrainError("没有配置对话模型", { kind: "config" });
+  // 小旅的对话同样吃 provider 这一个开关：接了外部接口就该走外部。
+  // 早先这里直接写死 `${cfg.endpoint}/api/chat`，于是设置里切成外部模型之后，
+  // 它拿外部模型名去打本机 Ollama，用户看到的是一句"模型返回 404"。
+  if (cfg.provider === "openai") {
+    return openaiChatStream(cfg, { model: cfg.copy, messages, onDelta, signal, temperature: 0.7, maxTokens: 500 });
+  }
   await ensureOllama(cfg).catch(() => {});
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), cfg.timeoutMs || 120000);
@@ -691,7 +1006,7 @@ export async function describeImages(cfg, absImagePaths) {
   let mixWhy = "";
   if (scenes.length >= 2 && cfg.copy) {
     try {
-      const raw = await ollamaChat(cfg, {
+      const raw = await llmChat(cfg, {
         model: cfg.copy,
         messages: [
           { role: "system", content: MIXABLE_SYSTEM },
@@ -1028,7 +1343,7 @@ export async function composeCopy(cfg, brief, imagePaths = [], opts = {}) {
   let ask = userMsg;
   while (attempt < maxAttempts) {
     attempt++;
-    const rawDraft = await ollamaChat(cfg, {
+    const rawDraft = await llmChat(cfg, {
       model: cfg.copy,
       messages: [
         { role: "system", content: system },
@@ -1064,3 +1379,4 @@ export async function composeCopy(cfg, brief, imagePaths = [], opts = {}) {
     attempts: attempt,
   };
 }
+

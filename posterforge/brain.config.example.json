@@ -26,5 +26,16 @@
   "visionMaxTokens": 160,
   "copyMaxTokens": 500,
   "temperature": 0.7,
-  "keepAlive": "30m"
+  "keepAlive": "30m",
+
+  "_provider": "模型跑在哪。ollama = 本机 Ollama（默认，离线、不花钱）；openai = 外部接口，任何兼容 OpenAI /chat/completions 的服务都行。改成 openai 时下面三项才用得上，且**旅游规划（HikiTravel）也认这个值**，三处会一起切过去。一般不用手改，网页上「设置 → 模型」里点一下就行。",
+  "provider": "ollama",
+  "_baseUrl": "外部接口地址，填到 /v1 为止（程序自己接 /chat/completions）。只在 provider=openai 时有意义。",
+  "baseUrl": "",
+  "_apiKey": "外部接口密钥。注意：这个文件不进版本库（.gitignore 里有），密钥只存在本机。设置页只回「有没有配过」，不回明文。",
+  "apiKey": "",
+  "_visionFromLlm": "外部模型自带视觉时勾上：图片直接喂给它，省掉「先本机读图、再写文案」那段两段式。只在 provider=openai 时生效；本机模式下读图一律走 vision。",
+  "visionFromLlm": false,
+  "_drawingModel": "出图用哪个本地模型，填 models/ 下的目录名。留空 = 自动挑一个能跑起来的（推荐）。",
+  "drawingModel": ""
 }

@@ -28,6 +28,7 @@ import os from "node:os";
 import {
   generateImage as aigenGenerate, status as aigenStatus, interrupt as aigenInterrupt,
   envCheck as aigenEnvCheck, preload as preloadAigen, AIGEN_MODEL, AigenError,
+  reloadModelDir,
 } from "./aigen.mjs";
 import { fetchFeeds, createFeedCache, SOURCES } from "./feeds.mjs";
 // 模板检索增强：nomic-embed-text 向量 + 余弦 + 采纳反馈增益（不训练模型，见该模块注释）
@@ -42,6 +43,7 @@ import { getRotation, applyRotation } from "./templates-rotate.mjs";
 import {
   loadBrainConfig, brainStatus, composeCopy, BrainError,
   BRAIN_LAYOUTS, BRAIN_KINDS, deriveImagePrompt, unloadModels, analyzeLayout, assistantChat,
+  saveBrainConfig, visionRoute, residentLocalModels,
 } from "./brain.mjs";
 // 版面几何：服务端与浏览器共用同一份，避免两条路渲出两种版式
 import { buildPosterSpecFrom, buildCheckinSpecFrom, POSTER_TONES, POSTER_COMPOSITIONS } from "./public/poster-layout.mjs";
@@ -50,7 +52,7 @@ import { buildPosterSpecFrom, buildCheckinSpecFrom, POSTER_TONES, POSTER_COMPOSI
 import { findPython, findComfyPython, findForgeRoot, findComfyRoot } from "./paths.mjs";
 // 模型自举：自动检索本机现成的画图模型 → 有就用 → 一个都没有时才谈下载
 import { modelStatus, provisionPlan, startProvision, provisionProgress, invalidateModelCache,
-  comfyUp, ensureComfyRunning, installComfyUI, comfyInstallPlan } from "./models.mjs";
+  comfyUp, ensureComfyRunning, installComfyUI, comfyInstallPlan, discoverModels } from "./models.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SITE_ROOT = __dirname;
@@ -182,6 +184,9 @@ function warmUpBrainLater(delayMs = 2500) {
     try {
       const cfg = loadBrainConfig(SITE_ROOT);
       if (!cfg.enabled || !cfg.copy) return;
+      // 走外部接口时没什么可预热的：本机 Ollama 里既没有被卸掉的本地模型，
+      // cfg.copy 又是个外部名字，打过去只会换回一个 404。
+      if (cfg.provider === "openai") return;
       // 直接打 Ollama：哪怕只让它回一个 token，目的是把权重读进卡里，
       // 并让 keep_alive 生效（模型待着，而不是用完就卸）。
       await fetch(String(cfg.endpoint || "").replace(/\/$/, "") + "/api/generate", {
@@ -1376,7 +1381,11 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     const freeGB = await vramFreeGB();
     if (freeGB !== null && freeGB < 3) {
       const bcfg = loadBrainConfig(SITE_ROOT);
-      const names = [bcfg.copy, bcfg.vision].filter(Boolean);
+      // 走外部接口时 copy/vision 是**外部模型名**，拿它们卸本机 Ollama 卸不掉，
+      // 显存一点不还，出图就会退回"越跑越慢"。这时改成问 Ollama 谁还占着卡。
+      const names = bcfg.provider === "openai"
+        ? await residentLocalModels(bcfg)
+        : [bcfg.copy, bcfg.vision].filter(Boolean);
       if (names.length) {
         await unloadModels(bcfg, names);
         evictedLLM = true;
@@ -1432,7 +1441,10 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       const freeGB = await vramFreeGB();
       if (freeGB !== null && freeGB < 5) {
         const bcfg = loadBrainConfig(SITE_ROOT);
-        const names = [bcfg.copy, bcfg.vision].filter(Boolean);
+        // 同上：外部接口模式下 copy/vision 不是本机模型名，得问 Ollama 谁占着卡。
+        const names = bcfg.provider === "openai"
+          ? await residentLocalModels(bcfg)
+          : [bcfg.copy, bcfg.vision].filter(Boolean);
         if (names.length) {
           await unloadModels(bcfg, names);
           evictedLLM = true;
@@ -1919,6 +1931,107 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       comfyUp: aig,
       autoBgEngine: "diffusers/SDXL-Turbo",
     });
+  }
+
+  /**
+   * /api/settings：设置页（右上角齿轮）读写的唯一入口。
+   *
+   * GET  返回当前设置 + 各下拉框的候选列表
+   * POST 保存白名单内的字段
+   *
+   * 安全约定：apiKey 只回传 hasApiKey 布尔值，不回传明文：
+   * 设置页不需要把密钥显示出来，回传等于把它写进浏览器历史与前端内存。
+   * 保存时若 apiKey 传空字符串，表示"这次没改"，沿用原来那份。
+   */
+  if (p === "/api/settings") {
+    const cfg = loadBrainConfig(SITE_ROOT);
+
+    if (req.method === "GET") {
+      const st = await brainStatus(cfg).catch(() => ({ up: false, models: [] }));
+      let drawing = [];
+      try {
+        // discoverModels() 返回的就是数组本身，不是 { models: [...] }。
+        // 两种形状都兼容：它上面的 modelStatus() 包装过一层，容易记混。
+        const dm = discoverModels();
+        drawing = (Array.isArray(dm) ? dm : (dm.models || [])).map((m) => ({
+          name: m.name, root: m.root, sizeGB: m.sizeGB, usable: m.usable,
+          blockedReason: m.blockedReason || null,
+        }));
+      } catch { drawing = []; }
+      const activeName = AIGEN_MODEL ? path.basename(AIGEN_MODEL) : "";
+      return json(res, 200, {
+        ok: true,
+        settings: {
+          provider: cfg.provider,
+          endpoint: cfg.endpoint,
+          baseUrl: cfg.baseUrl,
+          // 只回"有没有"，不回明文
+          hasApiKey: !!cfg.apiKey,
+          copy: cfg.copy,
+          vision: cfg.vision,
+          visionFromLlm: !!cfg.visionFromLlm,
+          drawingModel: cfg.drawingModel,
+        },
+        options: {
+          ollamaUp: !!st.up,
+          ollamaModels: st.models || [],
+          drawingModels: drawing,
+          activeDrawingModel: activeName,
+          activeDrawingRoot: AIGEN_MODEL,
+          // 当前读图实际走哪条路，设置页据此显示"正在用 LLM 自带视觉 / 本机视觉"
+          visionRoute: visionRoute(cfg),
+        },
+      });
+    }
+
+    if (req.method === "POST") {
+      let payload;
+      try { payload = JSON.parse(await readBody(req, 64 * 1024)); }
+      catch { return json(res, 400, { ok: false, message: "请求体不是合法 JSON" }); }
+
+      const before = loadBrainConfig(SITE_ROOT);
+      const patch = {};
+      for (const k of ["provider", "endpoint", "baseUrl", "copy", "vision", "visionFromLlm", "drawingModel"]) {
+        if (payload[k] !== undefined) patch[k] = payload[k];
+      }
+      // 密钥单独处理：只有传了非空值才覆盖，避免"没改密钥"被清空
+      if (typeof payload.apiKey === "string" && payload.apiKey.trim()) patch.apiKey = payload.apiKey.trim();
+      if (payload.clearApiKey === true) patch.apiKey = "";
+
+      if (patch.provider !== undefined && !["ollama", "openai"].includes(String(patch.provider))) {
+        return json(res, 400, { ok: false, message: "provider 只能是 ollama 或 openai" });
+      }
+      // 选了外部接口却没给地址，等于接下来一定失败，不如现在就说清楚
+      if (patch.provider === "openai" || (!patch.provider && before.provider === "openai")) {
+        const base = String(patch.baseUrl ?? before.baseUrl ?? "").trim();
+        if (!base) return json(res, 400, { ok: false, message: "选择外部接口时必须填写接口地址" });
+      }
+
+      try { saveBrainConfig(SITE_ROOT, patch); }
+      catch (e) { return json(res, 500, { ok: false, message: "写入配置失败：" + e.message }); }
+
+      // 绘图模型换了要让它立刻生效：重新解析目录 + 回收常驻 worker，
+      // 下次出图时用新模型重新加载。没换就不用打扰正在跑的 worker。
+      const after = loadBrainConfig(SITE_ROOT);
+      const drawChanged = String(before.drawingModel || "") !== String(after.drawingModel || "");
+      let drawNow = AIGEN_MODEL;
+      if (drawChanged) {
+        try { aigenInterrupt(); } catch { /* worker 没起也正常 */ }
+        invalidateModelCache();
+        drawNow = reloadModelDir();
+        console.log(`[settings] 绘图模型已切换 → ${drawNow}`);
+      }
+      console.log(`[settings] provider=${after.provider} visionRoute=${visionRoute(after)} copy=${after.copy}`);
+
+      return json(res, 200, {
+        ok: true,
+        applied: Object.keys(patch),
+        drawingModelChanged: drawChanged,
+        activeDrawingModel: drawNow ? path.basename(drawNow) : "",
+      });
+    }
+
+    return json(res, 405, { ok: false, message: "只支持 GET / POST" });
   }
 
   /**

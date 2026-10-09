@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..config import settings
+from ..config import effective_llm, settings
 from .client import LLMClient
 
 logger = logging.getLogger("travelplanner.warmup")
@@ -102,6 +102,14 @@ class ModelWarmer:
             with self._lock:
                 self._state = "off"
                 self._detail = "已关闭（OLLAMA_PREWARM=0）"
+            return False
+        # 走外部接口时没什么可预热的：前缀缓存由对方自己管，
+        # 而下面这些预热任务用的都是本机 Ollama 的模型名，打过去只会换回 404。
+        eff = effective_llm()
+        if eff.provider != "ollama":
+            with self._lock:
+                self._state = "off"
+                self._detail = f"外部接口（{eff.source}）无需预热"
             return False
         with self._lock:
             if self._thread is not None and self._thread.is_alive():

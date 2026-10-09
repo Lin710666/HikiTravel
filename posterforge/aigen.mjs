@@ -21,6 +21,8 @@ import path from "node:path";
 import { findComfyPython, REPO_ROOT } from "./paths.mjs";
 // 用哪个模型不写死，自动检索本机现成的，质量高的优先（规则只在 models.mjs 里）
 import { pickBestModel } from "./models.mjs";
+// 设置页把绘图模型写进 brain.config.json，这里读出来当"显式指定"用
+import { loadBrainConfig } from "./brain.mjs";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
@@ -55,13 +57,42 @@ export const AIGEN_SCRIPT = path.join(HERE, "aigen.py");
  */
 function resolveModelDir() {
   if (process.env.PF_AIGEN_MODEL) return process.env.PF_AIGEN_MODEL;
+  // 设置页里选的绘图模型优先于自动挑选。
+  // 允许两种写法：models/ 下的目录名（如 sdxl-turbo），或任意绝对路径。
+  // 选中的名字在本机找不到时**不报错**，直接落回自动挑选：
+  // 用户把仓库拷到另一台机器后，配置里的旧模型名多半是不存在的。
+  try {
+    const want = String(loadBrainConfig(REPO_ROOT).drawingModel || "").trim();
+    if (want) {
+      if (path.isAbsolute(want)) {
+        if (existsSync(want)) return want;
+      } else {
+        const rel = path.join(REPO_ROOT, "models", want);
+        if (existsSync(rel)) return rel;
+      }
+    }
+  } catch { /* 配置读不出来就继续往下走 */ }
   try {
     const best = pickBestModel();
     if (best) return best.root;
   } catch { /* 检索失败不该让整个站点起不来 */ }
   return path.join(REPO_ROOT, "models", "sdxl-turbo");   // 兜底：给个明确的预期路径
 }
-export const AIGEN_MODEL = resolveModelDir();
+
+/**
+ * 当前生效的模型目录。
+ *
+ * 用 let 而不是 const：设置页改完绘图模型要能立刻生效，不能等到下次重启进程。
+ * 保存设置的服务端会调 reloadModelDir() 重新解析，并顺手回收常驻 worker，
+ * 让它下次出图时用新模型重新加载。
+ */
+export let AIGEN_MODEL = resolveModelDir();
+
+/** 重新解析模型目录（设置页改了 drawingModel 之后调用） */
+export function reloadModelDir() {
+  AIGEN_MODEL = resolveModelDir();
+  return AIGEN_MODEL;
+}
 
 /**
  * 选中模型的推荐采样参数。

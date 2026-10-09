@@ -7,14 +7,118 @@
 
 使用方式：复制 .env.example 为 .env 后按需修改。
 """
+import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 
 # 载入 backend/.env（若存在）。必须在 Settings 默认值求值前调用，
 # 否则 os.getenv 会拿到空值。进程环境变量优先，不会被 .env 覆盖。
 load_dotenv()
+
+
+# --------------------------------------------------------------------------
+# 与 PosterForge 共用「模型跑在哪」这一份配置
+# --------------------------------------------------------------------------
+# 为什么旅游规划要去读 posterforge/brain.config.json：
+# 用户在设置面板里切一次「外部接口」，期望的是海报、小旅、旅游规划**一起**换，
+# 而不是每个页面各配一遍。那份配置本来就是"模型跑在哪"的唯一真相，
+# 这里复用它，省得两边各存一份、改了这边忘了那边。
+#
+# 优先级：显式环境变量 > 共享配置 > 本模块默认值。
+# 于是单独部署 HikiTravel（没有 posterforge 目录）时自然退回纯 Ollama，不受影响。
+#
+# 注意是**按调用时读**而不是 import 时读：用户在网页上点了保存就该立刻生效，
+# 不能要求重启 8001。用 mtime 做缓存，文件没动就不重复解析。
+
+
+@dataclass
+class LLMSettings:
+    """一次调用实际要用的模型参数（已经把所有来源合并好）。"""
+
+    provider: str          # ollama | openai
+    base_url: str          # ollama: 服务地址；openai: 到 /v1 为止的地址
+    api_key: str
+    model: str
+    source: str            # env / shared / default，仅供排查
+    shared_path: Optional[str] = None
+
+
+_shared_cache: Dict[str, Any] = {"mtime": None, "data": {}}
+
+
+def shared_config_path() -> Optional[Path]:
+    """找到 PosterForge 的配置文件；找不到就返回 None（纯本地部署的情形）。"""
+    raw = os.getenv("PF_BRAIN_CONFIG", "").strip()
+    if raw:
+        p = Path(raw)
+        return p if p.is_file() else None
+    # backend/app/config.py → parents[3] 就是仓库根，posterforge 与 hikitravel 平级
+    p = Path(__file__).resolve().parents[3] / "posterforge" / "brain.config.json"
+    return p if p.is_file() else None
+
+
+def _read_shared() -> Dict[str, Any]:
+    """按 mtime 缓存的共享配置读取。读坏了就当没有，不影响本地推理。"""
+    path = shared_config_path()
+    if path is None:
+        _shared_cache["mtime"] = None
+        _shared_cache["data"] = {}
+        return {}
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return dict(_shared_cache["data"])
+    if _shared_cache["mtime"] == mtime:
+        return dict(_shared_cache["data"])
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = dict(_shared_cache["data"])   # 正写着读到的半截 JSON：沿用上一份
+    _shared_cache["mtime"] = mtime
+    _shared_cache["data"] = data
+    return dict(data)
+
+
+def effective_llm() -> LLMSettings:
+    """合并出本次调用该用的参数。每次调用前都走一遍（廉价，带 mtime 缓存）。"""
+    shared = _read_shared()
+    path = shared_config_path()
+
+    env_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if env_provider in ("ollama", "openai"):
+        provider, source = env_provider, "env"
+    elif str(shared.get("provider", "")).strip().lower() in ("ollama", "openai"):
+        provider, source = str(shared["provider"]).strip().lower(), "shared"
+    else:
+        provider, source = "ollama", "default"
+
+    if provider == "openai":
+        base = (os.getenv("LLM_BASE_URL") or shared.get("baseUrl") or "").strip()
+        key = (os.getenv("LLM_API_KEY") or shared.get("apiKey") or "").strip()
+        model = (os.getenv("LLM_MODEL") or shared.get("copy") or "").strip() or settings.ollama_model
+    else:
+        base = (os.getenv("LLM_BASE_URL") or settings.ollama_base_url).strip()
+        key = ""
+        # OLLAMA_MODEL 显式设过就用它；否则跟随共享配置里的对话模型
+        if os.getenv("OLLAMA_MODEL"):
+            model = settings.ollama_model
+        else:
+            model = (shared.get("copy") or settings.ollama_model).strip()
+
+    return LLMSettings(
+        provider=provider,
+        base_url=base.rstrip("/"),
+        api_key=key,
+        model=model,
+        source=source,
+        shared_path=str(path) if path else None,
+    )
 
 
 @dataclass
