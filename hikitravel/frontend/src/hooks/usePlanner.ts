@@ -103,7 +103,7 @@ export function usePlanner(notify: (text: string) => void) {
         mapConfigRef.current = cfg
         setMapConfig(cfg)
         // 提前把高德 JS API 拉下来（约 1MB，异步加载）。
-        // 以前是等 PlanMap 挂载才开始下载，也就是等行程排好之后才开始——
+        // 以前是等 PlanMap 挂载才开始下载，也就是等行程排好之后才开始，
         // 于是右栏总比中栏的行程晚几秒才出现，看起来像"地图不跟着规划走"。
         // 拿到配置就预加载，行程一到就能立刻画出来。
         if (cfg.enabled) void loadAmap(cfg).catch(() => {})
@@ -114,7 +114,7 @@ export function usePlanner(notify: (text: string) => void) {
   /* 静态地图：Key 在后端，前端只拿 data URL 与图例 */
   const loadMap = useCallback(async (target: TravelPlan) => {
     // 已经有交互地图了，就没必要再花一次高德 Web服务 额度画静态图。
-    // 例外：用户点了「重新获取」——那是交互地图用不了时的兜底入口，
+    // 例外：用户点了「重新获取」，那是交互地图用不了时的兜底入口，
     // 不能再因为"配置说交互地图可用"就什么都不做。
     if (mapConfigRef.current?.enabled && !mapPreferStaticRef.current) return
     mapAbortRef.current?.abort()
@@ -127,7 +127,7 @@ export function usePlanner(notify: (text: string) => void) {
       if (controller.signal.aborted) return // 已被更新的请求取代，丢弃过期结果
       setMapData(data)
     } catch (e) {
-      if (controller.signal.aborted) return // 被取代不算失败，别把新结果清掉
+      if (controller.signal.aborted) return // 被取代不算失败，不要把新结果清掉
       // 地图只是辅助信息，失败不阻断行程展示；但原因要如实告诉用户：
       // 把「高德限流/网络失败」显示成「没配密钥」会让人往错误方向排查。
       setMapData(null)
@@ -255,7 +255,7 @@ export function usePlanner(notify: (text: string) => void) {
   const swapOption = useCallback(
     (from: string, to: string) => {
       if (!plan) return
-      // 用行程里的**具体名称**指代，不说「第 N 天的餐厅」这种笼统说法——
+      // 用行程里的**具体名称**指代，不说「第 N 天的餐厅」这种笼统说法，
       // 一天可能有好几家餐厅，大模型只能猜，替换就会落到错的那家。
       void run({ kind: 'revise', message: `把「${from}」换成「${to}」，其余保持不变`, plan })
     },

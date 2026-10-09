@@ -1,6 +1,6 @@
 # 批处理脚本必须用 CRLF 换行。
 #
-# 原因：cmd 对 LF 换行的 .bat 解析不可靠 —— if 块、goto 会出问题，
+# 原因：cmd 对 LF 换行的 .bat 解析不可靠：if 块、goto 会出问题，
 # 表现就是「双击没反应」或者报一些莫名其妙的外部命令错误。
 #
 # Windows 上很多人开了 core.autocrlf=true，本地工作区被自动转成 CRLF，

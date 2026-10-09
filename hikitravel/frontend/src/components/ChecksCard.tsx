@@ -27,7 +27,7 @@ export default function ChecksCard({ plan, disabled, notify }: Props) {
       </div>
       {pending ? (
         <p className="meta">
-          行程已经可以先看了，体检还在跑——它会检查绕路、重复安排、时间是否过满，
+          行程已经可以先看了，体检还在跑，它会检查绕路、重复安排、时间是否过满，
           结论出来后自动补在这里。
         </p>
       ) : issues.length === 0 ? (

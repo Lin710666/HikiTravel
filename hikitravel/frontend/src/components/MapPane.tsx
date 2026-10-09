@@ -17,7 +17,7 @@ interface Props {
 /**
  * 右栏：地图铺满整栏、常驻不动（仿 Wanderlog 的右侧地图）。
  *
- * 备选与体检已经移到中栏——右栏只留给地图，
+ * 备选与体检已经移到中栏，右栏只留给地图，
  * 否则地图会被挤成一小块，失去"边看行程边看路线"的意义。
  * 图例改成浮在地图左下角，可收起。
  */
@@ -28,7 +28,7 @@ export default function MapPane({ planner, day, theme, focus }: Props) {
   const [legendOpen, setLegendOpen] = useState(false)
 
   // 还没有规划（生成中，或首次进入还没生成）：以前这里返回一个空的 aside，
-  // 右栏就是一整块空白——边上的行程在动、地图一动不动，观感就是"地图坏了"。
+  // 右栏就是一整块空白，边上的行程在动、地图一动不动，观感就是"地图坏了"。
   // 现在给一个明确的等待态，说明地图什么时候会出现。
   if (!plan) {
     return (

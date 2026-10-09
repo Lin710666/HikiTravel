@@ -7,7 +7,7 @@ export interface Toast {
 
 let seq = 0
 
-/** 轻量提示：只做一件事——把一条消息显示 2 秒后收回。 */
+/** 轻量提示：只做一件事，把一条消息显示 2 秒后收回。 */
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([])
 

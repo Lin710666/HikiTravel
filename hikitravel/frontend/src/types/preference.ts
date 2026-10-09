@@ -12,7 +12,7 @@ export interface Travelers {
 /**
  * 特别想去的景点。
  *
- * 从下拉里选定具体地点时会带上 adcode 与坐标——坐标是权威，后端直接用，
+ * 从下拉里选定具体地点时会带上 adcode 与坐标，坐标是权威，后端直接用，
  * 不再拿名字去高德猜（同名景区会搜到别处）。手输的只有 name，坐标留空。
  */
 export interface MustVisit {

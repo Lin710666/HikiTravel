@@ -19,7 +19,7 @@ export default function App() {
   const [focus, setFocus] = useState<string | null>(null)
 
   /* 外观：跟随系统；用户手动切过才记住。
-     键名用站点统一的 pf-theme —— 门户(hub.html)、海报生成、行程规划三处共用同一个键，
+     键名用站点统一的 pf-theme：门户(hub.html)、海报生成、行程规划三处共用同一个键，
      所以在门户切了深色，进这里就是深色，不用各切一次。
      tp-theme 是这一页以前用的键，仍然读、也仍然写，免得老用户的选择白丢。 */
   const [theme, setTheme] = useState<Theme>(() => {
@@ -47,7 +47,7 @@ export default function App() {
   }, [])
 
   /* 用户没手动选过时，系统主题一变就跟着变（Windows 的自动日夜切换）。
-     注意这里判断的是"有没有手动选过"，而不是"localStorage 里有没有值"——
+     注意这里判断的是"有没有手动选过"，而不是"localStorage 里有没有值"，
      所以自动推导出来的主题**绝不能**写回 localStorage，否则一动页面就不再跟随系统
      （原来每次挂载都写一次，等于"跟随系统"只用得上第一次）。 */
   useEffect(() => {
@@ -73,7 +73,7 @@ export default function App() {
   /* ---------------------------------------------------------------- 三栏拖宽
      左右两条分隔条可以拖动，改左右栏的宽度。
 
-     宽度只存在内存里（刷新回默认）—— 和悬浮球那套规则一致：
+     宽度只存在内存里（刷新回默认）， 和悬浮球那套规则一致：
      免得哪天被拖成一个奇怪的比例，又找不回来。
 
      拖动时用 window 上的 pointermove 而不是 setPointerCapture：

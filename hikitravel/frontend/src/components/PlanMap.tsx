@@ -82,7 +82,7 @@ export default function PlanMap({ plan, day, theme, config, focus, fallback }: P
     if (!boxRef.current) return
     // 地图已经建好了（例如换了日期、改了规划）：直接标记就绪。
     // 这里曾经写成 `|| mapRef.current` 就 return，而 cleanup 又把 ready 置回 false，
-    // 结果每次 revise 之后 ready 永远停在 false，画覆盖物的 effect 再也不执行——
+    // 结果每次 revise 之后 ready 永远停在 false，画覆盖物的 effect 再也不执行，
     // 表现就是「替换一次之后地图上的路线再也不更新」。
     if (mapRef.current) {
       setReady(true)

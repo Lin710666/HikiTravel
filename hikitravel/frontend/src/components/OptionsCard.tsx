@@ -18,7 +18,7 @@ interface Props {
 
 // 备选池：只用于浏览候选。
 //
-// 替换入口故意不放在这里——从池子里点「替换」说不清是要换掉行程里的哪一项，
+// 替换入口故意不放在这里，从池子里点「替换」说不清是要换掉行程里的哪一项，
 // 之前那条链路就是这么坏的（一天可能有好几家餐厅，大模型只能猜）。
 // 现在替换统一从行程里具体某一项的「替换」按钮发起，见 ReplaceDialog。
 export default function OptionsCard({ dining, hotel, attraction }: Props) {

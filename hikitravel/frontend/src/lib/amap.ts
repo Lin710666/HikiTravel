@@ -100,7 +100,7 @@ export function collectPoints(plan: {
  * 地图元素的唯一键。
  *
  * 早先这里用的是「数组下标」，但酒店不在时间轴里、不占行程点序号，
- * 加进来之后下标就对不上了——所以改成显式键，行程点和酒店各有一套命名，
+ * 加进来之后下标就对不上了，所以改成显式键，行程点和酒店各有一套命名，
  * 以后再加别的图层（比如备选点）也只需补一个前缀。
  */
 export const poiKey = (day: number, itemIndex: number) => `poi:${day}:${itemIndex}`

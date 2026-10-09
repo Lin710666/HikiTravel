@@ -19,7 +19,7 @@ const MENU_MAX_HEIGHT = 300
  *
  * 为什么要有这个下拉：用户的目的地写法千奇百怪（「福建平潭」「平潭岛」
  * 「平潭综合实验区」），而且「平潭」在全国既有福建福州的平潭县、
- * 也有广东惠州的平潭镇——同名歧义靠后端猜是在赌，只能由用户确认。
+ * 也有广东惠州的平潭镇，同名歧义靠后端猜是在赌，只能由用户确认。
  * adcode 是高德的主键，选定之后一切字符串歧义都不存在了。
  *
  * 但它只是「建议层」：手输的仍然能直接提交，由后端解析链兜底，
@@ -28,7 +28,7 @@ const MENU_MAX_HEIGHT = 300
 export default function DestinationPicker({ value, adcode, disabled, onChange }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  /** 刚点选的名字：选完会触发一次 value 变化，别把它当成新输入又弹一次 */
+  /** 刚点选的名字：选完会触发一次 value 变化，不要把它当成新输入又弹一次 */
   const selectedRef = useRef('')
   const [open, setOpen] = useState(false)
   const [tips, setTips] = useState<PlaceTip[]>([])
