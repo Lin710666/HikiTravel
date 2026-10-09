@@ -52,7 +52,7 @@
 | 菜品图 | 800×800 | 一律用实拍，禁用 AI 生成 |
 | 携程 / 美团酒店 | 1200×800（3:2） | 横版 |
 
-## 批量出图脚本
+## 多尺寸分发脚本
 
 ```powershell
 $py = if ($env:PF_PYTHON) { $env:PF_PYTHON } else { "python" }

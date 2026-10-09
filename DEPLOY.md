@@ -50,7 +50,7 @@ if (!hasPip(python)) return bad("环境不合格");
 ```
 
 但有一台机器 Python 好好的、Pillow 也装着、渲染完全正常，**就是没有 pip**
-（依赖是别的方式装的）。脚本却报"环境不合格" —— 凭空造出一个故障。
+（依赖是别的方式装的）。脚本却报"环境不合格"，凭空造出一个故障。
 
 现在改成：
 
@@ -63,7 +63,7 @@ if (m.ok) return ok("已装，不需要 pip");
 **依赖装法有很多种，不该假设只有一种。**
 
 同理，`qrcode` 是**可选**依赖（没有它只是不画二维码），
-所以探测只把 `Pillow` 当必需 —— 把可选项算进"必需"，也会造出不存在的故障。
+所以探测只把 `Pillow` 当必需，把可选项算进"必需"，也会造出不存在的故障。
 
 ---
 
@@ -77,7 +77,7 @@ if (m.ok) return ok("已装，不需要 pip");
 
 ### 三个服务会自己死
 
-实测日志末尾是 `^C^C^C^C^C` —— 是被 **Ctrl+C 信号**打死的，**不是崩溃、不是 OOM**。
+实测日志末尾是 `^C^C^C^C^C`，是被 **Ctrl+C 信号**打死的，**不是崩溃、不是 OOM**。
 可能是别的程序收控制台时连带。具体来源没查明。
 
 所以 `start.mjs` 把**启动和保活做成一件事**：
@@ -86,7 +86,7 @@ if (m.ok) return ok("已装，不需要 pip");
 每 20 秒检查一次端口 → 不在就拉起来 → 再等 20 秒
 ```
 
-拉起用 `detached + unref` —— 它必须活得比父进程久，
+拉起用 `detached + unref`，它必须活得比父进程久，
 否则父进程一收工它跟着没，等于没守。
 
 **单独启动某个服务**（调试时用）：
@@ -126,7 +126,7 @@ ollama pull qwen2.5vl:3b    # 约 3.2GB，读照片
 | 两个都 null | 完全不用模型，出图链路照常 |
 | `"enabled": false` | 整个模型层关掉 |
 
-**模型不是必需的** —— 这是设计前提。没有模型时海报照样出，
+**模型不是必需的**，这是设计前提。没有模型时海报照样出，
 只是文案由内置规则生成而不是模型写的。
 
 ---
@@ -140,7 +140,7 @@ ollama pull qwen2.5vl:3b    # 约 3.2GB，读照片
 
 | 字段 | 说明 |
 |---|---|
-| `python` | 渲染用哪个 Python。**部署脚本会自动改写** —— 从别人机器拷来的配置，这行多半是错的 |
+| `python` | 渲染用哪个 Python。**部署脚本会自动改写**，从别人机器拷来的配置，这行多半是错的 |
 | `endpoint` | Ollama 地址，装在别的机器上就改成那台 IP |
 | `vision` / `copy` | 模型名，`ollama list` 看本机有哪些 |
 | `keepAlive` | 模型在显存里留多久（`30m`）|
@@ -243,8 +243,8 @@ pip install Pillow qrcode                                  # 手动
 
 `.gitignore` 已排掉：
 
-- `public/uploads` `public/generated` `public/copybooks` —— **用户用出来的东西**，不是项目的一部分
-- `brain.config.json` `assistant.json` `history.json` `templates-user.json` —— 本机个人数据
+- `public/uploads` `public/generated` `public/copybooks`，**用户用出来的东西**，不是项目的一部分
+- `brain.config.json` `assistant.json` `history.json` `templates-user.json`，本机个人数据
 - `.cache/` `.work/` `node_modules/` `.venv/` `__pycache__/`
 - 模型权重（几 GB，按需下载）
 

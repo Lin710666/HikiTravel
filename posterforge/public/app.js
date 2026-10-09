@@ -121,7 +121,7 @@ function fileToDataURL(file) {
 }
 
 /* ---------------------------------------------------------------- 功能菜单 */
-const ICONS = { poster: "🖼", template: "▤", checkin: "📍", copybook: "📖", batch: "▦", history: "🕘", analyze: "🔍" };
+const ICONS = { poster: "🖼", template: "▤", checkin: "📍", copybook: "📖", history: "🕘", analyze: "🔍" };
 
 function renderCapMenu() {
   const box = $("#capMenu");
@@ -1904,7 +1904,7 @@ function buildCopybookSpec() {
             heading: "实拍图",
             src: photoUrls[0],
             caption: photoUrls.length > 1
-              ? `本页为第 1 张实拍图（共 ${photoUrls.length} 张）。其余照片可用「批量出图」分发到各平台尺寸。`
+              ? `本页为第 1 张实拍图（共 ${photoUrls.length} 张）。`
               : "本页为实拍图。替换成你自己的照片后重新生成即可。",
           }]
         : []),
@@ -2395,7 +2395,6 @@ async function health() {
     { id: "template", name: "套用模板", desc: "从模板库挑一套，内容直接填好再改", icon: "template" },
     { id: "checkin", name: "打卡模板", desc: "对话 + 照片 → 可发布打卡卡", icon: "checkin" },
     { id: "copybook", name: "文案手册", desc: "一键生成多页互联网宣传手册", icon: "book" },
-    { id: "batch", name: "批量出图", desc: "一套内容，多尺寸多平台分发", icon: "grid" },
   ];
   renderCapMenu();
   syncCapCard();

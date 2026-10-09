@@ -1,4 +1,4 @@
-# Skill: image-layer（图像层 —— AI 出图的唯一合法接入点）
+# Skill: image-layer（图像层：AI 出图的唯一合法接入点）
 
 ## 什么时候用
 
@@ -61,7 +61,7 @@ python_embeded\python.exe -s ComfyUI\main.py ^
 
 ## 许可证（必须向客户说明）
 
-**Qwen-Image-2.1 权重采用 Qwen Research License Agreement —— 仅限研究 / 非商业用途。**
+**Qwen-Image-2.1 权重采用 Qwen Research License Agreement，仅限研究 / 非商业用途。**
 
 - 上一代 Qwen-Image-2512 是 Apache-2.0，**2.1 不是**。"Qwen 开源可商用"是过期印象。
 - 社区 GGUF / 量化包同属衍生物，受同一许可约束，**换格式不改变约束**。

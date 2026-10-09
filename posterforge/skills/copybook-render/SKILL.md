@@ -48,7 +48,7 @@
 ```
 
 深色页（cover/price/contact）用第一组，浅色页（text/bullets/table）用第二组。
-**浅色页不是"深色反相"** —— 长文阅读需要低对比、暖白底，直接反相会很刺眼。
+**浅色页不是"深色反相"**，长文阅读需要低对比、暖白底，直接反相会很刺眼。
 
 ## 怎么用
 
@@ -65,7 +65,7 @@ cd ..\..                    # 站点根（相对本 SKILL.md）
 ```
 
 站点侧通过 `POST /api/copybook` 调用，返回
-`{ ok, url, pages[], pageCount, bytes }` —— `pages[]` 用于前端缩略图预览。
+`{ ok, url, pages[], pageCount, bytes }`，`pages[]` 用于前端缩略图预览。
 
 ## 实测性能
 
@@ -128,7 +128,7 @@ $py = if ($env:PF_PYTHON) { $env:PF_PYTHON } else { "python" }
 | 引用 | `meta.logo` / `sections[].image` 指向的文件是否存在 |
 | 跨页一致 | 同一门店的电话在多页是否一致（号码归一化后比对） |
 
-**广告法词表从 `validate.py` 导入，不复制** —— 两处维护必然漂移。
+**广告法词表从 `validate.py` 导入，不复制**，两处维护必然漂移。
 
 实测：一份埋了 9 类错误的 spec，校验器报出 **13 error / 3 warning**，全部命中。
 
@@ -138,7 +138,7 @@ $py = if ($env:PF_PYTHON) { $env:PF_PYTHON } else { "python" }
 ### 一个值得记下的坑
 
 `python.exe` 输出到**管道**时默认用系统 ANSI 编码（中文 Windows 上是 GBK），
-而 Node 按 UTF-8 读 —— 校验器的中文报错会全变成乱码方块。
+而 Node 按 UTF-8 读，校验器的中文报错会全变成乱码方块。
 在终端手跑永远不会暴露，只有作为子进程被读输出时才会。
 
 服务端 `run()` 里已显式设置 `PYTHONIOENCODING=utf-8` 与 `PYTHONUTF8=1`。

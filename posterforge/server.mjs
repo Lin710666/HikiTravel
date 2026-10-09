@@ -638,7 +638,6 @@ const CAPABILITIES = [
   { id: "template", name: "套用模板", desc: "从模板库挑一套，内容直接填好再改", icon: "template" },
   { id: "checkin", name: "打卡模板", desc: "对话 + 照片 → 可发布打卡卡", icon: "checkin" },
   { id: "copybook", name: "文案手册", desc: "一键生成多页互联网宣传手册", icon: "book" },
-  { id: "batch", name: "批量出图", desc: "一套内容，多尺寸多平台分发", icon: "grid" },
   { id: "history", name: "历史记录", desc: "回看生成过的图，可重新下载或删掉", icon: "history" },
   // 「图片分析」**不做独立入口** —— 它是辅助生成的手段，不是一种生成模式。
   // 独立成一个菜单项会让用户以为"分析完能得到什么成品"，其实它只是帮你选版式。

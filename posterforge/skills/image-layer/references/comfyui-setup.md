@@ -92,7 +92,7 @@ steps 25 · cfg 1 · sampler euler · scheduler simple
 This is an RGBA image with transparency. <描述>. The image has alpha channel and the background is transparent.
 ```
 
-**必须存成 PNG** —— JPG 会丢掉 alpha 通道。
+**必须存成 PNG**，JPG 会丢掉 alpha 通道。
 
 产出放进 `image` 图层：
 
@@ -103,7 +103,7 @@ This is an RGBA image with transparency. <描述>. The image has alpha channel a
 
 ## 许可证（务必留意）
 
-Qwen-Image-2.1 使用 **Qwen Research License Agreement —— 仅限研究 / 非商业用途**。
+Qwen-Image-2.1 使用 **Qwen Research License Agreement，仅限研究 / 非商业用途**。
 
 - 商用需单独授权：`model-business@notice.qwencloud.com`
 - 社区 GGUF / 量化包同属衍生物，受同一许可约束
