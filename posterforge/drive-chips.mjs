@@ -390,7 +390,7 @@ async function main() {
   check("已回到只剩 1 张照片", leftCount === 1, `剩 ${leftCount} 张`);
   // 留下的必须是带品红指纹的那张。
   // 注意：不能拿"字节数等于源文件"来判，上传后服务端会重新编码（转正 + 去 EXIF），
-  // 尺寸会变（39 KB → 26 KB）。判据用尺寸比例 + 指纹像素，别用字节数。
+  // 尺寸会变（39 KB → 26 KB）。判据用尺寸比例 + 指纹像素，不要用字节数。
   const leftFiles = JSON.parse(await cdp.evalJs(
     "JSON.stringify(window.posterforge.state.files.filter(f => f.uploaded && f.url))"
   ));

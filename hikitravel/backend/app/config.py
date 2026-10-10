@@ -44,6 +44,8 @@ class LLMSettings:
     api_key: str
     model: str
     source: str            # env / shared / default，仅供排查
+    #: 外部模型是否开思考模式。见 effective_llm 里的说明，默认关。
+    thinking: bool = False
     shared_path: Optional[str] = None
 
 
@@ -111,12 +113,28 @@ def effective_llm() -> LLMSettings:
         else:
             model = (shared.get("copy") or settings.ollama_model).strip()
 
+    # 思考模式：默认关，需要多约束推理时再打开。
+    # 为什么默认关（官方文档写的两条）：
+    #   1. 开思考时 temperature 不生效，而规划与体检都靠 0.1~0.2 求稳定；
+    #   2. reasoning_tokens 算在 completion_tokens 里，会占掉 max_tokens，
+    #      我们那点额度（体检 350 / 选点 700）会被思考吃光、正文直接空掉。
+    # 打开时 client.py 会同步把 max_tokens 抬高，见那里的说明。
+    # 取值顺序：环境变量 LLM_THINKING > 共享配置的 planThinking > 关。
+    _think_env = (os.getenv("LLM_THINKING", "") or "").strip().lower()
+    if _think_env in ("1", "on", "true", "yes"):
+        thinking = True
+    elif _think_env in ("0", "off", "false", "no"):
+        thinking = False
+    else:
+        thinking = bool(shared.get("planThinking", False))
+
     return LLMSettings(
         provider=provider,
         base_url=base.rstrip("/"),
         api_key=key,
         model=model,
         source=source,
+        thinking=thinking,
         shared_path=str(path) if path else None,
     )
 

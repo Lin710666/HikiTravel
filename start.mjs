@@ -13,10 +13,11 @@
  *   node start.mjs          前台跑（Ctrl+C 停，已起的服务不停）
  *   node start.mjs --once   只拉起，不守
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnHidden } from "./posterforge/spawn-hidden.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PF = path.join(ROOT, "posterforge");
@@ -29,11 +30,13 @@ const LOG_DIR = path.join(PF, ".work", "logs");
 mkdirSync(LOG_DIR, { recursive: true });
 const log = (m) => { const l = `[${new Date().toISOString().slice(11, 19)}] ${m}`; console.log(l); try { appendFileSync(path.join(LOG_DIR, "start.log"), l + "\n"); } catch {} };
 
-/** 脱离父进程起服务：父进程退出后它要继续活 */
+/**
+ * 脱离父进程起服务：父进程退出后它要继续活，而且不能弹窗口。
+ * 为什么不能直接写 detached：见 posterforge/spawn-hidden.mjs 的说明，
+ * 那是这台机器上"打开启动全部.bat 跳出一堆终端窗口"的根源。
+ */
 function detach(cmd, args, cwd) {
-  const p = spawn(cmd, args, { cwd, detached: true, stdio: "ignore", windowsHide: true });
-  p.unref();
-  return p.pid;
+  return spawnHidden(cmd, args, { cwd });
 }
 
 const node = process.execPath;

@@ -44,11 +44,13 @@ import {
   loadBrainConfig, brainStatus, composeCopy, BrainError,
   BRAIN_LAYOUTS, BRAIN_KINDS, deriveImagePrompt, unloadModels, analyzeLayout, assistantChat,
   saveBrainConfig, visionRoute, residentLocalModels,
+  loadProviders, saveProviders, migrateLegacyProvider,
 } from "./brain.mjs";
 // 版面几何：服务端与浏览器共用同一份，避免两条路渲出两种版式
 import { buildPosterSpecFrom, buildCheckinSpecFrom, POSTER_TONES, POSTER_COMPOSITIONS } from "./public/poster-layout.mjs";
 // 路径解析的唯一来源：python / ComfyUI / ollama / 浏览器在哪，全交给 paths.mjs。
 // 本文件里不再出现任何写死的盘符，换机器、换盘符都不用改代码。
+import { spawnHidden } from "./spawn-hidden.mjs";
 import { findPython, findComfyPython, findForgeRoot, findComfyRoot } from "./paths.mjs";
 // 模型自举：自动检索本机现成的画图模型 → 有就用 → 一个都没有时才谈下载
 import { modelStatus, provisionPlan, startProvision, provisionProgress, invalidateModelCache,
@@ -458,7 +460,7 @@ async function serveStatic(res, absPath) {
     const ext = path.extname(absPath).toLowerCase();
     const base = path.basename(absPath);
 
-    // HTML 里给助手组件带上**版本号**。
+    // HTML 里给本地脚本与样式带上**版本号**。
     //
     // 为什么非做不可：`no-cache` 只对"新收到的响应"生效。用户浏览器里
     // 可能还存着改之前用 max-age=3600 缓存的那份，没过期就**不会去问服务器**，
@@ -467,10 +469,17 @@ async function serveStatic(res, absPath) {
     // 换 URL 是唯一能绕过它的办法：地址变了，浏览器就当新资源。
     if (ext === ".html") {
       let text = data.toString("utf8");
-      if (text.indexOf("/ai-ball.js") >= 0) {
-        const av = await stat(path.join(PUBLIC_DIR, "ai-ball.js")).catch(() => null);
-        const v = av ? Math.round(av.mtimeMs).toString(36) : "1";
-        text = text.replace(/\/ai-ball\.js(\?[^"']*)?/g, "/ai-ball.js?v=" + v);
+      // 页面上引用到的**本地** js/css 全部带版本号，而不是只给 ai-ball.js 带。
+      // 只在名单里加一个，新加的 model-panel.js / settings.js 就漏了，
+      // 于是"改了文件但用户刷新看不到"的老毛病换个地方再犯一次。
+      const local = [...new Set(
+        [...text.matchAll(/(?:src|href)="\/([A-Za-z0-9_.\-]+\.(?:js|css))(?:\?[^"']*)?"/g)].map((m) => m[1]),
+      )];
+      for (const name of local) {
+        const asset = await stat(path.join(PUBLIC_DIR, name)).catch(() => null);
+        const v = asset ? Math.round(asset.mtimeMs).toString(36) : "1";
+        const re = new RegExp("/" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(\\?[^\"']*)?", "g");
+        text = text.replace(re, "/" + name + "?v=" + v);
       }
       data = Buffer.from(text, "utf8");
     }
@@ -483,14 +492,17 @@ async function serveStatic(res, absPath) {
     //     但缩略图 URL 没变、还带 3600 缓存，用户看到的仍是旧的纯渐变图，
     //     反馈"两个功能页都没改变"。
     // 结论：**会被迭代覆盖的静态资源，一律不许长缓存。**
-    // 缩略图虽然多，但都是几十 KB，回源校验（304）比"改了看不见"便宜得多。
+    //
+    // 所以按扩展名一刀切，而不是逐个列文件名：原来那份名单是写死的
+    // （ai-ball.js / app.js / style.css），后来新加的 model-panel.js、
+    // model-panel.css、settings.js 都不在里面，于是改了文件用户刷新也看不见，
+    // 反馈"我没找到那个功能"。这种清单注定会漏，不如不要清单。
     const isThumb = absPath.includes(path.sep + "thumbs" + path.sep);
-    const noCache = ext === ".html" || isThumb ||
-      base === "ai-ball.js" || base === "app.js" || base === "style.css";
+    const noCache = isThumb || [".html", ".js", ".mjs", ".css"].includes(ext);
     res.writeHead(200, {
       "content-type": MIME[ext] || "application/octet-stream",
       "content-length": data.length,
-      // 缩略图允许缓存，HTML/脚本不缓存（方便改完刷新就见效）
+      // 缩略图也走回源校验：几十 KB 的 304 比"改了看不见"便宜得多
       "cache-control": noCache ? "no-cache, must-revalidate" : "public, max-age=3600",
       etag: `W/"${data.length}-${Math.round(st.mtimeMs)}"`,
     });
@@ -1916,15 +1928,24 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
     const cfg = loadBrainConfig(SITE_ROOT);
     const st = await brainStatus(cfg);
     const aig = aigenEnvCheck().ok;
+    // 外部接口模式下不要求本机 Ollama 在跑：对话走外部，读图也可能走外部自带视觉。
+    // 这条判断出错过的后果很隐蔽：ready=false 时前端**根本不调 /api/compose**，
+    // 而 AI 底图正是在那个接口里生成的，于是表现成"配了外部接口反而不出 AI 底图"。
+    const externalMode = cfg.provider === "openai";
     return json(res, 200, {
       enabled: cfg.enabled,
       ...st,
       vision: cfg.vision,
       copy: cfg.copy,
+      // 读图**实际**用哪个模型：走外部自带视觉时就是那个外部模型。
+      // 只回 cfg.vision 的话，界面会说"照片由 qwen2.5vl:3b 读图"，
+      // 而那个本机模型根本没被调用过一次，属于报错名字。
+      visionRoute: visionRoute(cfg),
+      visionModel: visionRoute(cfg) === "llm" ? cfg.copy : cfg.vision,
       tones: Object.entries(POSTER_TONES).map(([id, v]) => ({ id, name: v.name })),
       layouts: BRAIN_LAYOUTS,
       kinds: BRAIN_KINDS,
-      ready: cfg.enabled && st.up && st.hasCopy,
+      ready: cfg.enabled && st.hasCopy && (externalMode || st.up),
       // AI 底图能力：前端据此决定"没照片时"要不要提示会自生成
       autoBgAvailable: aig,
       // 兼容旧字段名（前端早期用过 comfyUp）
@@ -1971,6 +1992,11 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
           vision: cfg.vision,
           visionFromLlm: !!cfg.visionFromLlm,
           drawingModel: cfg.drawingModel,
+          planThinking: !!cfg.planThinking,
+          // 非空说明当前用的是外部服务商，本机那两个模型不参与，
+          // 设置页据此把本机模型的下拉禁掉（改也改不动，免得让人白改）
+          activeProviderId: cfg.activeProviderId || "",
+          activeModelId: cfg.activeModelId || "",
         },
         options: {
           ollamaUp: !!st.up,
@@ -1991,20 +2017,16 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 
       const before = loadBrainConfig(SITE_ROOT);
       const patch = {};
-      for (const k of ["provider", "endpoint", "baseUrl", "copy", "vision", "visionFromLlm", "drawingModel"]) {
+      // provider / baseUrl / apiKey / visionFromLlm 已经搬去 /api/providers 了，
+      // 两个接口都写同一批字段必然互相覆盖，这里不再接受它们。
+      for (const k of ["endpoint", "copy", "vision", "drawingModel", "planThinking"]) {
         if (payload[k] !== undefined) patch[k] = payload[k];
       }
-      // 密钥单独处理：只有传了非空值才覆盖，避免"没改密钥"被清空
-      if (typeof payload.apiKey === "string" && payload.apiKey.trim()) patch.apiKey = payload.apiKey.trim();
-      if (payload.clearApiKey === true) patch.apiKey = "";
-
-      if (patch.provider !== undefined && !["ollama", "openai"].includes(String(patch.provider))) {
-        return json(res, 400, { ok: false, message: "provider 只能是 ollama 或 openai" });
-      }
-      // 选了外部接口却没给地址，等于接下来一定失败，不如现在就说清楚
-      if (patch.provider === "openai" || (!patch.provider && before.provider === "openai")) {
-        const base = String(patch.baseUrl ?? before.baseUrl ?? "").trim();
-        if (!base) return json(res, 400, { ok: false, message: "选择外部接口时必须填写接口地址" });
+      // 外接服务商时，copy/vision 是从服务商结构解析出来的，手改这两个会立刻被解析结果盖回去，
+      // 不如直接忽略，免得用户以为改成功了
+      if (before.activeProviderId) {
+        delete patch.copy;
+        delete patch.vision;
       }
 
       try { saveBrainConfig(SITE_ROOT, patch); }
@@ -2031,6 +2053,116 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       });
     }
 
+    return json(res, 405, { ok: false, message: "只支持 GET / POST" });
+  }
+
+  /**
+   * /api/providers/fetch-models，替浏览器去问服务商有哪些模型。
+   *
+   * 为什么要绕一层：模型列表接口要带密钥，而密钥从不回传到浏览器
+   * （调试面板、浏览器历史、前端内存都不该有它）。所以这一步只能在服务端做，
+   * 浏览器只管把"问哪个服务商"告诉我们。
+   */
+  if (p === "/api/providers/fetch-models" && req.method === "POST") {
+    let payload;
+    try { payload = JSON.parse(await readBody(req, 8 * 1024)); }
+    catch { return json(res, 400, { ok: false, message: "请求体不是合法 JSON" }); }
+
+    const id = String(payload.provider || "").trim();
+    if (!id) return json(res, 400, { ok: false, message: "没有指定服务商" });
+    const got = loadProviders(SITE_ROOT);
+    const target = got.providers.find((x) => x.id === id);
+    if (!target) return json(res, 404, { ok: false, message: `没有叫 ${id} 的服务商` });
+    if (!target.baseURL) return json(res, 400, { ok: false, message: "这个服务商还没填接口地址" });
+    if (!target.hasKey) return json(res, 400, { ok: false, message: "这个服务商还没配密钥，问不了" });
+
+    // 密钥要现从文件里读：loadProviders 只回"配没配过"，不回明文，这是有意的
+    let apiKey = "";
+    try {
+      const rawCfg = JSON.parse(readFileSync(path.join(SITE_ROOT, "brain.config.json"), "utf8"));
+      apiKey = String((rawCfg.providers && rawCfg.providers[id] && rawCfg.providers[id].apiKey) || "");
+    } catch { /* 读不到就走下面的"没密钥"分支 */ }
+    if (!apiKey) return json(res, 400, { ok: false, message: "这个服务商还没配密钥，问不了" });
+
+    const base = target.baseURL.replace(/\/+$/, "");
+    const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
+    try {
+      const r = await fetch(url, {
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      const text = await r.text();
+      if (!r.ok) {
+        return json(res, 200, { ok: false, message: `对方返回 ${r.status}：${text.slice(0, 200)}` });
+      }
+      let body;
+      try { body = JSON.parse(text); } catch { return json(res, 200, { ok: false, message: "对方返回的不是 JSON" }); }
+      // 三种见过的形状：OpenAI 的 data[].id、Ollama 风格 models[].name、以及裸数组
+      const list = Array.isArray(body) ? body
+        : Array.isArray(body.data) ? body.data
+          : Array.isArray(body.models) ? body.models
+            : [];
+      const models = [...new Set(list.map((m) => String(
+        (m && (m.id || m.name || m.model)) || (typeof m === "string" ? m : "")
+      )).filter(Boolean))].sort();
+      console.log(`[providers] ${id} 拉到 ${models.length} 个模型`);
+      return json(res, 200, { ok: true, models, url });
+    } catch (e) {
+      const why = e.name === "AbortError" || e.name === "TimeoutError" ? "等了 15 秒没回应" : e.message;
+      return json(res, 200, { ok: false, message: `连不上：${why}` });
+    }
+  }
+
+  /**
+   * /api/providers，服务商与模型的多份配置。
+   *
+   * 与 /api/settings 的分工：
+   *   settings   管与具体服务商无关的项（本机模型、绘图模型、思考模式…）
+   *   providers  管有哪些服务商、每个的密钥、每个下面有哪些模型、当前用哪个
+   *
+   * 密钥只回「配没配过」，不回明文。保存时：不传 = 不动，空串 = 不动，null = 清除。
+   */
+  if (p === "/api/providers") {
+    if (req.method === "GET") {
+      const cfg = loadBrainConfig(SITE_ROOT);
+      const st = await brainStatus(cfg).catch(() => ({ up: false, models: [] }));
+      // 旧配置只有扁平的 provider/baseUrl/apiKey，这里顺手迁移一次，
+      // 否则设置页上会一张服务商卡都没有，用户以为配置丢了
+      if (migrateLegacyProvider(SITE_ROOT)) console.log("[providers] 已把旧的扁平配置迁移成服务商结构");
+      return json(res, 200, {
+        ok: true,
+        ...loadProviders(SITE_ROOT),
+        local: { copy: cfg.copy, vision: cfg.vision },
+        ollamaUp: !!st.up,
+        ollamaModels: st.models || [],
+      });
+    }
+    if (req.method === "POST") {
+      let payload;
+      try { payload = JSON.parse(await readBody(req, 512 * 1024)); }
+      catch { return json(res, 400, { ok: false, message: "请求体不是合法 JSON" }); }
+      try {
+        const r = saveProviders(SITE_ROOT, payload);
+        const after = loadBrainConfig(SITE_ROOT);
+        console.log(`[providers] ${r.providerCount} 个服务商，当前 ${r.activeModel.provider || "（本机）"} / ${r.activeModel.model || "-"}`);
+        return json(res, 200, {
+          ok: true,
+          ...r,
+          // 回一份解析后的结果，设置页据此显示"实际生效的地址与模型"
+          resolved: {
+            provider: after.provider,
+            baseUrl: after.baseUrl,
+            copy: after.copy,
+            visionFromLlm: after.visionFromLlm,
+            visionRoute: visionRoute(after),
+          },
+        });
+      } catch (e) {
+        // would-wipe 是"提交上来的表是空的、会把配置丢光"，属于调用方的问题，回 400
+        const code = e && e.code === "would-wipe" ? 400 : 500;
+        return json(res, code, { ok: false, message: (code === 400 ? "" : "写入配置失败：") + e.message, code: e && e.code });
+      }
+    }
     return json(res, 405, { ok: false, message: "只支持 GET / POST" });
   }
 
@@ -2084,7 +2216,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
 
     let out;
     try {
-      out = await composeCopy(cfg, brief, absPhotos, { facts, mode });
+      out = await composeCopy(cfg, brief, absPhotos, { facts, mode, bannedWords: AD_LAW_BANNED });
     } catch (e) {
       const kind = e instanceof BrainError ? e.kind : "brain";
       const hint = kind === "offline"
@@ -2239,7 +2371,7 @@ async function ensureBackground({ imagePrompt, cacheKeySeed, size = 768, height 
       kind: c.kind,
       // 自生成的底图：没有用户照片时才可能非空
       autoBgUrl: autoBg?.ok ? autoBg.url : null,
-      factsSource: `大模型生成（${cfg.vision || "无视觉"} 读图 + ${cfg.copy} 写文案）`,
+      factsSource: `大模型生成（${(visionRoute(cfg) === "llm" ? cfg.copy : cfg.vision) || "无视觉"} 读图 + ${cfg.copy} 写文案）`,
     });
 
     if (payload.render === false) {
@@ -2391,9 +2523,9 @@ function startWenlv() {
     ? ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(WENLV_PORT)]
     : ["run", "python", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(WENLV_PORT)];
   try {
-    const child = spawn(cmd, args, { cwd: HK_BACKEND, detached: true, stdio: "ignore", windowsHide: true });
-    child.unref();
-    console.log(`[wenlv] ${WENLV_PORT} 没在跑，已自动拉起：${cmd}`);
+    // 用 spawnHidden 而不是 detached：Windows 上 detached 会让 windowsHide 失效、弹出终端窗口
+    const pid = spawnHidden(cmd, args, { cwd: HK_BACKEND });
+    console.log(`[wenlv] ${WENLV_PORT} 没在跑，已自动拉起：${cmd}（pid ${pid}）`);
     return "started";
   } catch (err) {
     console.log(`[wenlv] 自动拉起失败：${err.message}`);

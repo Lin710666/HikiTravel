@@ -375,7 +375,14 @@ html[data-theme="dark"] .settings-nav-item { color: #cfd3d6; }
 html[data-theme="dark"] .settings-nav-item.on { background: rgba(255, 255, 255, 0.10); color: #f9fafb; }
 .settings-nav-item svg { width: 16px; height: 16px; flex: none; }
 
-.settings-content { display: flex; flex-direction: column; min-width: 0; width: 612px; flex: 1; }
+/* min-height:0 是必须的，不是可选的：
+   手机上面板是竖排（flex-direction:column），中间这层如果不写明 min-height:0，
+   它就带着默认的 min-height:auto，会按内容撑高、不肯收缩。
+   结果 .settings-body 被顶得比自己该有的高（实测 iPhone 430×932 上
+   内容列 895px > 面板 872px），它的 overflow-y:auto 永远没有产生滚动的余地，
+   底部按钮还被挤出面板裁掉，表现就是"设置里上下滑不动"。
+   桌面是横排，高度由 align-items:stretch 拉平，所以同一个毛病在桌面上看不出来。 */
+.settings-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; width: 612px; flex: 1; }
 .settings-header {
   display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between;
   gap: 8px; padding: 20px 14px 8px 10px;
@@ -592,7 +599,15 @@ html[data-theme="dark"] .settings-msg.err { color: #ff9b9b; }
     <nav class="settings-nav">
       <div class="settings-nav-title">设置</div>
       <div class="settings-nav-list">
-        <button class="settings-nav-item on" type="button">
+        <button class="settings-nav-item on" data-page="general" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/>
+            <circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>
+          </svg>
+          通用设置
+        </button>
+        <button class="settings-nav-item" data-page="models" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
@@ -605,7 +620,7 @@ html[data-theme="dark"] .settings-msg.err { color: #ff9b9b; }
 
     <div class="settings-content">
       <div class="settings-header">
-        <h3 style="margin:0;font-size:16px;font-weight:500;line-height:24px;">模型</h3>
+        <h3 id="setPageTitle" style="margin:0;font-size:16px;font-weight:500;line-height:24px;">通用设置</h3>
         <div class="settings-actions">
           <button class="settings-close" id="setClose" type="button" data-close aria-label="关闭">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -616,62 +631,28 @@ html[data-theme="dark"] .settings-msg.err { color: #ff9b9b; }
         </div>
       </div>
 
-      <div class="settings-body">
+      <!-- 通用设置：本机的东西，不需要密钥，也不需要联网 -->
+      <div class="settings-body" data-page-body="general">
         <p class="settings-note">
-          对话、读图与出图分别用哪个模型。默认全部走本机 Ollama 与本机绘图模型，不联网、不花钱；
-          想让外部接口代劳时再切过去。
+          这些跑在本机，不联网也不花钱。要让外部接口代劳，去左边「模型」里加一个服务商。
         </p>
 
         <div class="settings-group">
-          <h4>大脑</h4>
-
+          <h4>本机 Ollama</h4>
           <ul class="settings-card" style="list-style:none;margin:0 0 8px;padding:12px 14px;">
             <li class="settings-field">
-              <label for="setProvider">服务来源</label>
-              <select id="setProvider">
-                <option value="ollama">本机 Ollama（默认，离线免费）</option>
-                <option value="openai">外部接口（OpenAI 兼容）</option>
-              </select>
-            </li>
-
-            <li id="setRemoteGroup" class="settings-remote" hidden>
-              <div class="settings-field">
-                <label for="setBaseUrl">接口地址</label>
-                <input id="setBaseUrl" type="text" placeholder="https://HOST/v1" autocomplete="off" spellcheck="false">
-                <span class="settings-hint">
-                  填到 /v1 为止，后面由程序自己接 /chat/completions。
-                  <button class="settings-linkish" id="setPreset" type="button">填入 DeepSeek 官方参数</button>
-                </span>
-              </div>
-              <div class="settings-field">
-                <label for="setApiKey">密钥</label>
-                <input id="setApiKey" type="password" placeholder="留空表示不修改" autocomplete="off">
-                <span class="settings-hint">
-                  <span id="setKeyHint">还没有保存过密钥。</span>
-                  <button class="settings-linkish" id="setClearKey" type="button" hidden>清除已保存的密钥</button>
-                </span>
-              </div>
-              <div class="settings-field">
-                <label for="setRemoteModel">外部模型</label>
-                <input id="setRemoteModel" type="text" placeholder="例如 deepseek-flash" autocomplete="off" spellcheck="false">
-                <span class="settings-hint" id="setRemoteModelHint"></span>
-              </div>
-              <label class="settings-switch" for="setVisionFromLlm">
-                <input id="setVisionFromLlm" type="checkbox">
-                这个模型自带视觉，读图也用它
-              </label>
-            </li>
-
-            <li class="settings-field">
-              <label for="setCopy">对话模型（本机）</label>
+              <label for="setCopy">对话模型</label>
               <select id="setCopy"></select>
             </li>
             <li class="settings-field">
-              <label for="setVision">读图模型（本机）</label>
+              <label for="setVision">读图模型</label>
               <select id="setVision"></select>
               <span class="settings-hint" id="setVisionHint"></span>
             </li>
           </ul>
+          <p class="settings-note" style="margin:0;">
+            上面这两个只有在本机模式下才用得上。外面接了自带视觉的模型时，读图会交给它。
+          </p>
         </div>
 
         <div class="settings-group">
@@ -687,11 +668,32 @@ html[data-theme="dark"] .settings-msg.err { color: #ff9b9b; }
             列出的是本机已下载的模型。换模型后会重启出图进程，下次出图生效。
           </p>
         </div>
+
+        <div class="settings-group">
+          <h4>旅游规划</h4>
+          <ul class="settings-card" style="list-style:none;margin:0 0 8px;padding:12px 14px;">
+            <li class="settings-field">
+              <label class="settings-switch" for="setPlanThinking">
+                <input id="setPlanThinking" type="checkbox">
+                让外部模型先想一遍再排行程
+              </label>
+              <span class="settings-hint">
+                开着时温度设置不再生效（对方接口的行为），推理还要占掉输出额度。
+                实测开着更慢、行程也没更贴合要求，所以默认关。
+              </span>
+            </li>
+          </ul>
+        </div>
       </div>
 
-      <!-- 按钮和提示放在滚动区**外面**：展开"外部接口"后内容会超出一屏，
+      <!-- 模型：服务商与模型的多份配置，样式与结构照搬 DeepSeek Harness，由 model-panel.js 渲染 -->
+      <div class="settings-body pf-mp" data-page-body="models" hidden>
+        <div id="settingsModels"></div>
+      </div>
+
+      <!-- 按钮和提示放在滚动区**外面**：内容超出一屏时，
            留在里面的话"保存"会被顶到折叠线以下，得先滚一段才找得到。 -->
-      <div class="settings-footer">
+      <div class="settings-footer" data-page-foot="general">
         <div class="settings-foot">
           <button class="settings-btn primary" id="setSave" type="button">保存</button>
           <button class="settings-btn" id="setReload" type="button">重新读取</button>
@@ -703,8 +705,11 @@ html[data-theme="dark"] .settings-msg.err { color: #ff9b9b; }
   </div>
 </div>
 
+<!-- 模型设置面板的样式直接来自 DeepSeek Harness 的产物（见文件头说明） -->
+<link rel="stylesheet" href="/model-panel.css">
 <!-- 悬浮球 AI 助手：与海报页、旅游规划页共用 /ai-ball.js 这一份实现。
      data-api-base 指到反代的 /wenlv/api/（本页在 8800 上，同源 /api/ 是本服务自己的接口）。 -->
+<script src="/model-panel.js" defer></script>
 <script src="/settings.js" defer></script>
 <script src="/ai-ball.js" data-api-base="/wenlv" defer></script>
 

@@ -2087,6 +2087,28 @@ async function composeWithModel({ onProgress, mode = "poster" } = {}) {
 }
 
 /**
+ * 模型没参与时，收尾该说的那句话。
+ *
+ * 分情况说的理由：这几种失败用户该做的事完全不同 ——
+ * 广告法是改几个字，超时是换模型，连不上才是去看 ollama。
+ * 一律套"服务端会自动启动本机模型（ollama serve）"，会把改字的人支去查进程。
+ */
+function modelMissTail(errMsg) {
+  const why = String(errMsg || "");
+  if (/广告法|禁用词/.test(why)) {
+    return "这次不是模型没连上：模型写的文案里有《广告法》禁用词，出图前的校验把整份成品退回了。"
+      + "换个说法（比如把「最好」改成具体光线、时间）再生成一次就行。";
+  }
+  if (/超时|timeout/i.test(why)) {
+    return "模型这次响应超时了。可以在「设置 → 模型」里换一个更快的模型，或调大超时时间。";
+  }
+  if (/密钥|401|403|拒绝/.test(why)) {
+    return "外部接口拒绝了这次请求，多半是密钥不对或没配。去「设置 → 模型」里检查那个服务商的密钥。";
+  }
+  return "服务端会自动启动本机模型（ollama serve），本次没成功：上面那句是原因。";
+}
+
+/**
  * 把模型决定的内容显示出来。
  *
  * 为什么必须显示：模型写的东西是"生成"的，用户有权看到它到底写了什么、
@@ -2100,11 +2122,13 @@ function renderComposeNote(composed, errMsg) {
     // 措辞不能再写"确认 Ollama 在运行"，那是把责任推给用户。
     // 服务端现在会**自己把本机模型拉起来**（见 brain.mjs 的 ensureOllama），
     // 走到这里说明自动拉起也失败了，该说的是"拉不起来"以及为什么。
+    // 收尾那句原来写死成"服务端会自动启动本机模型（ollama serve），本次没成功"，
+    // 于是一个《广告法》禁用词导致的失败也会被说成 ollama 起不来 ——
+    // 用户照着去查 ollama 永远查不出所以然。这里按错误内容分开说。
     box.innerHTML =
       `<b>模型没有参与这次生成</b><br>` +
       `<span class="cn-err">${errMsg ? String(errMsg).slice(0, 200) : "原因未知"}</span><br>` +
-      `<span class="cn-dim">已用本地确定性规则兜底，图照样能出。` +
-      `服务端会自动启动本机模型（ollama serve），本次没成功：上面那句是原因。</span>`;
+      `<span class="cn-dim">已用本地确定性规则兜底，图照样能出。${modelMissTail(errMsg)}</span>`;
     return;
   }
   const c = composed.copy || {};
@@ -2416,7 +2440,10 @@ async function loadBrain() {
     state.brain = data;
     const btn = $("#genBtn");
     if (btn && data.ready) {
-      btn.title = `文案由 ${data.copy} 生成，照片由 ${data.vision} 读图`;
+      // visionModel 是服务端算好的"读图实际用的那个模型"：接了自带视觉的外部模型时
+      // 它就是外部模型，直接写 data.vision 会显示成"照片由 qwen2.5vl:3b 读图"，
+      // 而那个本机模型根本没被调用过。
+      btn.title = `文案由 ${data.copy} 生成，照片由 ${data.visionModel || data.vision} 读图`;
     }
     const hint = $("#promptHint");
     if (hint && data.ready) {
@@ -2429,7 +2456,7 @@ async function loadBrain() {
 }
 
 /* 顶栏已按需求移除，相关占位按钮的处理也一并删掉。
-   如果以后加回顶栏，注意别用 alert()：无头浏览器里它会阻塞脚本。 */
+   如果以后加回顶栏，注意不要用 alert()：无头浏览器里它会阻塞脚本。 */
 
 /* 暴露只读状态给自动化测试（drive-test.mjs）。不影响业务逻辑。 */
 window.posterforge = {

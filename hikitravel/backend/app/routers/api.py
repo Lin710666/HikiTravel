@@ -474,6 +474,7 @@ def health() -> Dict[str, Any]:
         "llm_provider": eff.provider,
         "llm_source": eff.source,
         "llm_model": eff.model,
+        "llm_thinking": bool(eff.thinking),
         "amap_configured": bool(orchestrator.retrieve.amap.key),
         # 启动预热（模型加载 + 提示词缓存）的进度：预热跑完前，第一次生成会明显更慢
         "ollama_warm": warmer.status(),

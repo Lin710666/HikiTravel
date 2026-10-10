@@ -25,6 +25,7 @@ import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { REPO_ROOT, SITE_ROOT, findComfyRoot, findComfyPython, findPython } from "./paths.mjs";
+import { spawnHidden } from "./spawn-hidden.mjs";
 
 /** 镜像端点：官方 huggingface.co 在本机不通，默认走 hf-mirror。 */
 const ENDPOINT = process.env.PF_HF_ENDPOINT || "https://hf-mirror.com";
@@ -366,18 +367,16 @@ export async function ensureComfyRunning({ waitMs = 180000, log = () => {} } = {
       const args = ["-s", main, "--port", String(port)];
       if (process.env.PF_COMFY_LOWVRAM !== "0") args.push("--lowvram");
       log(`拉起 ComfyUI：${py} ${args.join(" ")}`);
-      const p = spawn(py, args, {
+      // spawnHidden 保证"活得比本进程久 + 不弹窗口"。
+      // 原来的 detached + windowsHide 在 Windows 上会弹终端窗口，见 spawn-hidden.mjs。
+      const comfyPid = spawnHidden(py, args, {
         cwd: path.dirname(main),
-        detached: true,               // 得活得比本进程久
-        stdio: "ignore",
-        windowsHide: true,
-        env: { ...process.env, PF_COMFY_ROOT: root },
+        env: { PF_COMFY_ROOT: root },
       });
-      p.unref();
       const t0 = Date.now();
       while (Date.now() - t0 < waitMs) {
         await new Promise((r) => setTimeout(r, 2500));
-        if (await comfyUp(host)) return { ok: true, spawned: true, pid: p.pid, waitedMs: Date.now() - t0 };
+        if (await comfyUp(host)) return { ok: true, spawned: true, pid: comfyPid, waitedMs: Date.now() - t0 };
       }
       return { ok: false, reason: "timeout", message: `已尝试拉起 ComfyUI，但 ${Math.round(waitMs / 1000)}s 内没起来（看它的控制台输出排查）` };
     })().finally(() => { setTimeout(() => { comfyStarting = null; }, 5000); });

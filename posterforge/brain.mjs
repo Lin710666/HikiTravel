@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 // Ollama 装在哪由 paths.mjs 统一解析（环境变量 → 系统目录拼出来的常见位置 → PATH）
 import { findOllama } from "./paths.mjs";
+import { spawnHidden } from "./spawn-hidden.mjs";
 
 export const BRAIN_LAYOUTS = ["poster_text", "poster_photo_bg", "poster_photo_strip"];
 export const BRAIN_KINDS = ["tourism", "food", "stay", "event", "sale"];
@@ -236,6 +237,40 @@ export async function residentLocalModels(cfg) {
 }
 
 /* ------------------------------------------------------------------ 配置 */
+
+/**
+ * 把「服务商 + 当前选中的模型」解析成运行时那几个扁平字段。
+ *
+ * 为什么要有这一层：配置里存的是多服务商、多模型的结构（每个服务商一份密钥），
+ * 而下游几十处调用只认 provider / baseUrl / apiKey / copy / visionFromLlm 这几个扁平值。
+ * 解析放在加载时做一次，下游一行都不用改。
+ *
+ * 读图能力由**模型自己**声明（input 里有没有 "image"），不再是全局的一个勾选框：
+ * 同一个服务商下可能既有能读图的也有不能读图的，挂在全局上必然出错。
+ *
+ * 解析不出来（结构缺失、服务商或模型被删了）就返回 null，由调用方退回扁平字段。
+ */
+export function resolveActiveModel(raw) {
+  const providers = raw && typeof raw.providers === "object" && raw.providers ? raw.providers : null;
+  const active = raw && typeof raw.activeModel === "object" && raw.activeModel ? raw.activeModel : null;
+  if (!providers || !active) return null;
+  const p = providers[active.provider];
+  if (!p || typeof p !== "object") return null;
+  const models = Array.isArray(p.models) ? p.models.filter((m) => m && m.id) : [];
+  if (!models.length) return null;
+  const m = models.find((x) => x.id === active.model) || models[0];
+  return {
+    providerId: active.provider,
+    modelId: m.id,
+    modelName: String(m.name || m.id),
+    displayName: String(p.displayName || active.provider),
+    baseUrl: String(p.baseURL || "").trim(),
+    apiKey: String(p.apiKey || ""),
+    // input 里有 image 才认它能读图
+    visionFromLlm: Array.isArray(m.input) && m.input.includes("image"),
+  };
+}
+
 export function loadBrainConfig(siteRoot) {
   const file = path.join(siteRoot, "brain.config.json");
   const cfg = {
@@ -249,8 +284,8 @@ export function loadBrainConfig(siteRoot) {
     apiKey: "",
     vision: "qwen2.5vl:3b",
     // visionFromLlm：读图直接交给 LLM 自带的视觉能力，而不是本机的 Ollama 视觉模型。
-    // 只有在 provider=openai 且那个模型确实支持图片输入时才有意义
-    // （比如自带视觉的旗舰模型）。为 false 时仍走本机 Ollama 读图。
+    // 只有在 provider=openai 且那个模型确实支持图片输入时才有意义。
+    // 用了服务商结构时，这个值由当前模型的 input 推出来，不再由用户手勾。
     visionFromLlm: false,
     copy: "qwen2.5:7b",
     // drawingModel：绘图（AI 底图）用哪个本机模型。留空表示用发现逻辑挑最合适的那个。
@@ -265,16 +300,33 @@ export function loadBrainConfig(siteRoot) {
     copyMaxTokens: 500,
     temperature: 0.7,
     keepAlive: "30m",
+    // 只影响旅游规划：外部模型要不要开思考模式。海报这条一直关着。
+    // 注意它必须列在这里，下面那个合并循环只拷贝默认值里已有的键，
+    // 漏了就会出现"存得进去、读不出来"（设置页上开关一刷新就弹回去）。
+    planThinking: false,
+    // 下面两个只是给设置页看的：当前生效的是哪个服务商下的哪个模型
+    activeProviderId: "",
+    activeModelId: "",
   };
+  let raw = {};
   try {
-    if (existsSync(file)) {
-      const raw = JSON.parse(readFileSync(file, "utf8"));
-      for (const k of Object.keys(cfg)) {
-        if (raw[k] !== undefined && !k.startsWith("_")) cfg[k] = raw[k];
-      }
-    }
+    if (existsSync(file)) raw = JSON.parse(readFileSync(file, "utf8")) || {};
   } catch {
-    // 配置坏了就用默认值，不要让整站起不来
+    raw = {};   // 配置坏了就用默认值，不要让整站起不来
+  }
+  for (const k of Object.keys(cfg)) {
+    if (raw[k] !== undefined && !k.startsWith("_")) cfg[k] = raw[k];
+  }
+  // 有服务商结构就以它为准，覆盖上面读到的扁平字段
+  const r = resolveActiveModel(raw);
+  if (r && r.baseUrl) {
+    cfg.provider = "openai";
+    cfg.baseUrl = r.baseUrl;
+    cfg.apiKey = r.apiKey;
+    cfg.copy = r.modelId;
+    cfg.visionFromLlm = r.visionFromLlm;
+    cfg.activeProviderId = r.providerId;
+    cfg.activeModelId = r.modelId;
   }
   return cfg;
 }
@@ -285,6 +337,9 @@ export const BRAIN_CONFIG_KEYS = [
   "vision", "visionFromLlm", "copy", "drawingModel",
   "timeoutMs", "maxImageSide", "numCtx", "visionMaxTokens",
   "copyMaxTokens", "temperature", "keepAlive",
+  // 只给旅游规划用：外部模型要不要开思考模式。海报这条一直关着，
+  // 因为读图和文案都靠低温求稳定，而思考模式下 temperature 会被忽略。
+  "planThinking",
 ];
 
 /** 数值字段的合法区间，越界一律夹回来（配置写错不该让站点崩） */
@@ -317,7 +372,7 @@ export function saveBrainConfig(siteRoot, patch = {}) {
   for (const k of BRAIN_CONFIG_KEYS) {
     if (patch[k] === undefined) continue;
     let v = patch[k];
-    if (k === "visionFromLlm" || k === "enabled") v = !!v;
+    if (k === "visionFromLlm" || k === "enabled" || k === "planThinking") v = !!v;
     else if (NUM_RANGE[k]) {
       const n = Number(v);
       if (!Number.isFinite(n)) continue;
@@ -331,6 +386,188 @@ export function saveBrainConfig(siteRoot, patch = {}) {
   }
   writeFileSync(file, JSON.stringify(raw, null, 2) + "\n", "utf8");
   return applied;
+}
+
+/**
+ * 把旧版扁平的 provider / baseUrl / apiKey / copy 迁移成「服务商 + 模型」结构。
+ *
+ * 为什么放在读取时顺手做：老配置里只有那四个扁平字段，设置页上会一张服务商卡都
+ * 看不到，用户会以为配置丢了。迁移是幂等的，已经迁过就直接返回 false。
+ */
+export function migrateLegacyProvider(siteRoot) {
+  const file = path.join(siteRoot, "brain.config.json");
+  let raw = {};
+  try { if (existsSync(file)) raw = JSON.parse(readFileSync(file, "utf8")) || {}; } catch { return false; }
+  if (raw.providers && typeof raw.providers === "object" && Object.keys(raw.providers).length) return false;
+  if (String(raw.provider || "") !== "openai") return false;
+  const base = String(raw.baseUrl || "").trim();
+  const model = String(raw.copy || "").trim();
+  if (!base || !model) return false;
+
+  const isDs = /deepseek/i.test(base);
+  let id = "custom";
+  try {
+    id = new URL(base).hostname.replace(/^www\./, "").replace(/\./g, "-");
+  } catch { /* 地址不合法就用 custom */ }
+  if (isDs) id = "deepseek-official";
+
+  raw.providers = {};
+  raw.providers[id] = {
+    displayName: isDs ? "深度求索" : id,
+    baseURL: base,
+    apiKey: String(raw.apiKey || ""),
+    models: [{ id: model, name: model, input: raw.visionFromLlm ? ["text", "image"] : ["text"] }],
+  };
+  raw.activeModel = { provider: id, model };
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n", "utf8");
+  return true;
+}
+
+/** 读「服务商 + 模型」结构，给设置页用。密钥只回"配没配过"，不回明文。 */
+export function loadProviders(siteRoot) {
+  const file = path.join(siteRoot, "brain.config.json");
+  let raw = {};
+  try { if (existsSync(file)) raw = JSON.parse(readFileSync(file, "utf8")) || {}; } catch { raw = {}; }
+  const ps = (raw.providers && typeof raw.providers === "object") ? raw.providers : {};
+  const active = (raw.activeModel && typeof raw.activeModel === "object") ? raw.activeModel : {};
+  const out = [];
+  for (const [id, p] of Object.entries(ps)) {
+    if (!p || typeof p !== "object") continue;
+    out.push({
+      id,
+      displayName: String(p.displayName || id),
+      baseURL: String(p.baseURL || ""),
+      hasKey: !!String(p.apiKey || ""),
+      models: (Array.isArray(p.models) ? p.models : []).map((m) => {
+        const one = {
+          id: String(m && m.id || ""),
+          name: String(m && m.name || m && m.id || ""),
+          input: Array.isArray(m && m.input) ? m.input : ["text"],
+        };
+        // 容量字段是可选的。以前这里只留 id/name/input，用户在高级设置里
+        // 填了上下文窗口，一保存就没了。夹到合理区间，写坏了不至于把接口打挂。
+        const cw = Number(m && m.contextWindow);
+        if (Number.isFinite(cw) && cw > 0) one.contextWindow = Math.min(20000000, Math.round(cw));
+        const mt = Number(m && m.maxTokens);
+        if (Number.isFinite(mt) && mt > 0) one.maxTokens = Math.min(200000, Math.round(mt));
+        return one;
+      }),
+    });
+  }
+  out.sort((a, b) => (a.id === "deepseek-official" ? -1 : b.id === "deepseek-official" ? 1 : a.id.localeCompare(b.id)));
+  return {
+    providers: out,
+    // provider 为空串表示"用本机 Ollama"，这样本机也只是一张卡，不用另开一条分支
+    activeModel: { provider: String(active.provider || ""), model: String(active.model || "") },
+  };
+}
+
+/**
+ * 保存「服务商 + 模型」结构。
+ *
+ * 密钥沿用规则（与设置页输入框的占位文案一致）：
+ *   undefined  不动（用户没碰这个框）
+ *   非空字符串 换掉
+ *   null       清掉
+ *
+ * 保存完必须把当前选中的服务商/模型解析出来**同步写进扁平字段**：
+ * 旅游规划（HikiTravel）是直接读这个 JSON 文件的，不走这里的解析，
+ * 不同步它就永远用着旧地址旧密钥。这也是文件里同时存两套的原因。
+ */
+export function saveProviders(siteRoot, incoming = {}) {
+  const file = path.join(siteRoot, "brain.config.json");
+  let raw = {};
+  try { if (existsSync(file)) raw = JSON.parse(readFileSync(file, "utf8")) || {}; } catch { raw = {}; }
+
+  const prev = (raw.providers && typeof raw.providers === "object") ? raw.providers : {};
+  const src = (incoming.providers && typeof incoming.providers === "object") ? incoming.providers : {};
+  const next = {};
+
+  for (const [rawId, p] of Object.entries(src)) {
+    const id = String(rawId || "").trim().slice(0, 60);
+    if (!id || !p || typeof p !== "object") continue;
+    const models = (Array.isArray(p.models) ? p.models : []).map((m) => {
+      const mid = String(m && m.id || "").trim().slice(0, 200);
+      const nm = String(m && m.name || "").trim().slice(0, 200);
+      const input = Array.isArray(m && m.input)
+        ? m.input.filter((x) => x === "text" || x === "image")
+        : ["text"];
+      const one = { id: mid, name: nm || mid, input };
+      // 容量字段可选，夹到合理区间（写坏了不至于把请求打挂）
+      const cw = Number(m && m.contextWindow);
+      if (Number.isFinite(cw) && cw > 0) one.contextWindow = Math.min(20000000, Math.round(cw));
+      const mt = Number(m && m.maxTokens);
+      if (Number.isFinite(mt) && mt > 0) one.maxTokens = Math.min(200000, Math.round(mt));
+      return one;
+    }).filter((m) => m.id);
+
+    let apiKey;
+    if (p.apiKey === null) apiKey = "";
+    else if (typeof p.apiKey === "string" && p.apiKey.trim()) apiKey = p.apiKey.trim();
+    else apiKey = String((prev[id] && prev[id].apiKey) || "");
+
+    next[id] = {
+      displayName: (String(p.displayName || "").trim().slice(0, 60) || id),
+      baseURL: String(p.baseURL || "").trim().slice(0, 300),
+      apiKey,
+      models,
+    };
+  }
+
+  // 兜底：整表为空但配置里原来有内容，一律拒绝。
+  //
+  // 这条不是防空想出来的：设置页出过一次故障，把 providers:{} 发了上来，
+  // 结果服务商、地址、API 密钥全被抹掉（saveProviders 是整表替换）。
+  // 真要删到一家不剩，调用方必须显式带 allowEmpty，删除流程会带。
+  const prevCount = Object.keys(prev).length;
+  if (!Object.keys(next).length && prevCount && incoming.allowEmpty !== true) {
+    const err = new Error(`提交的服务商列表是空的，但配置里原本有 ${prevCount} 个，已拒绝写入以免把配置丢光`);
+    err.code = "would-wipe";
+    throw err;
+  }
+
+  // 当前选中的那个：没了就落到第一个有模型的；provider 为空串是合法的，表示本机
+  let active = (incoming.activeModel && typeof incoming.activeModel === "object") ? incoming.activeModel : null;
+  const activeId = active ? String(active.provider || "").trim() : "";
+  if (activeId) {
+    const p = next[activeId];
+    if (!p || !p.models.length) {
+      const first = Object.keys(next).find((k) => next[k].models.length);
+      active = first ? { provider: first, model: next[first].models[0].id } : { provider: "", model: "" };
+    } else if (!p.models.some((m) => m.id === active.model)) {
+      active = { provider: activeId, model: p.models[0].id };
+    } else {
+      active = { provider: activeId, model: String(active.model) };
+    }
+  } else {
+    active = { provider: "", model: "" };
+  }
+
+  raw.providers = next;
+  raw.activeModel = active;
+
+  // 同步扁平字段，旅游规划读的就是这几个
+  const r = active.provider ? resolveActiveModel(raw) : null;
+  if (r && r.baseUrl) {
+    raw.provider = "openai";
+    raw.baseUrl = r.baseUrl;
+    raw.apiKey = r.apiKey;
+    raw.copy = r.modelId;
+    raw.visionFromLlm = r.visionFromLlm;
+  } else {
+    // 回到本机模式。copy 若还是外部模型名，本机 Ollama 里根本找不到，
+    // 所以换成本机默认的那个（设置页上的本机模型下拉可以再改）。
+    raw.provider = "ollama";
+    raw.baseUrl = "";
+    raw.apiKey = "";
+    raw.visionFromLlm = false;
+    if (!raw.copy || /^(deepseek|gpt|claude|glm|kimi|minimax|qwen3\.8|intern|atria|agents)/i.test(String(raw.copy))) {
+      raw.copy = "qwen2.5:7b";
+    }
+  }
+
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n", "utf8");
+  return { activeModel: active, providerCount: Object.keys(next).length };
 }
 
 /* ------------------------------------------------------------------ 调用 */
@@ -381,9 +618,10 @@ async function ensureOllama(cfg, { waitMs = 40000 } = {}) {
       }
       if (!bin) return { ok: false, message: "找不到 ollama 可执行文件（可用 PF_OLLAMA_BIN 指定路径）" };
       try {
-        const p = spawn(bin, ["serve"], { detached: true, stdio: "ignore", windowsHide: true });
-        p.unref();
-        return { ok: true, spawned: bin };
+        // 不能写 detached：Windows 上那会让 windowsHide 失效、弹一个终端窗口出来。
+        // 详见 spawn-hidden.mjs。
+        const pid = spawnHidden(bin, ["serve"], {});
+        return { ok: true, spawned: bin, pid };
       } catch (e) {
         return { ok: false, message: `启动 ollama 失败：${e.message}` };
       }
@@ -745,7 +983,15 @@ function visionChat(cfg, opts) {
   return ollamaChat(cfg, opts);
 }
 
-/** Ollama 是否在跑，以及有哪些模型 */
+/**
+ * 模型服务是否可用：Ollama 在不在、本机有哪些模型，以及「这次到底算不算配好了」。
+ *
+ * 为什么要把两种模式分开判：接外部接口时 cfg.copy / cfg.vision 是**外部模型的名字**
+ * （比如 deepseek-flash），拿它们去本机 Ollama 的模型列表里找必然找不到，
+ * 于是 hasCopy 恒为 false → 上层判成"模型不可用" → 前端连 /api/compose 都不调用，
+ * 而 AI 底图正是在那个接口里生成的。表现就是：**一配外部接口，就不出 AI 底图了**。
+ * 所以外部模式下"配没配好"看的是地址、密钥、模型名齐不齐，不看本机列表。
+ */
 export async function brainStatus(cfg) {
   const out = { up: false, endpoint: cfg.endpoint, models: [], hasVision: false, hasCopy: false };
   try {
@@ -756,10 +1002,20 @@ export async function brainStatus(cfg) {
     // qwen2.5vl:3b 出现两次），直接透传的话设置面板的下拉里就是一串重影。
     // 只按名字去重，不改顺序：顺序是 Ollama 给的，通常最近用的在前。
     out.models = [...new Set((j.models || []).map((m) => m.name).filter(Boolean))];
-    out.hasVision = !!cfg.vision && out.models.some((n) => n === cfg.vision || n.startsWith(cfg.vision));
-    out.hasCopy = !!cfg.copy && out.models.some((n) => n === cfg.copy || n.startsWith(cfg.copy));
   } catch {
     out.up = false;
+  }
+
+  const external = cfg.provider === "openai";
+  if (external) {
+    out.hasCopy = !!(cfg.baseUrl && cfg.apiKey && cfg.copy);
+    // 读图交给外部模型自带视觉时，本机有没有视觉模型就无所谓了
+    out.hasVision = visionRoute(cfg) === "llm" ? !!cfg.visionFromLlm : out.models.some(
+      (n) => !!cfg.vision && (n === cfg.vision || n.startsWith(cfg.vision)),
+    );
+  } else {
+    out.hasVision = !!cfg.vision && out.models.some((n) => n === cfg.vision || n.startsWith(cfg.vision));
+    out.hasCopy = !!cfg.copy && out.models.some((n) => n === cfg.copy || n.startsWith(cfg.copy));
   }
   return out;
 }
@@ -1096,7 +1352,7 @@ function tidy(s) {
  * 这些如果直接透到渲染器，轻则排版挤爆，重则渲染失败。
  * 校验失败不静默通过，返回 errors，让调用方决定是重试还是退回兜底。
  */
-export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
+export function validateCopy(raw, { hasPhotos = 0, brief = "", banned = [] } = {}) {
   const errors = [];
   const fatalErrors = [];
   const source = String(brief || "");
@@ -1113,6 +1369,23 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
   const sub = tidy(str(j.sub, 90));
   if (!title) errors.push("缺 title");
   if (title && title.length < 4) errors.push("title 太短");
+
+  // 《广告法》禁用词。
+  //
+  // 词表的权威源是 renderer/validate.py，服务端从那里解析出来再传进来，所以这里
+  // 不写死任何词。接上它的理由：出图前 validate.py 会**直接拒绝**带这些词的成品，
+  // 而一次校验不过就等于整份模型产出作废、退回本地模板 ——
+  // 实测 deepseek-flash 写出过「日落前一小时到，光最好」，为一个词废掉整次生成
+  // 太不划算。放进 errors 之后，下面那个已有的重试循环会带着"哪个词不能用"
+  // 再问一遍，让模型自己换一个说法。
+  if (banned.length) {
+    for (const [field, text] of [["title", title], ["sub", sub]]) {
+      const hit = banned.filter((w) => w && text.includes(w));
+      if (hit.length) {
+        errors.push(`${field} 里有《广告法》禁用词 ${hit.map((w) => "「" + w + "」").join("")}，必须换个说法`);
+      }
+    }
+  }
 
   // 标题最多两行，且每行有字数上限，超了排版会挤爆或被硬切。
   // 用共用断行器判断"能不能好好断成两行"，顺便把结果回写进 copy，
@@ -1214,7 +1487,7 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
   // 但把 errors 交出去，调用方可以据此重试一次。
   // 致命项（编造价格/电话、标题里带指令词、没标题、不是 JSON）必须重写。
   const fatal = errors.filter((e) =>
-    /缺 title|不是合法 JSON|不是对象|带了指令词|编造价格|编造电话|title 太长/.test(e)
+    /缺 title|不是合法 JSON|不是对象|带了指令词|编造价格|编造电话|title 太长|禁用词/.test(e)
   );
   return { ok: fatal.length === 0, errors, fatal, copy };
 }
@@ -1224,7 +1497,7 @@ export function validateCopy(raw, { hasPhotos = 0, brief = "" } = {}) {
  * 打卡卡只要 caption(短标题) + body(描述) + tags + grid。
  * 规则和海报那条一样严格：不许把用户的指令印上去、不许说空话。
  */
-export function validateCheckin(raw, { hasPhotos = 0, brief = "" } = {}) {
+export function validateCheckin(raw, { hasPhotos = 0, brief = "", banned = [] } = {}) {
   const errors = [];
   let j;
   try {
@@ -1238,6 +1511,17 @@ export function validateCheckin(raw, { hasPhotos = 0, brief = "" } = {}) {
   const body = tidy(str(j.body, 90));
   if (!caption) errors.push("缺 caption");
   if (caption && caption.length < 4) errors.push("caption 太短");
+
+  // 《广告法》禁用词，理由同 validateCopy：词表由服务端从 validate.py 解析后传进来，
+  // 在这里报错能让已有的重试循环带着具体词再问一遍，而不是让整次生成作废。
+  if (banned.length) {
+    for (const [field, text] of [["caption", caption], ["body", body]]) {
+      const hit = banned.filter((w) => w && text.includes(w));
+      if (hit.length) {
+        errors.push(`${field} 里有《广告法》禁用词 ${hit.map((w) => "「" + w + "」").join("")}，必须换个说法`);
+      }
+    }
+  }
 
   // 这条是用户直接投诉过的：输入框里写的是"帮我把2张图片融合并帮我写好文案"，
   // 结果这整句被印到了打卡卡的标题上。指令不是文案，必须拦住。
@@ -1272,7 +1556,7 @@ export function validateCheckin(raw, { hasPhotos = 0, brief = "" } = {}) {
   };
 
   const fatal = errors.filter((e) =>
-    /缺 caption|不是合法 JSON|不是对象|带了指令词|是空话/.test(e)
+    /缺 caption|不是合法 JSON|不是对象|带了指令词|是空话|禁用词/.test(e)
   );
   return { ok: fatal.length === 0, errors, fatal, copy };
 }
@@ -1326,7 +1610,20 @@ export async function composeCopy(cfg, brief, imagePaths = [], opts = {}) {
     parts.push(`【用户上传了 ${hasPhotos} 张照片，但读图失败，请只依据文字写文案】`);
   }
 
-  const system = mode === "checkin" ? CHECKIN_SYSTEM : COPY_SYSTEM;
+  let system = mode === "checkin" ? CHECKIN_SYSTEM : COPY_SYSTEM;
+  // 把《广告法》禁用词直接列给模型。
+  //
+  // 为什么要列：原来提示词只说"不要写放哪都能用的空话"，并给了几个例子，
+  // 结果 deepseek-flash 把例子里的「随手一拍就是大片」原样抄了出来（否定式清单里
+  // 的例子很容易被模型当成可用词），又写出「光最好」，被 validate.py 拦下，
+  // 整份模型产出作废。列成明确的"这些词一律不能出现"比举反例有效。
+  // 词表由服务端从 validate.py 解析后传进来，这里不写死，避免多一份副本漂移。
+  const bannedWords = Array.isArray(opts.bannedWords) ? opts.bannedWords.filter(Boolean) : [];
+  if (bannedWords.length) {
+    system += `\n\n【《广告法》第九条禁用词，文案里一个都不能出现】` +
+      bannedWords.join("、") +
+      `\n这些词包括同义替换（"最好"换成"更好"也不行，要用具体事实说话，比如"日落前一小时光线柔和"）。`;
+  }
   const validator = mode === "checkin" ? validateCheckin : validateCopy;
   parts.push(
     mode === "checkin"
@@ -1352,7 +1649,7 @@ export async function composeCopy(cfg, brief, imagePaths = [], opts = {}) {
       format: "json",
       maxTokens: cfg.copyMaxTokens,
     });
-    last = validator(rawDraft, { hasPhotos, brief });
+    last = validator(rawDraft, { hasPhotos, brief, banned: bannedWords });
     last.raw = rawDraft;
     if (last.ok) break;
     if (attempt < maxAttempts) {
@@ -1375,7 +1672,10 @@ export async function composeCopy(cfg, brief, imagePaths = [], opts = {}) {
     mixable: vision.ok ? vision.mixable : null,
     mixWhy: vision.mixWhy || "",
     ms: Date.now() - started,
-    model: { vision: cfg.vision, copy: cfg.copy },
+    // 读图实际用的模型取决于走哪条路：接了外部接口且模型自带视觉时，
+    // 读图是交给它做的，cfg.vision 那个本机模型一次都没被调用。
+    // 照实报，否则界面会显示"qwen2.5vl:3b 读图"，与事实不符。
+    model: { vision: visionRoute(cfg) === "llm" ? cfg.copy : cfg.vision, copy: cfg.copy },
     attempts: attempt,
   };
 }

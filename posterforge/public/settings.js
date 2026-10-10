@@ -1,17 +1,18 @@
 /**
- * settings.js，模型设置面板的共享实现。
+ * settings.js，设置面板的外壳与「通用设置」页。
  *
- * 由门户（hub.html）加载。界面结构与尺寸照搬 DeepSeek Harness 网页端的设置窗口，
- * 数据从 /api/settings 读、也存回它；这里不直接读写配置文件。
+ * 分两页，和 DeepSeek Harness 的导航结构一致：
+ *   通用设置  本机的东西：本机模型、绘图模型、旅游规划的思考模式
+ *   模型      服务商与模型的多份配置，交给 model-panel.js（那份是照 DSH 搬的）
  *
- * 三种状态要分清楚：
- *   1. 选了外部接口才展开那组输入框，选本机 Ollama 时收起，免得让人以为都要填。
- *   2. 外部密钥只回传"有没有"，输入框永远留空；留空表示这次不改。
- *   3. 勾了"用模型自带视觉"之后本机视觉模型那栏与本次无关，
- *      但**不隐藏**：隐藏会让人以为配置丢了，给一句说明更清楚。
+ * 两页的数据来源不同，别搞混：
+ *   通用设置 → /api/settings    只管本机的项
+ *   模型     → /api/providers   管有哪些服务商、密钥、模型，以及当前用哪个
+ * 外接服务商时 copy/vision 是从服务商结构解析出来的，所以这一页在那种情况下
+ * 只作展示、不让改（服务端也会忽略这两个字段）。
  *
  * 齿轮图标用的是带齿的轮廓（Feather 的 settings）。
- * 注意不要用“圆心 + 放射线”那种画法：那和深浅色按钮的太阳图标长得一样，用户会认错。
+ * 不要用"圆心 + 放射线"那种画法：那和旁边深浅色按钮的太阳图标长得一样，用户会认错。
  */
 (function () {
   "use strict";
@@ -61,85 +62,48 @@
     }
   }
 
-  function syncVisibility() {
-    var isRemote = $("#setProvider") && $("#setProvider").value === "openai";
-    var remote = $("#setRemoteGroup");
-    if (remote) remote.hidden = !isRemote;
-    var fromLlm = $("#setVisionFromLlm") && $("#setVisionFromLlm").checked;
-    var vh = $("#setVisionHint");
-    if (vh) {
-      vh.textContent = (isRemote && fromLlm)
-        ? "当前读图走外部模型自带的视觉，这个下拉暂不生效。"
-        : "本机读图用哪个模型。图片会先缩到长边 896 再喂给它。";
+  /* ---------------------------------------------------------------- 页面切换 */
+
+  var PAGE_TITLE = { general: "通用设置", models: "模型" };
+  var mountedOnce = false;
+
+  /** 面板的明暗跟着页面走。DSH 那套令牌挂在 .pf-mp / .pf-mp.pf-dark 上，要手动同步。 */
+  function syncPanelTheme() {
+    var host = document.querySelector(".pf-mp");
+    if (!host) return;
+    var dark = document.documentElement.getAttribute("data-theme") === "dark";
+    host.classList.toggle("pf-dark", dark);
+  }
+
+  function showPage(name) {
+    var key = PAGE_TITLE[name] ? name : "general";
+    var items = document.querySelectorAll(".settings-nav-item");
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.toggle("on", items[i].getAttribute("data-page") === key);
+    }
+    var bodies = document.querySelectorAll("[data-page-body]");
+    for (var j = 0; j < bodies.length; j++) {
+      bodies[j].hidden = bodies[j].getAttribute("data-page-body") !== key;
+    }
+    // 保存栏只属于通用设置页；模型页每张卡自己带「取消 / 保存」
+    var foot = document.querySelector("[data-page-foot]");
+    if (foot) foot.hidden = key !== "general";
+    var t = $("#setPageTitle");
+    if (t) t.textContent = PAGE_TITLE[key];
+
+    if (key === "models") {
+      syncPanelTheme();
+      var host = $("#settingsModels");
+      if (host && window.PFModelPanel) {
+        // 只在第一次进入时挂载，之后靠它自己的 reload 刷新，
+        // 免得每次切页都把正在编辑的表单重画一遍、把草稿冲掉
+        if (!mountedOnce) { window.PFModelPanel.mount(host); mountedOnce = true; }
+        else window.PFModelPanel.reload();
+      }
     }
   }
 
-  /** 读回服务端配置并铺到界面上。返回 Promise，好让调用方等它铺完再说话。 */
-  // 外部模型认不认图，是最容易踩的一个坑：模型没有视觉却勾了「自带视觉」，
-  // 读图时把图片发过去会被对方 400 拒掉，而报错来自几十行开外，
-  // 很难联想到是这个勾造成的。这里按模型名给一句话。
-  // 依据是官方文档：DeepSeek 的视觉指南里明确支持图片的是 deepseek-flash，
-  // 别的型号（如 deepseek-v4-pro）文档没提，就别替它打包票。
-  function remoteModelHint(name) {
-    var n = String(name || "").trim().toLowerCase();
-    if (!n) return "";
-    if (/deepseek-flash|v4-flash/.test(n)) {
-      return n + " 支持图片输入，可以勾上「自带视觉」，读图和写文案都交给它。";
-    }
-    if (/^deepseek/.test(n)) {
-      return "官方文档里支持图片输入的是 deepseek-flash；" + n +
-        " 没提到读图，建议下面那个开关先别勾，读图仍用本机视觉模型。";
-    }
-    return "";
-  }
-
-  // 预设：省得去记"地址要不要带 /v1""模型现在叫什么"。
-  // DeepSeek 官方 base_url 就是 https://api.deepseek.com（不带 /v1），
-  // 我们的代码是自己接 /chat/completions 的，所以两种写法都通。
-  var PRESETS = {
-    deepseek: {
-      baseUrl: "https://api.deepseek.com",
-      model: "deepseek-flash",
-      visionFromLlm: true,
-      note: "已填入 DeepSeek 官方参数（deepseek-flash 支持读图）。填上密钥再保存即可。",
-    },
-  };
-
-  function applyPreset(key) {
-    var p = PRESETS[key];
-    if (!p) return;
-    // 先把来源切到外部，否则下面那组输入框还是收起的，改了也看不见
-    $("#setProvider").value = "openai";
-    $("#setBaseUrl").value = p.baseUrl;
-    $("#setRemoteModel").value = p.model;
-    $("#setVisionFromLlm").checked = !!p.visionFromLlm;
-    syncVisibility();
-    var mh = $("#setRemoteModelHint");
-    if (mh) mh.textContent = remoteModelHint(p.model);
-    showMsg(p.note, "ok");
-  }
-
-  /** 清除已保存的密钥。后端一直支持 clearApiKey，但界面上从来没发过这个字段，
-   *  于是填过一次就只能覆盖、删不掉。 */
-  function clearKey() {
-    if (!window.confirm("确定清除已保存的接口密钥？\n清掉之后走外部接口就会失败，需要重新填。")) return;
-    var btn = $("#setClearKey");
-    if (btn) btn.disabled = true;
-    showMsg("清除中…");
-    fetch("/api/settings", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ clearApiKey: true }),
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (!data || !data.ok) throw new Error((data && data.message) || "清除失败");
-        // 同样要等 load() 铺完再写提示，否则会被它收尾的 showMsg("") 擦掉
-        return load().then(function () { showMsg("密钥已清除。", "ok"); });
-      })
-      .catch(function (e) { showMsg("清除失败：" + (e.message || e), "err"); })
-      .finally(function () { if (btn) btn.disabled = false; });
-  }
+  /* ------------------------------------------------------------ 通用设置页 */
 
   function load() {
     showMsg("读取中…");
@@ -150,30 +114,15 @@
         var s = data.settings || {};
         var o = data.options || {};
 
-        $("#setProvider").value = s.provider || "ollama";
-        $("#setBaseUrl").value = s.baseUrl || "";
-        $("#setApiKey").value = "";
-        $("#setKeyHint").textContent = s.hasApiKey
-          ? "已保存密钥；留空表示不修改。"
-          : "还没有保存过密钥。";
-        // 有密钥才给“清除”入口：没密钥时摆一个不能点的按钮只是噪音
-        var ck = $("#setClearKey");
-        if (ck) ck.hidden = !s.hasApiKey;
-        // provider=openai 时 copy 字段就是外部模型的名字
-        $("#setRemoteModel").value = s.provider === "openai" ? (s.copy || "") : "";
-        $("#setVisionFromLlm").checked = !!s.visionFromLlm;
-        var mh = $("#setRemoteModelHint");
-        if (mh) mh.textContent = remoteModelHint(s.provider === "openai" ? (s.copy || "") : "");
-
         var ollama = (o.ollamaModels || []).filter(Boolean);
-        // 视觉候选只留看起来能读图的，免得把纯文本模型选来当眼睛
+        // 读图候选只留看起来能读图的，免得把纯文本模型选来当眼睛
         var visionCand = ollama.filter(function (n) {
           return /vl|vision|llava|minicpm-v|moondream|gemma3/i.test(n);
         });
-        fillSelect($("#setVision"), visionCand.map(function (n) { return { value: n, label: n }; }),
-          s.vision, "本机没有可读图的模型");
         fillSelect($("#setCopy"), ollama.map(function (n) { return { value: n, label: prettyModel(n) }; }),
           s.copy, "本机没有模型（先 ollama pull）");
+        fillSelect($("#setVision"), visionCand.map(function (n) { return { value: n, label: n }; }),
+          s.vision, "本机没有可读图的模型");
 
         var draw = o.drawingModels || [];
         // 头一项是空值 = 交回自动挑选。没有这一项的话，一旦选过具体模型就再也
@@ -181,38 +130,51 @@
         var drawItems = [{ value: "", label: "自动挑选（推荐）" }].concat(draw.map(function (m) {
           return { value: m.name, label: m.name + " · " + m.sizeGB + "GB" + (m.usable ? "" : "（不可用）") };
         }));
-        fillSelect($("#setDrawing"), drawItems, s.drawingModel || "",
-          "本机没有绘图模型");
+        fillSelect($("#setDrawing"), drawItems, s.drawingModel || "", "本机没有绘图模型");
+
         var dh = $("#setDrawingHint");
         if (dh) {
           dh.textContent = draw.length
             ? "当前生效：" + (o.activeDrawingModel || "（未知）") + (o.activeDrawingRoot ? " · " + o.activeDrawingRoot : "")
             : "本机没找到可用的 diffusers 模型目录。留空表示自动挑选。";
         }
-        syncVisibility();
-        showMsg("");
+
+        var vh = $("#setVisionHint");
+        if (vh) {
+          vh.textContent = o.visionRoute === "llm"
+            ? "当前读图交给外面那个自带视觉的模型了，这一项暂不生效。"
+            : "本机读图用哪个模型。图片会先缩到长边 896 再喂给它。";
+        }
+
+        var pt = $("#setPlanThinking");
+        if (pt) pt.checked = !!s.planThinking;
+
+        // 外接服务商时这两个是从服务商结构解析出来的，改了也会被解析结果盖回去，
+        // 直接禁掉，免得用户以为改成功了
+        var locked = !!s.activeProviderId;
+        ["#setCopy", "#setVision"].forEach(function (sel) {
+          var el = $(sel);
+          if (el) {
+            el.disabled = locked;
+            el.title = locked ? "当前用的是外部服务商，本机模型不参与；去「模型」页切换" : "";
+          }
+        });
+        showMsg(locked ? "当前用着外部服务商，本机模型那两栏不参与。" : "");
       })
       .catch(function (e) { showMsg("读取失败：" + (e.message || e), "err"); });
   }
 
   function save() {
     var btn = $("#setSave");
-    var provider = $("#setProvider").value;
-    var payload = { provider: provider, visionFromLlm: !!$("#setVisionFromLlm").checked };
-    if (provider === "openai") {
-      payload.baseUrl = $("#setBaseUrl").value.trim();
-      var key = $("#setApiKey").value.trim();
-      // 只有真的填了才带上密钥，否则服务端会以为要清空
-      if (key) payload.apiKey = key;
-      payload.copy = $("#setRemoteModel").value.trim();
-    } else {
-      payload.copy = $("#setCopy").value;
-      payload.vision = $("#setVision").value;
-    }
-    // 空字符串是合法值（= 自动挑选），所以这里不能像别处那样"有值才带"，
-    // 否则选了自动也发不出去。
-    var drawSel = $("#setDrawing");
-    if (drawSel) payload.drawingModel = drawSel.value || "";
+    var payload = {
+      drawingModel: ($("#setDrawing") && $("#setDrawing").value) || "",
+      planThinking: !!($("#setPlanThinking") && $("#setPlanThinking").checked),
+    };
+    // 外接服务商时这两个由服务商结构决定，不往上报
+    var copyEl = $("#setCopy");
+    var visEl = $("#setVision");
+    if (copyEl && !copyEl.disabled && copyEl.value) payload.copy = copyEl.value;
+    if (visEl && !visEl.disabled && visEl.value) payload.vision = visEl.value;
 
     if (btn) btn.disabled = true;
     showMsg("保存中…");
@@ -224,9 +186,8 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data || !data.ok) throw new Error((data && data.message) || "保存失败");
-        // 必须**等 load() 铺完再写提示**。之前是"调用 load() 紧接着写提示"，
-        // 看着没问题，其实 load() 是异步的：那句 showMsg("") 会在几百毫秒后
-        // 才跑，正好把刚显示出来的“已保存。”擦掉，用户什么都看不到。
+        // 必须**等 load() 铺完再写提示**。load() 是异步的，它末尾那句 showMsg("")
+        // 会在几百毫秒后才跑，正好把刚显示出来的"已保存。"擦掉。
         return load().then(function () {
           showMsg(
             data.drawingModelChanged
@@ -240,10 +201,13 @@
       .finally(function () { if (btn) btn.disabled = false; });
   }
 
+  /* ------------------------------------------------------------------ 开关 */
+
   function open() {
     var m = $("#settingsModal");
     if (!m) return;
     m.hidden = false;
+    showPage("general");
     load();
   }
   function close() {
@@ -265,22 +229,14 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && m && !m.hidden) close();
     });
-    var prov = $("#setProvider");
-    if (prov) prov.addEventListener("change", syncVisibility);
-    var vfl = $("#setVisionFromLlm");
-    if (vfl) vfl.addEventListener("change", syncVisibility);
-    // 模型名是手打的，打的时候就得跟着更新那句"认不认图"的提示
-    var rm = $("#setRemoteModel");
-    if (rm) {
-      rm.addEventListener("input", function () {
-        var mh = $("#setRemoteModelHint");
-        if (mh) mh.textContent = remoteModelHint(rm.value);
-      });
+
+    var items = document.querySelectorAll(".settings-nav-item");
+    for (var i = 0; i < items.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function () { showPage(btn.getAttribute("data-page")); });
+      })(items[i]);
     }
-    var ps = $("#setPreset");
-    if (ps) ps.addEventListener("click", function () { applyPreset("deepseek"); });
-    var ck = $("#setClearKey");
-    if (ck) ck.addEventListener("click", clearKey);
+
     var sv = $("#setSave");
     if (sv) sv.addEventListener("click", save);
     var rl = $("#setReload");
@@ -298,6 +254,11 @@
         }
       });
     }
+
+    // 面板的明暗要跟着页面主题走（切换按钮在导航栏上，不在面板里）
+    new MutationObserver(syncPanelTheme).observe(document.documentElement, {
+      attributes: true, attributeFilter: ["data-theme"],
+    });
   }
 
   if (document.readyState === "loading") {

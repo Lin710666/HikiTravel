@@ -37,5 +37,7 @@
   "_visionFromLlm": "外部模型自带视觉时勾上：图片直接喂给它，省掉「先本机读图、再写文案」那段两段式。只在 provider=openai 时生效；本机模式下读图一律走 vision。",
   "visionFromLlm": false,
   "_drawingModel": "出图用哪个本地模型，填 models/ 下的目录名。留空 = 自动挑一个能跑起来的（推荐）。",
-  "drawingModel": ""
+  "drawingModel": "",
+  "_planThinking": "只影响旅游规划：外部模型要不要开思考模式。默认关。开着时 temperature 不再生效（官方行为），且推理 token 会占掉 max_tokens，所以只在「约束多、要它多想」时才值得打开。海报那条一直关着。",
+  "planThinking": false
 }

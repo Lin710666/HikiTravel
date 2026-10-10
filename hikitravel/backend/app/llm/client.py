@@ -20,7 +20,13 @@ from ..config import effective_llm, settings
 from ..http_local import trust_env_for
 
 
-def _thinking_param(base_url: str) -> Dict[str, Any]:
+def _is_deepseek(base_url: str) -> bool:
+    """只有 DeepSeek 认 thinking 这个字段；别的网关多半会回 400。"""
+    host = (urlparse(base_url).hostname or "").lower()
+    return host == "deepseek.com" or host.endswith(".deepseek.com")
+
+
+def _thinking_param(base_url: str, enabled: bool) -> Dict[str, Any]:
     """DeepSeek 的思考模式开关。
 
     官方文档写明：思考模式**默认是开的**，且它「不支持 temperature，
@@ -31,10 +37,9 @@ def _thinking_param(base_url: str) -> Dict[str, Any]:
     所以默认关掉。**只对 DeepSeek 的地址发这个字段**：
     别的 OpenAI 兼容网关大多不认识 thinking，发了会直接回 400。
     """
-    host = (urlparse(base_url).hostname or "").lower()
-    if host == "deepseek.com" or host.endswith(".deepseek.com"):
-        return {"thinking": {"type": "disabled"}}
-    return {}
+    if not _is_deepseek(base_url):
+        return {}
+    return {"thinking": {"type": "enabled" if enabled else "disabled"}}
 
 
 class LLMClient:
@@ -221,15 +226,19 @@ class LLMClient:
             # 注意 DeepSeek 额外要求提示词里出现 "json" 字样（我们的提示词都有）。
             "response_format": {"type": "json_object"},
             "stream": False,
-            # 关掉 DeepSeek 的思考模式，否则下面这个 temperature 会被静默忽略
-            **_thinking_param(eff.base_url),
+            # 思考模式默认关（开着 temperature 会失效）；这里按配置决定
+            **_thinking_param(eff.base_url, eff.thinking),
         }
         # 采样参数改名：Ollama 的 num_predict 在 OpenAI 这边叫 max_tokens。
         # num_ctx 没有对应概念，忽略即可。
         if "temperature" in opts:
             payload["temperature"] = opts["temperature"]
         if opts.get("num_predict"):
-            payload["max_tokens"] = opts["num_predict"]
+            want = int(opts["num_predict"])
+            # 开着思考时推理 token 也占 max_tokens（官方 usage 里 reasoning_tokens
+            # 是 completion_tokens 的一部分）。体检只给 350、选点只给 700，
+            # 这点额度会被思考吃光、正文直接空掉，所以这里给足余量。
+            payload["max_tokens"] = max(want * 8, 4096) if eff.thinking else want
         try:
             resp = httpx.post(
                 f"{eff.base_url}/chat/completions",

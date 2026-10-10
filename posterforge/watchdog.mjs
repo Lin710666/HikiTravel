@@ -22,7 +22,7 @@
  * 并且一次把三个服务都拉起来。本文件保留给"只想单独守 PosterForge"的场景，
  * 它的 .bat 入口已经删掉了（见 _backup-before-bat-merge/启动守门狗.bat）。
  */
-import { spawn } from "node:child_process";
+import { spawnHidden } from "./spawn-hidden.mjs";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,11 +46,16 @@ function log(msg) {
   try { appendFileSync(LOG, line + "\n"); } catch { /* 日志写不进去不该影响守护 */ }
 }
 
-/** 火起来就不管的进程：detached + unref，活得比守门狗久 */
+/**
+ * 火起来就不管的进程：活得比守门狗久，而且不弹窗口。
+ *
+ * 别改回 `spawn(..., { detached: true, windowsHide: true })`：Windows 上
+ * DETACHED_PROCESS 会让 CREATE_NO_WINDOW 失效，于是每重启一次服务就弹一个终端窗口。
+ * 这里重启过 115 次，用户看到的"一堆窗口"就是这么来的。
+ * 详见 spawn-hidden.mjs。
+ */
 function spawnDetached(cmd, args, cwd) {
-  const p = spawn(cmd, args, { cwd, detached: true, stdio: "ignore", windowsHide: true, shell: false });
-  p.unref();
-  return p.pid;
+  return spawnHidden(cmd, args, { cwd });
 }
 
 const SERVICES = [
